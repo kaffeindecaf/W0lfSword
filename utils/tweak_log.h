@@ -17,7 +17,7 @@ extern "C" {
 #define TWEAK_LOG_PATH "/tmp/FilzaTweak.log"
 #define TWEAK_LOG_MAX_SIZE (4 * 1024 * 1024)
 
-static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
+extern pthread_mutex_t g_log_mutex;
 
 static void TweakLog(const char *format, ...) {
     if (!format) return;

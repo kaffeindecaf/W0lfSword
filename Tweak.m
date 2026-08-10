@@ -87,31 +87,28 @@ static int (*p_unzClose)(unzFile64);
 
 static bool g_minizipLoaded = false;
 static void loadMinizip(void) {
-    if (g_minizipLoaded) return;
-    // RTLD_DEFAULT searches all loaded images including Filza's statically linked minizip
-    p_zipOpen64 = dlsym(RTLD_DEFAULT, "zipOpen64");
-    p_zipOpenNewFileInZip64 = dlsym(RTLD_DEFAULT, "zipOpenNewFileInZip64");
-    p_zipWriteInFileInZip = dlsym(RTLD_DEFAULT, "zipWriteInFileInZip");
-    p_zipCloseFileInZip = dlsym(RTLD_DEFAULT, "zipCloseFileInZip");
-    p_zipClose = dlsym(RTLD_DEFAULT, "zipClose");
-    p_unzOpen64 = dlsym(RTLD_DEFAULT, "unzOpen64");
-    p_unzGoToFirstFile = dlsym(RTLD_DEFAULT, "unzGoToFirstFile");
-    p_unzGoToNextFile = dlsym(RTLD_DEFAULT, "unzGoToNextFile");
-    p_unzGetCurrentFileInfo64 = dlsym(RTLD_DEFAULT, "unzGetCurrentFileInfo64");
-    p_unzOpenCurrentFilePassword = dlsym(RTLD_DEFAULT, "unzOpenCurrentFilePassword");
-    p_unzReadCurrentFile = dlsym(RTLD_DEFAULT, "unzReadCurrentFile");
-    p_unzCloseCurrentFile = dlsym(RTLD_DEFAULT, "unzCloseCurrentFile");
-    p_unzClose = dlsym(RTLD_DEFAULT, "unzClose");
-    g_minizipLoaded = (p_zipOpen64 && p_zipOpenNewFileInZip64 && p_zipWriteInFileInZip &&
-                        p_zipCloseFileInZip && p_zipClose &&
-                        p_unzOpen64 && p_unzGoToFirstFile && p_unzGoToNextFile &&
-                        p_unzGetCurrentFileInfo64 && p_unzOpenCurrentFilePassword &&
-                        p_unzReadCurrentFile && p_unzCloseCurrentFile && p_unzClose);
-    NSLog(@"[Tweak] minizip loaded: %d (zip=%p zipNew=%p zipWrite=%p zipCloseFile=%p zipClose=%p unz=%p unzFirst=%p unzNext=%p unzInfo=%p unzPassword=%p unzRead=%p unzCloseCurrent=%p unzClose=%p)",
-          g_minizipLoaded, p_zipOpen64, p_zipOpenNewFileInZip64, p_zipWriteInFileInZip,
-          p_zipCloseFileInZip, p_zipClose, p_unzOpen64, p_unzGoToFirstFile, p_unzGoToNextFile,
-          p_unzGetCurrentFileInfo64, p_unzOpenCurrentFilePassword, p_unzReadCurrentFile,
-          p_unzCloseCurrentFile, p_unzClose);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        p_zipOpen64 = dlsym(RTLD_DEFAULT, "zipOpen64");
+        p_zipOpenNewFileInZip64 = dlsym(RTLD_DEFAULT, "zipOpenNewFileInZip64");
+        p_zipWriteInFileInZip = dlsym(RTLD_DEFAULT, "zipWriteInFileInZip");
+        p_zipCloseFileInZip = dlsym(RTLD_DEFAULT, "zipCloseFileInZip");
+        p_zipClose = dlsym(RTLD_DEFAULT, "zipClose");
+        p_unzOpen64 = dlsym(RTLD_DEFAULT, "unzOpen64");
+        p_unzGoToFirstFile = dlsym(RTLD_DEFAULT, "unzGoToFirstFile");
+        p_unzGoToNextFile = dlsym(RTLD_DEFAULT, "unzGoToNextFile");
+        p_unzGetCurrentFileInfo64 = dlsym(RTLD_DEFAULT, "unzGetCurrentFileInfo64");
+        p_unzOpenCurrentFilePassword = dlsym(RTLD_DEFAULT, "unzOpenCurrentFilePassword");
+        p_unzReadCurrentFile = dlsym(RTLD_DEFAULT, "unzReadCurrentFile");
+        p_unzCloseCurrentFile = dlsym(RTLD_DEFAULT, "unzCloseCurrentFile");
+        p_unzClose = dlsym(RTLD_DEFAULT, "unzClose");
+        g_minizipLoaded = (p_zipOpen64 && p_zipOpenNewFileInZip64 && p_zipWriteInFileInZip &&
+                           p_zipCloseFileInZip && p_zipClose &&
+                           p_unzOpen64 && p_unzGoToFirstFile && p_unzGoToNextFile &&
+                           p_unzGetCurrentFileInfo64 && p_unzOpenCurrentFilePassword &&
+                           p_unzReadCurrentFile && p_unzCloseCurrentFile && p_unzClose);
+        TweakLog("[Tweak] minizip loaded: %d", g_minizipLoaded);
+    });
 }
 
 static IMP orig_ZipFiles = NULL, orig_unZipFile = NULL, orig_unZipFilePassword = NULL;

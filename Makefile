@@ -15,7 +15,7 @@ FilzaApplySandboxExt_FILES += kexploit/kexploit_opa334.m kexploit/krw.m kexploit
 FilzaApplySandboxExt_FILES += SSV/SSVUtils.m
 
 # --- utils ---
-FilzaApplySandboxExt_FILES += utils/hexdump.c utils/process.c utils/permission_utils.m utils/state.m
+FilzaApplySandboxExt_FILES += utils/hexdump.c utils/process.c utils/permission_utils.m utils/state.m utils/tweak_log.m
 
 # --- kpf ---
 FilzaApplySandboxExt_FILES += kpf/patchfinder.m
