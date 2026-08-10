@@ -16,6 +16,14 @@ set -uo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
+# ── Sudo check ───────────────────────────────────────────────
+if [ "$EUID" -ne 0 ]; then
+    echo -e "\033[1;33m  ⚠  W0lfSword works best with sudo\033[0m"
+    echo -e "\033[2m  Some features (idevicepair, package install, kernelcache pull)\033[0m"
+    echo -e "\033[2m  need root. Re-run with:\033[0m  \033[1;38;5;39msudo ./W0lfSword\033[0m"
+    echo ""
+fi
+
 # ── Session log ──────────────────────────────────────────────
 DATA_DIR="$PROJECT_DIR/.w0lfsword"
 mkdir -p "$DATA_DIR/profiles" "$DATA_DIR"
