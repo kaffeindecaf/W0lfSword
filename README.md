@@ -155,6 +155,8 @@ W0lfSword/
 
 ## Architecture
 
+![W0lfSword Architecture](W0lfSwordArchitecture.png)
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Filza App (com.tigisoftware.Filza)            │
