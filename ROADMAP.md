@@ -126,31 +126,31 @@
 
 ## A6 — Production Readiness (audit 2026-08-10)
 
-- [ ] `A6.1` 🔴 — Replace `exit()` in `FAILURE()` macro with error return path  
+- [x] `A6.1` 🔴 — Replace `exit()` in `FAILURE()` macro with error return path  
   _FAILURE(0) calls exit() — kills Filza on any exploit failure. 34 call sites. Use longjmp or return._
 
 - [ ] `A6.2` 🔴 — 40+ `printf()` sites leak kernel addresses (ASLR slide, PCB addrs)  
   _kexploit_opa334.m, RemoteCall.m, krw.m all print kernel addresses to stdout. Wrap in #ifdef DEBUG._
 
-- [ ] `A6.3` 🔴 — sandbox_escape.m: KRW_LEN=0x20 truncates class name "read-writ\0" missing 'e'  
+- [x] `A6.3` 🔴 — sandbox_escape.m: KRW_LEN=0x20 truncates class name "read-writ\0" missing 'e'  
   _Fixed 2026-08-10: KRW_LEN increased to 0x21 (33). Verified the class name now fits with null._
 
-- [ ] `A6.4` 🟠 — utils/tweak_log.h: static mutex in header → each TU gets own copy  
+- [x] `A6.4` 🟠 — utils/tweak_log.h: static mutex in header → each TU gets own copy  
   _Move g_log_mutex to a .m file. Cross-TU log calls use different mutexes → race on file write._
 
-- [ ] `A6.5` 🟠 — Tweak.m: loadMinizip() not thread-safe (non-atomic flag + unsynchronized dlsym)  
+- [x] `A6.5` 🟠 — Tweak.m: loadMinizip() not thread-safe (non-atomic flag + unsynchronized dlsym)  
   _Use dispatch_once or pthread_once for one-time initialization._
 
 - [ ] `A6.6` 🟠 — W0lfSword script: `eval` in retry() → code injection surface  
   _Replace with array-based command execution._
 
-- [ ] `A6.7` 🟠 — kexploit_opa334.m: 15+ file-scope vars missing `static` → pollute namespace  
+- [x] `A6.7` 🟠 — kexploit_opa334.m: 15+ file-scope vars missing `static` → pollute namespace  
   _Add static to readFd, writeFd, controlSocket, rwSocket, socketPorts, etc._
 
-- [ ] `A6.8` 🟡 — kexploit_opa334.m: hardcoded `sleep(8)` for A18 — undocumented delay  
+- [x] `A6.8` 🟡 — kexploit_opa334.m: hardcoded `sleep(8)` for A18 — undocumented delay  
   _Document why 8 seconds is needed, or investigate if still required._
 
-- [ ] `A6.9` 🟡 — kexploit/offsets.m:631 `printf("hello from roooot!\n")` debug joke in production  
+- [x] `A6.9` 🟡 — kexploit/offsets.m:631 `printf("hello from roooot!\n")` debug joke in production  
   _Remove or wrap in #ifdef DEBUG._
 
 - [ ] `A6.10` 🟡 — Tweak.m: 6+ `NSLog()` sites should be TweakLog for unified logging
@@ -743,7 +743,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | A2 — Filza Compatibility | 11 | 2 | 9 |
 | A3 — Kernel Exploit Robustness | 22 | 3 | 19 |
 | A5 — SSV & Sandbox Stability | 10 | 2 | 8 |
-| A6 — Production Readiness (new) | 20 | 1 | 19 |
+| A6 — Production Readiness (new) | 20 | 7 | 13 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
 | B2 — Runtime Control | 3 | 1 | 2 |
 | B3 — Power User Features | 7 | 0 | 7 |
@@ -774,7 +774,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J6 — Original Commands | 2 | 1 | 1 |
 | J7 — Polish | 3 | 1 | 2 |
 | J8 — Beta UX (new) | 6 | 0 | 6 |
-| **TOTAL** | **169** | **54** | **115** |
+| **TOTAL** | **169** | **60** | **109** |
 
 ---
 
