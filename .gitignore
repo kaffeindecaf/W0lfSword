@@ -9,6 +9,7 @@ REPO_SETUP.md
 BUILD.md
 WOLF_ASCII_ART.txt
 temporatyArchitecture
+W0lfSwordChainTransparent.drawio.png
 # Build artifacts
 .theos/
 packages/
@@ -58,6 +59,7 @@ __MACOSX/
 *.tar.gz
 *.zip
 *.rar
+*.ipa
 
 # Core dumps
 core
