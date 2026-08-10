@@ -15,18 +15,21 @@ extern "C" {
 #endif
 
 #define TWEAK_LOG_PATH "/tmp/FilzaTweak.log"
-#define TWEAK_LOG_MAX_SIZE (4 * 1024 * 1024)  // 4MB rotation
+#define TWEAK_LOG_MAX_SIZE (4 * 1024 * 1024)
 
 static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void TweakLog(const char *format, ...) {
+    if (!format) return;
+
     if (pthread_mutex_trylock(&g_log_mutex) != 0) {
         va_list args;
         va_start(args, format);
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
-        struct tm *t = localtime(&ts.tv_sec);
-        fprintf(stderr, "[%02d:%02d:%02d] ", t->tm_hour, t->tm_min, t->tm_sec);
+        struct tm t;
+        localtime_r(&ts.tv_sec, &t);
+        fprintf(stderr, "[%02d:%02d:%02d] ", t.tm_hour, t.tm_min, t.tm_sec);
         vfprintf(stderr, format, args);
         fprintf(stderr, "\n");
         fflush(stderr);
@@ -45,10 +48,11 @@ static void TweakLog(const char *format, ...) {
     FILE *f = fopen(TWEAK_LOG_PATH, "a");
     if (!f) { pthread_mutex_unlock(&g_log_mutex); return; }
 
+    struct tm t;
     time_t now = time(NULL);
-    struct tm *t = localtime(&now);
+    localtime_r(&now, &t);
     char ts[32];
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &t);
     fprintf(f, "[%s] ", ts);
 
     va_list args;
@@ -64,11 +68,12 @@ static void TweakLog(const char *format, ...) {
 #ifdef __OBJC__
 #import <Foundation/Foundation.h>
 static void TweakNSLog(NSString *format, ...) {
+    if (!format) return;
     va_list args;
     va_start(args, format);
     NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
     va_end(args);
-    TweakLog("%s", [msg UTF8String]);
+    TweakLog("%s", [msg UTF8String] ?: "(nil)");
 }
 #endif
 

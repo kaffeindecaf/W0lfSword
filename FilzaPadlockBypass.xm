@@ -9,12 +9,18 @@
 #import "FilzaPadlockBypass.h"
 #import "utils/permission_utils.h"
 #import "utils/tweak_log.h"
+#import "utils/state.h"
 #import "kexploit/krw.h"
 #import "kexploit/vnode.h"
 #import "kexploit/offsets.h"
 #import <substrate.h>
 
 static BOOL g_hooks_disabled = NO;
+
+// Safe UTF8String — prevents SIGSEGV on nil
+static const char *safe_utf8(NSString *s) {
+    return s ? [s UTF8String] : "(nil)";
+}
 
 #pragma mark - Class existence verification
 
@@ -53,22 +59,22 @@ static void verify_padlock_classes(void) {
 #pragma mark - Helper Functions
 
 BOOL filza_canEditPath(NSString *path) {
-    TweakLog("[Padlock] filza_canEditPath: %s - returning YES", [path UTF8String]);
+    TweakLog("[Padlock] filza_canEditPath: %s - returning YES", safe_utf8(path));
     return YES;
 }
 
 BOOL filza_canWritePath(NSString *path) {
-    TweakLog("[Padlock] filza_canWritePath: %s - returning YES", [path UTF8String]);
+    TweakLog("[Padlock] filza_canWritePath: %s - returning YES", safe_utf8(path));
     return YES;
 }
 
 BOOL filza_canDeletePath(NSString *path) {
-    TweakLog("[Padlock] filza_canDeletePath: %s - returning YES", [path UTF8String]);
+    TweakLog("[Padlock] filza_canDeletePath: %s - returning YES", safe_utf8(path));
     return YES;
 }
 
 BOOL filza_canCreatePath(NSString *path) {
-    TweakLog("[Padlock] filza_canCreatePath: %s - returning YES", [path UTF8String]);
+    TweakLog("[Padlock] filza_canCreatePath: %s - returning YES", safe_utf8(path));
     return YES;
 }
 
@@ -80,7 +86,7 @@ BOOL filza_canCreatePath(NSString *path) {
     if (g_hooks_disabled) return %orig;
     %log;
     NSString *path = [url path];
-    TweakLog("NZFileBrowserController::canEditItemAtURL: %s - BYPASSING", [path UTF8String]);
+    TweakLog("NZFileBrowserController::canEditItemAtURL: %s - BYPASSING", safe_utf8(path));
     return YES;
 }
 
@@ -182,12 +188,12 @@ BOOL filza_canCreatePath(NSString *path) {
 - (BOOL)createFileAtPath:(NSString *)path contents:(NSData *)data attributes:(NSDictionary *)attr {
     if (g_hooks_disabled) return %orig;
     %log;
-    TweakLog("NZFileManager::createFileAtPath: %s - applying permissions after", [path UTF8String]);
+    TweakLog("NZFileManager::createFileAtPath: %s - applying permissions after", safe_utf8(path));
     
     BOOL result = %orig;
     
     if (result) {
-        apply_permissions_after_operation([path UTF8String], "create");
+        apply_permissions_after_operation(safe_utf8(path), "create");
     }
     
     return result;
@@ -223,20 +229,20 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)removeItemAtPath:(NSString *)path error:(NSError **)err {
     if (g_hooks_disabled) return %orig;
+    if (!exploit_is_done()) return %orig;
     %log;
-    TweakLog("NZFileManager::removeItemAtPath: %s - allowing deletion", [path UTF8String]);
+    TweakLog("NZFileManager::removeItemAtPath: %s - allowing deletion", safe_utf8(path));
     
     // For SSV paths, we need to clear the immutable flag before deletion
-    if (is_ssv_protected_path([path UTF8String])) {
+    if (is_ssv_protected_path(safe_utf8(path))) {
         TweakLog("SSV path detected, attempting to clear immutable flag");
-        uint64_t vnode = get_vnode_for_path_by_open([path UTF8String]);
+        uint64_t vnode = get_vnode_for_path_by_open(safe_utf8(path));
         if (vnode != -1) {
             uint64_t v_data = kread64(vnode + off_vnode_v_data);
             if (v_data) {
-                // Clear UF_IMMUTABLE flag (0x8000)
                 uint32_t flags = kread32(v_data + off_apfs_fsnode_flags);
                 kwrite32(v_data + off_apfs_fsnode_flags, flags & ~0x8000);
-                TweakLog("Cleared immutable flag for %s", [path UTF8String]);
+                TweakLog("Cleared immutable flag for %s", safe_utf8(path));
             }
         }
     }
@@ -247,12 +253,12 @@ BOOL filza_canCreatePath(NSString *path) {
 - (BOOL)replaceItemAtPath:(NSString *)path withItemAtPath:(NSString *)withItem error:(NSError **)err {
     if (g_hooks_disabled) return %orig;
     %log;
-    TweakLog("NZFileManager::replaceItemAtPath: %s - applying permissions after", [path UTF8String]);
+    TweakLog("NZFileManager::replaceItemAtPath: %s - applying permissions after", safe_utf8(path));
     
     BOOL result = %orig;
     
     if (result) {
-        apply_permissions_after_operation([path UTF8String], "replace");
+        apply_permissions_after_operation(safe_utf8(path), "replace");
     }
     
     return result;
@@ -267,12 +273,12 @@ BOOL filza_canCreatePath(NSString *path) {
 - (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile {
     if (g_hooks_disabled) return %orig;
     %log;
-    TweakLog("NZTextEditor::writeToFile: %s - applying permissions after", [path UTF8String]);
+    TweakLog("NZTextEditor::writeToFile: %s - applying permissions after", safe_utf8(path));
     
     BOOL result = %orig;
     
     if (result) {
-        apply_permissions_after_operation([path UTF8String], "modify");
+        apply_permissions_after_operation(safe_utf8(path), "modify");
     }
     
     return result;

@@ -60,9 +60,9 @@ bool get_parent_dir_info(const char *path, uid_t *uid, gid_t *gid, mode_t *mode)
         return false;
     }
     
-    *uid = kread32(v_data + 0x80);
-    *gid = kread32(v_data + 0x84);
-    *mode = kread16(v_data + 0x88);
+    *uid = kread32(v_data + off_apfs_fsnode_uid);
+    *gid = kread32(v_data + off_apfs_fsnode_gid);
+    *mode = kread16(v_data + off_apfs_fsnode_mode);
     
     TweakLog("Kernel read succeeded: uid=%d gid=%d mode=%o", *uid, *gid, *mode);
     free(pathCopy);

@@ -144,7 +144,10 @@ static id hook_ZipFiles(id self, SEL _cmd, id files, id toFilePath, id currentDi
     @try {
         loadMinizip();
         if (!g_minizipLoaded) return orig_ZipFiles ? ((id(*)(id,SEL,id,id,id))orig_ZipFiles)(self, _cmd, files, toFilePath, currentDirectory) : nil;
-        zipFile64 zf = p_zipOpen64(((NSString *)toFilePath).UTF8String, 0); // APPEND_STATUS_CREATE=0
+        NSString *zipPath = [toFilePath isKindOfClass:[NSString class]] ? (NSString *)toFilePath : nil;
+        const char *zipC = zipPath ? zipPath.UTF8String : NULL;
+        if (!zipC) { NSLog(@"[Tweak] zipOpen64: invalid path"); return nil; }
+        zipFile64 zf = p_zipOpen64(zipC, 0);
         if (!zf) { NSLog(@"[Tweak] zipOpen64 failed"); return nil; }
 
         for (id fi in files) {
@@ -176,7 +179,10 @@ static id hook_unZipFile(id self, SEL _cmd, id zipPath, id toPath, id currentDir
         if ([zipPath respondsToSelector:NSSelectorFromString(@"filePath")])
             zipPathStr = [zipPath performSelector:NSSelectorFromString(@"filePath")];
 
-        unzFile64 uf = p_unzOpen64(((NSString *)zipPathStr).UTF8String);
+        NSString *zsStr = [zipPathStr isKindOfClass:[NSString class]] ? (NSString *)zipPathStr : nil;
+        const char *zsC = zsStr ? zsStr.UTF8String : NULL;
+        if (!zsC) { if (outMsg) *outMsg = @"Invalid zip path"; return nil; }
+        unzFile64 uf = p_unzOpen64(zsC);
         if (!uf) { if (outMsg) *outMsg = @"Failed to open zip"; return nil; }
 
         NSFileManager *fm = [NSFileManager defaultManager];
@@ -188,6 +194,7 @@ static id hook_unZipFile(id self, SEL _cmd, id zipPath, id toPath, id currentDir
         int ret = p_unzGoToFirstFile(uf);
         while (ret == 0) {
             p_unzGetCurrentFileInfo64(uf, NULL, filename, sizeof(filename), NULL, 0, NULL, 0);
+            filename[sizeof(filename) - 1] = '\0';
             NSString *name = [NSString stringWithUTF8String:filename];
             NSString *fullPath = [destPath stringByAppendingPathComponent:name];
 
