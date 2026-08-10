@@ -39,7 +39,7 @@
 extern void early_kread(uint64_t where, void *read_buf, size_t size);
 extern int check_sandbox_var_rw(void);
 
-#define KRW_LEN 0x20
+#define KRW_LEN 0x21  // 33 — must fit "com.apple.app-sandbox.read-write" + null
 
 // Verified offsets (IDA binary analysis across 6 kernelcaches)
 #define OFF_PROC_PROC_RO       0x18  // proc → proc_ro (stable 17.0-26.x)

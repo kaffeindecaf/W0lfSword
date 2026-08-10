@@ -124,6 +124,49 @@
 
 ---
 
+## A6 — Production Readiness (audit 2026-08-10)
+
+- [ ] `A6.1` 🔴 — Replace `exit()` in `FAILURE()` macro with error return path  
+  _FAILURE(0) calls exit() — kills Filza on any exploit failure. 34 call sites. Use longjmp or return._
+
+- [ ] `A6.2` 🔴 — 40+ `printf()` sites leak kernel addresses (ASLR slide, PCB addrs)  
+  _kexploit_opa334.m, RemoteCall.m, krw.m all print kernel addresses to stdout. Wrap in #ifdef DEBUG._
+
+- [ ] `A6.3` 🔴 — sandbox_escape.m: KRW_LEN=0x20 truncates class name "read-writ\0" missing 'e'  
+  _Fixed 2026-08-10: KRW_LEN increased to 0x21 (33). Verified the class name now fits with null._
+
+- [ ] `A6.4` 🟠 — utils/tweak_log.h: static mutex in header → each TU gets own copy  
+  _Move g_log_mutex to a .m file. Cross-TU log calls use different mutexes → race on file write._
+
+- [ ] `A6.5` 🟠 — Tweak.m: loadMinizip() not thread-safe (non-atomic flag + unsynchronized dlsym)  
+  _Use dispatch_once or pthread_once for one-time initialization._
+
+- [ ] `A6.6` 🟠 — W0lfSword script: `eval` in retry() → code injection surface  
+  _Replace with array-based command execution._
+
+- [ ] `A6.7` 🟠 — kexploit_opa334.m: 15+ file-scope vars missing `static` → pollute namespace  
+  _Add static to readFd, writeFd, controlSocket, rwSocket, socketPorts, etc._
+
+- [ ] `A6.8` 🟡 — kexploit_opa334.m: hardcoded `sleep(8)` for A18 — undocumented delay  
+  _Document why 8 seconds is needed, or investigate if still required._
+
+- [ ] `A6.9` 🟡 — kexploit/offsets.m:631 `printf("hello from roooot!\n")` debug joke in production  
+  _Remove or wrap in #ifdef DEBUG._
+
+- [ ] `A6.10` 🟡 — Tweak.m: 6+ `NSLog()` sites should be TweakLog for unified logging
+- [ ] `A6.11` 🟡 — kutils.m: proc_get_p_name static buffer not thread-safe
+- [ ] `A6.12` 🟡 — control: version 0.7.6 vs script v0.9, placeholder maintainer/author
+- [ ] `A6.13` 🟡 — CONTEXT.md: stale line counts, stale architecture, wrong fixes count
+- [ ] `A6.14` 🟢 — Makefile: kexploit/sandbox_backup.m dead code not compiled
+- [ ] `A6.15` 🟢 — kutils.h:29 `amfi_cslot_get` declared but never defined
+- [ ] `A6.16` 🟢 — xpaci.h: double #include <stdbool.h> (lines 2-3)
+- [ ] `A6.17` 🟢 — W0lfSword: `seq` not on macOS → hline/section broken output
+- [ ] `A6.18` 🟢 — W0lfSword: `sleep 0.05` (fractional) doesn't work on busybox
+- [ ] `A6.19` 🟢 — krw.m + vnode_research.m: debug functions with no #ifdef guards
+- [ ] `A6.20` 🟢 — build_and_extract.sh: missing pipefail → silent build failures
+
+---
+
 ## A3 — Kernel Exploit Robustness
 
 - [ ] `A3.1` 🔴 — Kernel panic recovery: detect previous crash, disable exploit  
@@ -699,7 +742,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | A1 — Thread Safety | 14 | 12 | 2 |
 | A2 — Filza Compatibility | 11 | 2 | 9 |
 | A3 — Kernel Exploit Robustness | 22 | 3 | 19 |
-| A5 — SSV & Sandbox Stability (new) | 10 | 2 | 8 |
+| A5 — SSV & Sandbox Stability | 10 | 2 | 8 |
+| A6 — Production Readiness (new) | 20 | 1 | 19 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
 | B2 — Runtime Control | 3 | 1 | 2 |
 | B3 — Power User Features | 7 | 0 | 7 |
@@ -730,7 +774,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J6 — Original Commands | 2 | 1 | 1 |
 | J7 — Polish | 3 | 1 | 2 |
 | J8 — Beta UX (new) | 6 | 0 | 6 |
-| **TOTAL** | **149** | **53** | **96** |
+| **TOTAL** | **169** | **54** | **115** |
 
 ---
 

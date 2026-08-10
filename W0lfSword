@@ -32,9 +32,10 @@ log_script() { echo "[$(date '+%H:%M:%S')] $*" >> "$SESSION_LOG"; }
 
 # ── Exit trap — restore terminal ─────────────────────────────
 cleanup() {
-    tput cnorm 2>/dev/null || true   # restore cursor
-    stty echo 2>/dev/null || true     # restore echo
-    echo -e "\033[?25h"               # show cursor
+    tput cnorm 2>/dev/null || true
+    stty echo 2>/dev/null || true
+    echo -e "\033[?25h"
+    stop_crash_monitor
     log_script "session ended (exit=$?)"
 }
 trap cleanup EXIT
@@ -231,9 +232,8 @@ scan_devices() {
     # WiFi devices from saved list
     local active_active; active_active=$(get_device_ip)
     if [ -f "$DATA_DIR/devices.list" ] && [ -s "$DATA_DIR/devices.list" ]; then
-        sort -u "$DATA_DIR/devices.list" | while read -r dip dname; do
+        while read -r dip dname; do
             [ -z "$dip" ] && continue
-            # Skip if already listed as USB
             local is_usb=false
             for u in "${DEV_USB[@]}"; do
                 [[ "$u" == *"$dip"* ]] && is_usb=true && break
@@ -245,7 +245,7 @@ scan_devices() {
             ping -c1 -W1 "$dip" >/dev/null 2>&1 && st="${C_GRN}online${NC}"
             DEV_WIFI+=("$mark|$dip|$dname|$st")
             ((DEV_COUNT++))
-        done
+        done < <(sort -u "$DATA_DIR/devices.list")
     fi
 }
 
@@ -800,6 +800,7 @@ run_menu() {
             targets|t)    cmd_targets || true;;
             q|Q|quit|exit)
                 echo ""; echo -e "  ${C_WOLF}~ howl later ~${NC}"; echo ""; exit 0;;
+            help|h|\?) cmd_help || true;;
             *)
                 echo -e "  ${C_RED}Unknown — try 1-8, b/d/s/l/m/c, or q${NC}";;
         esac
@@ -1216,7 +1217,6 @@ stop_crash_monitor() {
     [ -n "${CRASH_MONITOR_PID:-}" ] && kill "$CRASH_MONITOR_PID" 2>/dev/null || true
     CRASH_MONITOR_PID=""
 }
-trap 'stop_crash_monitor' EXIT
 
 cmd_crashlog() {
     local logfile="$DATA_DIR/last_crash.log"
