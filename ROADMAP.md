@@ -80,8 +80,8 @@
 - [ ] `A2.3` 🟢 — Test with Filza 4.0.0 on iOS 17.0 and 18.0 for regression  
   _Prompt:_ "Create a test matrix: Filza 4.0.0 × iOS 17.0, 17.7, 18.0, 18.7, 26.0. For each combo, test: launch, browse /System, create a file, delete a file, zip Documents, unzip to /var/tmp. Mark pass/fail."
 
-- [ ] `A2.4` 🟠 — FilzaPadlockBypass NZ* hooks are dead code — replace with TG* equivalents  
-  _IPA analysis 2026-08-10: The NZ* classes (NZFileBrowserController, NZDirectoryController, NZFileItem, NZFileManager, NZTextEditor, NZFileViewer) do NOT exist in Filza 4.0.0 or 4.0.2. The actual Filza uses TG* prefixes. Need to reverse-engineer the actual TG* class hierarchy. Affects all 17 padlock bypass hooks._
+- [x] `A2.4` 🟠 — FilzaPadlockBypass NZ* hooks are dead code — replace with TG* equivalents  
+  _Fixed 2026-08-10: Replaced all 17 dead NZ* hooks with hooks on real TG/TIGI classes (TIGIBrowserView, TGPageViewController, TGFileSystemListViewController). TIGIBrowserView forces readOnly:NO, TGPageViewController allows delete without confirmation._
 
 - [ ] `A2.5` 🟠 — PadlockBypass removeItemAtPath kreads before exploit_is_done guard → kernel panic
 - [ ] `A2.6` 🟡 — Tweak.m zip hooks: unconditional (NSString*) cast on id → crash if non-NSString
