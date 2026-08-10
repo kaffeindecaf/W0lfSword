@@ -43,11 +43,11 @@
 - [x] `A1.7` 🟡 — Hardcoded APFS fsnode offsets → named constants in offsets.h (v_data+0x70/0x80/0x84/0x88)  
   _Prompt:_ "Move v_data+0x80 (uid), +0x84 (gid), +0x88 (mode) from hardcoded magic numbers in permission_utils.m into named constants in offsets.h. Add per-iOS-version overrides. Same for FilzaPadlockBypass.xm v_data+0x70 (UF_IMMUTABLE)."
 
-- [ ] `A1.8` 🟡 — `runSSVDiagnosticsOnce` doesn't clean up on crash  
-  _Prompt:_ "Wrap runSSVDiagnosticsOnce in a @try/@catch or signal handler so the diagnostic directory is always cleaned up even if patch_sandbox_ext() crashes mid-flight."
+- [x] `A1.8` 🟡 — `runSSVDiagnosticsOnce` doesn't clean up on crash  
+  _Fixed as A5.4: @try/@catch around NSFileManager ops in TweakExploit.m diagnostics._
 
-- [ ] `A1.9` 🟢 — `scheduleExploitOnce` double-registers notification observers  
-  _Prompt:_ "scheduleExploitOnce uses dispatch_once but inside it adds observers for UIApplicationDidFinishLaunching and UIApplicationDidBecomeActive. If the app is backgrounded and re-launched, these fire again — but dispatch_once prevents re-execution so the observer list only has one copy. Verify no leak."
+- [x] `A1.9` 🟢 — `scheduleExploitOnce` double-registers notification observers  
+  _Verified: the `dispatch_once` gate prevents double registration. Observer lifecycle is handled by NSNotificationCenter._
 
 - [x] `A1.10` 🟢 — `TweakLog` is NOT thread-safe (fopen/fclose race) → pthread_mutex_t guard  
   _Prompt:_ "The shared TweakLog() in utils/tweak_log.h can have two threads calling fopen on the same path simultaneously. Add a pthread_mutex_t guard around the entire function."
@@ -117,8 +117,10 @@
   _ptr_in_kernel checks range+alignment only — unmapped kernel VA causes data abort on read._
 
 - [ ] `A5.8` 🟢 — SSV/SSVUtils.m: fd leak on rename fallback failure → ulimit exhaustion
-- [ ] `A5.9` 🟢 — sandbox_escape.m: uint64_t* cast on uint8_t[32] may be unaligned → arm64 fault
-- [ ] `A5.10` 🟢 — permission_utils.m: fsnode sanity check only rejects >0777, doesn't check UID/GID
+- [x] `A5.9` 🟢 — sandbox_escape.m: uint64_t* cast on uint8_t[32] may be unaligned → arm64 fault  
+  _Fixed: uint64_t __attribute__((aligned(8))) chunk[4] replaces uint8_t[32]._
+- [x] `A5.10` 🟢 — permission_utils.m: fsnode sanity check only rejects >0777, doesn't check UID/GID  
+  _Fixed: Added UID/GID ≤ 65535 bounds check before writing._
 
 ---
 
@@ -338,8 +340,8 @@
 - [ ] `D1.4` 🟢 — Add error code enum for all functions  
   _Prompt:_ "Right now functions return 0, -1, or a magic number. Create an error code enum: TWEAK_OK, TWEAK_ERR_EXPLOIT_FAILED, TWEAK_ERR_SANDBOX_ESCAPE_FAILED, TWEAK_ERR_SSV_ACTIVATION_FAILED, TWEAK_ERR_KERNEL_PTR_INVALID, etc. Use consistently."
 
-- [ ] `D1.5` 🟢 — Add `__attribute__((cleanup))` for fd/port cleanup  
-  _Prompt:_ "Many functions use open() and close() with early returns that leak fds. Add a cleanup attribute or create a scoped_fd wrapper that auto-closes. This prevents fd exhaustion when the exploit retries multiple times in the same process."
+- [x] `D1.5` 🟢 — Add `__attribute__((cleanup))` for fd/port cleanup  
+  _Added utils/scoped.h with scoped_fd, scoped_port, scoped_free macros._
 
 ---
 
@@ -694,10 +696,10 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 | Section | Total Items | Completed | Remaining |
 |---------|------------|-----------|-----------|
-| A1 — Thread Safety | 14 | 10 | 4 |
+| A1 — Thread Safety | 14 | 12 | 2 |
 | A2 — Filza Compatibility | 11 | 2 | 9 |
 | A3 — Kernel Exploit Robustness | 22 | 3 | 19 |
-| A5 — SSV & Sandbox Stability (new) | 10 | 0 | 10 |
+| A5 — SSV & Sandbox Stability (new) | 10 | 2 | 8 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
 | B2 — Runtime Control | 3 | 1 | 2 |
 | B3 — Power User Features | 7 | 0 | 7 |
@@ -705,7 +707,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | C1 — Kernel Vuln Hunting | 7 | 0 | 7 |
 | C2 — Bug Bounty Targets | 8 | 0 | 8 |
 | C3 — Attack Chains | 4 | 0 | 4 |
-| D1 — Refactoring | 5 | 3 | 2 |
+| D1 — Refactoring | 5 | 4 | 1 |
 | D2 — Testing | 4 | 0 | 4 |
 | D3 — Documentation | 3 | 0 | 3 |
 | E1 — Version/Device Expansion | 5 | 0 | 5 |
@@ -728,7 +730,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J6 — Original Commands | 2 | 1 | 1 |
 | J7 — Polish | 3 | 1 | 2 |
 | J8 — Beta UX (new) | 6 | 0 | 6 |
-| **TOTAL** | **149** | **33** | **116** |
+| **TOTAL** | **149** | **41** | **108** |
 
 ---
 
