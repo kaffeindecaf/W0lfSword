@@ -1004,6 +1004,14 @@ static void installHooks(void) {
 #pragma mark - Entry Point
 
 __attribute__((constructor)) void TweakInit(void) {
+    // Safe mode: if flag file exists, skip all kernel operations entirely
+    if (access("/var/mobile/Documents/.filza_safe_mode", F_OK) == 0) {
+        TweakLog("[Tweak] SAFE MODE — skipping exploit, sandbox escape, and kernel writes");
+        TweakLog("[Tweak] Only UI hooks active. Delete /var/mobile/Documents/.filza_safe_mode to enable exploit.");
+        installHooks();
+        return;
+    }
+
     // Crash recovery: if we've crashed 3+ times without success, auto-disable
     const char *successFlag = "/var/mobile/Documents/.filza_last_success";
     const char *crashCountFile = "/var/mobile/Documents/.filza_crash_count";

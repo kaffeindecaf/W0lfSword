@@ -259,6 +259,9 @@ cmd_deploy() {
     vlog "Filza restarted"
     echo "$ip" > "$DATA_DIR/active_device"
     log_script "deploy success: $ip"
+
+    # Start crash monitor in background
+    crash_monitor "$ip" "$DATA_DIR/last_crash.log"
 }
 
 cmd_status() {
@@ -690,7 +693,7 @@ draw_menu() {
     echo -e "  ${C_EYE}${B}[ 8 ]${NC}  Targets            ${C_DIM}Supported apps${NC}"
     echo ""
     echo -e "  ${C_DIM}───${NC}"
-    echo -e "  ${C_DIM}quick:${NC}  ${C_EYE}b${NC}=build  ${C_EYE}d${NC}=deploy  ${C_EYE}a${NC}=adderall  ${C_EYE}s${NC}=status  ${C_EYE}l${NC}=log  ${C_EYE}m${NC}=monitor  ${C_EYE}c${NC}=clean"
+    echo -e "  ${C_DIM}quick:${NC}  ${C_EYE}b${NC}=build  ${C_EYE}d${NC}=deploy  ${C_EYE}a${NC}=adderall  ${C_EYE}sf${NC}=safe  ${C_EYE}s${NC}=status  ${C_EYE}l${NC}=log  ${C_EYE}m${NC}=monitor  ${C_EYE}c${NC}=clean"
     echo -e "  ${C_EYE}${B}[ q ]${NC}  Quit               ${C_DIM}╱  howl later${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
@@ -770,11 +773,25 @@ stop_pulse() {
 }
 
 cmd_adderall() {
+    # Parse adderall-specific flags
+    local SAFE_MODE=false
+    local args_clean=()
+    for a in "$@"; do
+        case "$a" in --safe|--safe-mode) SAFE_MODE=true;; *) args_clean+=("$a");; esac
+    done
+    set -- "${args_clean[@]}"
+
     show_header
     echo ""
-    echo -e "  ${C_AMB}${B}╔════════════════════════════════════════════════╗${NC}"
-    echo -e "  ${C_AMB}${B}║         W0lfSword ADDERALL — Auto Exploit         ║${NC}"
-    echo -e "  ${C_AMB}${B}╚════════════════════════════════════════════════╝${NC}"
+    if $SAFE_MODE; then
+        echo -e "  ${C_AMB}${B}╔════════════════════════════════════════════════╗${NC}"
+        echo -e "  ${C_AMB}${B}║    W0lfSword ADDERALL — SAFE MODE (no exploit)   ║${NC}"
+        echo -e "  ${C_AMB}${B}╚════════════════════════════════════════════════╝${NC}"
+    else
+        echo -e "  ${C_AMB}${B}╔════════════════════════════════════════════════╗${NC}"
+        echo -e "  ${C_AMB}${B}║         W0lfSword ADDERALL — Auto Exploit         ║${NC}"
+        echo -e "  ${C_AMB}${B}╚════════════════════════════════════════════════╝${NC}"
+    fi
     echo ""
     echo -e "  ${C_DIM}Fully automated: discover device, check offsets, build, deploy, verify${NC}"
     echo -e "  ${C_DIM}Run with --yes to skip prompts, -vv for extreme verbosity${NC}"
@@ -1014,6 +1031,10 @@ EOF
     fi
 
     stage "2/5" "Deploying to $IP..."
+    if $SAFE_MODE; then
+        info "Safe mode: setting flag before deploy"
+        ssh_safe "root@$IP" "touch /var/mobile/Documents/.filza_safe_mode" 2>/dev/null
+    fi
     local rp="/tmp/$(basename "$deb")"
     scp_safe "$deb" "root@$IP:$rp" >/dev/null 2>&1 || { err "SCP failed"; return 1; }
     ssh_safe "root@$IP" "dpkg -i '$rp' >/dev/null 2>&1; rm -f '$rp'" 2>/dev/null \
@@ -1021,7 +1042,19 @@ EOF
     ssh_safe "root@$IP" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
     ok "Deployed + Filza restarted"
 
+    # Start crash monitor (captures log + detects kernel panic)
+    if ! $SAFE_MODE; then
+        crash_monitor "$IP" "$DATA_DIR/last_crash.log"
+    fi
+
     stage "3/5" "Waiting for exploit..."
+    if $SAFE_MODE; then
+        echo -e "  ${C_AMB}  Safe mode — exploit will NOT run. Only UI hooks active.${NC}"
+        echo -e "  ${C_DIM}  Run './W0lfSword safe off $IP' and restart Filza to attempt exploit.${NC}"
+        log_script "adderall safe deploy: $IP ($DEV_MODEL iOS $IOS_VER)"
+        echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$IP\",\"ios\":\"$IOS_VER\",\"result\":\"safe_mode\"}" >> "$DATA_DIR/history.json"
+        return 0
+    fi
     local dots=""
     for i in $(seq 1 12); do
         dots+="."
@@ -1067,6 +1100,81 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════
+#  SAFETY COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+cmd_safe() {
+    local ip; ip=$(get_device_ip "${1:-}")
+    local action="${2:-on}"
+    [ -z "$ip" ] && { err "No device IP"; return 1; }
+
+    case "$action" in
+        on)
+            ssh_safe "root@$ip" "touch /var/mobile/Documents/.filza_safe_mode" 2>/dev/null
+            echo -e "  ${C_GRN}✓${NC} Safe mode ENABLED — tweak will skip all kernel writes"
+            echo -e "  ${C_DIM}Delete /var/mobile/Documents/.filza_safe_mode to re-enable exploit${NC}"
+            log_script "safe mode ON for $ip"
+            ;;
+        off)
+            ssh_safe "root@$ip" "rm -f /var/mobile/Documents/.filza_safe_mode" 2>/dev/null
+            echo -e "  ${C_AMB}⚠${NC} Safe mode DISABLED — exploit will run on next Filza launch"
+            echo -e "  ${C_DIM}Run './W0lfSword safe on' to re-enable safety${NC}"
+            log_script "safe mode OFF for $ip"
+            ;;
+        *) echo -e "${C_RED}Usage:${NC} safe on|off [ip]";;
+    esac
+}
+
+crash_monitor() {
+    local ip="${1:-}" outfile="${2:-$DATA_DIR/last_crash.log}"
+    [ -z "$ip" ] && return 1
+
+    echo -e "  ${C_DIM}Crash monitor started — saving to ${outfile}${NC}"
+    log_script "crash monitor started for $ip"
+
+    # Background: tail the log until device goes offline (kernel panic)
+    (
+        ssh_safe "root@$ip" "tail -f /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null | while IFS= read -r l; do
+            echo "[$(date '+%H:%M:%S')] $l" >> "$outfile"
+        done
+        # Device went offline — log it
+        echo "[$(date '+%H:%M:%S')] === DEVICE OFFLINE (possible kernel panic) ===" >> "$outfile"
+        log_script "crash monitor: $ip went offline"
+    ) &
+    CRASH_MONITOR_PID=$!
+    echo -e "  ${C_DIM}Monitor PID: $CRASH_MONITOR_PID (auto-cleaned on next run)${NC}"
+}
+
+stop_crash_monitor() {
+    [ -n "${CRASH_MONITOR_PID:-}" ] && kill "$CRASH_MONITOR_PID" 2>/dev/null || true
+    CRASH_MONITOR_PID=""
+}
+trap 'stop_crash_monitor' EXIT
+
+cmd_crashlog() {
+    local logfile="$DATA_DIR/last_crash.log"
+    if [ -f "$logfile" ] && [ -s "$logfile" ]; then
+        section "Last Crash Log ($logfile)"
+        echo ""
+        cat "$logfile" | while IFS= read -r l; do
+            if echo "$l" | grep -q 'OFFLINE\|PANIC\|kernel panic'; then
+                echo -e "  ${C_RED}${B}$l${NC}"
+            elif echo "$l" | grep -q 'ERROR\|FAILED'; then
+                echo -e "  ${C_RED}$l${NC}"
+            elif echo "$l" | grep -q 'Retry\|WARNING\|SAFE'; then
+                echo -e "  ${C_AMB}$l${NC}"
+            else
+                echo -e "  ${C_DIM}$l${NC}"
+            fi
+        done
+        echo ""
+        echo -e "  ${C_DIM}Lines: $(wc -l < "$logfile")${NC}"
+    else
+        echo -e "  ${C_DIM}No crash log yet — deploy first.${NC}"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════
 #  HELP
 # ═══════════════════════════════════════════════════════════════
 
@@ -1095,6 +1203,7 @@ cmd_help() {
     echo ""
     section "Exploit Workflow"
     printf "  ${C_EYE}%-14s${NC} %s\n" "adderall"     "Auto-discover → build → deploy → verify"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "safe on|off"  "Enable/disable safe mode (skip kernel writes)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "quick"        "One-shot exploit chain (needs configured device)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "profile ..."  "Save/load exploit configs"
     printf "  ${C_EYE}%-14s${NC} %s\n" "device ..."   "Multi-device manager"
@@ -1139,6 +1248,8 @@ main() {
         doctor)    cmd_doctor "${args[@]}";;
         quick)     cmd_quick "${args[@]}";;
         adderall)  cmd_adderall "${args[@]}";;
+        safe)      cmd_safe "${args[@]}";;
+        crashlog)  cmd_crashlog "${args[@]}";;
         profile)   cmd_profile "${args[@]}";;
         device)    cmd_device "${args[@]}";;
         history)   cmd_history "${args[@]}";;
