@@ -4,6 +4,7 @@
 #include <choma/MachOByteOrder.h>
 #include <choma/BufferedStream.h>
 #include <mach/machine.h>
+#include <sys/mman.h>
 #include "xpf.h"
 #include "decompress.h"
 
@@ -356,7 +357,7 @@ int xpf_start_with_kernel_path(const char *kernelPath)
 				uint32_t count = LITTLE_TO_HOST(*(uint32_t *)(cmdData + 4));
 				if (flavor == ARM_THREAD_STATE64) {
 					arm_thread_state64_t *threadState = (arm_thread_state64_t *)(cmdData + 8);
-#ifdef __arm64e__
+#if __DARWIN_OPAQUE_ARM_THREAD_STATE64
 					gXPF.kernelEntry = LITTLE_TO_HOST((uint64_t)threadState->__opaque_pc);
 #else
 					gXPF.kernelEntry = LITTLE_TO_HOST((uint64_t)threadState->__pc);

@@ -8,47 +8,32 @@
 
 #import "FilzaPadlockBypass.h"
 #import "utils/permission_utils.h"
+#import "utils/tweak_log.h"
+#import "kexploit/krw.h"
+#import "kexploit/vnode.h"
+#import "kexploit/offsets.h"
 #import <substrate.h>
-
-static void logPadlock(const char *fmt, ...) {
-    NSString *logPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"FilzaPadlockDebug.log"];
-    FILE *f = fopen([logPath fileSystemRepresentation], "a");
-    if (!f) return;
-    
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    char ts[32];
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
-    fprintf(f, "[%s] ", ts);
-    
-    va_list args;
-    va_start(args, fmt);
-    vfprintf(f, fmt, args);
-    va_end(args);
-    fprintf(f, "\n");
-    fclose(f);
-}
 
 #pragma mark - Helper Functions
 
 BOOL filza_canEditPath(NSString *path) {
-    logPadlock("filza_canEditPath: %@ - returning YES", path);
-    return YES;  // Always allow editing
+    TweakLog("[Padlock] filza_canEditPath: %s - returning YES", [path UTF8String]);
+    return YES;
 }
 
 BOOL filza_canWritePath(NSString *path) {
-    logPadlock("filza_canWritePath: %@ - returning YES", path);
-    return YES;  // Always allow writing
+    TweakLog("[Padlock] filza_canWritePath: %s - returning YES", [path UTF8String]);
+    return YES;
 }
 
 BOOL filza_canDeletePath(NSString *path) {
-    logPadlock("filza_canDeletePath: %@ - returning YES", path);
-    return YES;  // Always allow deletion
+    TweakLog("[Padlock] filza_canDeletePath: %s - returning YES", [path UTF8String]);
+    return YES;
 }
 
 BOOL filza_canCreatePath(NSString *path) {
-    logPadlock("filza_canCreatePath: %@ - returning YES", path);
-    return YES;  // Always allow creation
+    TweakLog("[Padlock] filza_canCreatePath: %s - returning YES", [path UTF8String]);
+    return YES;
 }
 
 #pragma mark - NZFileBrowserController Hooks
@@ -58,31 +43,31 @@ BOOL filza_canCreatePath(NSString *path) {
 - (BOOL)canEditItemAtURL:(NSURL *)url {
     %log;
     NSString *path = [url path];
-    logPadlock("NZFileBrowserController::canEditItemAtURL: %@ - BYPASSING", path);
+    TweakLog("NZFileBrowserController::canEditItemAtURL: %s - BYPASSING", [path UTF8String]);
     return YES;
 }
 
 - (BOOL)isLocked {
     %log;
-    logPadlock("NZFileBrowserController::isLocked - BYPASSING (returning NO)");
+    TweakLog("NZFileBrowserController::isLocked - BYPASSING (returning NO)");
     return NO;  // Hide the padlock
 }
 
 - (BOOL)readOnlyMode {
     %log;
-    logPadlock("NZFileBrowserController::readOnlyMode - BYPASSING (returning NO)");
+    TweakLog("NZFileBrowserController::readOnlyMode - BYPASSING (returning NO)");
     return NO;  // Disable read-only mode
 }
 
 - (BOOL)canCreateFiles {
     %log;
-    logPadlock("NZFileBrowserController::canCreateFiles - BYPASSING (returning YES)");
+    TweakLog("NZFileBrowserController::canCreateFiles - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canDeleteItems {
     %log;
-    logPadlock("NZFileBrowserController::canDeleteItems - BYPASSING (returning YES)");
+    TweakLog("NZFileBrowserController::canDeleteItems - BYPASSING (returning YES)");
     return YES;
 }
 
@@ -94,19 +79,19 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)canCreateFiles {
     %log;
-    logPadlock("NZDirectoryController::canCreateFiles - BYPASSING (returning YES)");
+    TweakLog("NZDirectoryController::canCreateFiles - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canDeleteItems {
     %log;
-    logPadlock("NZDirectoryController::canDeleteItems - BYPASSING (returning YES)");
+    TweakLog("NZDirectoryController::canDeleteItems - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)isLocked {
     %log;
-    logPadlock("NZDirectoryController::isLocked - BYPASSING (returning NO)");
+    TweakLog("NZDirectoryController::isLocked - BYPASSING (returning NO)");
     return NO;
 }
 
@@ -118,25 +103,25 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)isLocked {
     %log;
-    logPadlock("NZFileItem::isLocked - BYPASSING (returning NO)");
+    TweakLog("NZFileItem::isLocked - BYPASSING (returning NO)");
     return NO;
 }
 
 - (BOOL)canWrite {
     %log;
-    logPadlock("NZFileItem::canWrite - BYPASSING (returning YES)");
+    TweakLog("NZFileItem::canWrite - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canDelete {
     %log;
-    logPadlock("NZFileItem::canDelete - BYPASSING (returning YES)");
+    TweakLog("NZFileItem::canDelete - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canEdit {
     %log;
-    logPadlock("NZFileItem::canEdit - BYPASSING (returning YES)");
+    TweakLog("NZFileItem::canEdit - BYPASSING (returning YES)");
     return YES;
 }
 
@@ -148,7 +133,7 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)createFileAtPath:(NSString *)path contents:(NSData *)data attributes:(NSDictionary *)attr {
     %log;
-    logPadlock("NZFileManager::createFileAtPath: %@ - applying permissions after", path);
+    TweakLog("NZFileManager::createFileAtPath: %s - applying permissions after", [path UTF8String]);
     
     BOOL result = %orig;
     
@@ -161,7 +146,7 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)copyItemAtPath:(NSString *)src toPath:(NSString *)dst error:(NSError **)err {
     %log;
-    logPadlock("NZFileManager::copyItemAtPath: %@ -> %@ - applying permissions after", src, dst);
+    TweakLog("NZFileManager::copyItemAtPath: %s -> %s - applying permissions after", [src UTF8String], [dst UTF8String]);
     
     BOOL result = %orig;
     
@@ -174,7 +159,7 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)moveItemAtPath:(NSString *)src toPath:(NSString *)dst error:(NSError **)err {
     %log;
-    logPadlock("NZFileManager::moveItemAtPath: %@ -> %@ - applying permissions after", src, dst);
+    TweakLog("NZFileManager::moveItemAtPath: %s -> %s - applying permissions after", [src UTF8String], [dst UTF8String]);
     
     BOOL result = %orig;
     
@@ -187,19 +172,19 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)removeItemAtPath:(NSString *)path error:(NSError **)err {
     %log;
-    logPadlock("NZFileManager::removeItemAtPath: %@ - allowing deletion", path);
+    TweakLog("NZFileManager::removeItemAtPath: %s - allowing deletion", [path UTF8String]);
     
     // For SSV paths, we need to clear the immutable flag before deletion
     if (is_ssv_protected_path([path UTF8String])) {
-        logPadlock("SSV path detected, attempting to clear immutable flag");
+        TweakLog("SSV path detected, attempting to clear immutable flag");
         uint64_t vnode = get_vnode_for_path_by_open([path UTF8String]);
         if (vnode != -1) {
             uint64_t v_data = kread64(vnode + off_vnode_v_data);
             if (v_data) {
                 // Clear UF_IMMUTABLE flag (0x8000)
-                uint32_t flags = kread32(v_data + 0x70);
-                kwrite32(v_data + 0x70, flags & ~0x8000);
-                logPadlock("Cleared immutable flag for %@", path);
+                uint32_t flags = kread32(v_data + off_apfs_fsnode_flags);
+                kwrite32(v_data + off_apfs_fsnode_flags, flags & ~0x8000);
+                TweakLog("Cleared immutable flag for %s", [path UTF8String]);
             }
         }
     }
@@ -209,7 +194,7 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)replaceItemAtPath:(NSString *)path withItemAtPath:(NSString *)withItem error:(NSError **)err {
     %log;
-    logPadlock("NZFileManager::replaceItemAtPath: %@ - applying permissions after", path);
+    TweakLog("NZFileManager::replaceItemAtPath: %s - applying permissions after", [path UTF8String]);
     
     BOOL result = %orig;
     
@@ -228,7 +213,7 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile {
     %log;
-    logPadlock("NZTextEditor::writeToFile: %@ - applying permissions after", path);
+    TweakLog("NZTextEditor::writeToFile: %s - applying permissions after", [path UTF8String]);
     
     BOOL result = %orig;
     
@@ -247,13 +232,13 @@ BOOL filza_canCreatePath(NSString *path) {
 
 - (BOOL)canEdit {
     %log;
-    logPadlock("NZFileViewer::canEdit - BYPASSING (returning YES)");
+    TweakLog("NZFileViewer::canEdit - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canSave {
     %log;
-    logPadlock("NZFileViewer::canSave - BYPASSING (returning YES)");
+    TweakLog("NZFileViewer::canSave - BYPASSING (returning YES)");
     return YES;
 }
 
@@ -262,5 +247,5 @@ BOOL filza_canCreatePath(NSString *path) {
 #pragma mark - Initialization
 
 void initFilzaPadlockBypass(void) {
-    logPadlock("initFilzaPadlockBypass called - hooks are active");
+    TweakLog("initFilzaPadlockBypass called - hooks are active");
 }

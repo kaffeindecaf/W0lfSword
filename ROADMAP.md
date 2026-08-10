@@ -1,0 +1,638 @@
+# ROADMAP.md — Master Task File
+
+> **Purpose:** Every day, pick one item. Complete it. Check it off.  
+> **Format:** `[ ] #ID — Status` = unchecked. `[x] #ID — Status` = done.  
+> **Priority:** 🔴 Critical → 🟠 High → 🟡 Medium → 🟢 Low → ⚪ Research
+
+---
+
+## LEGEND
+
+| Icon | Meaning |
+|------|---------|
+| 🔴 | Crash / data loss / kernel panic risk |
+| 🟠 | Major feature missing, affects many users |
+| 🟡 | Nice to have, code quality, edge case |
+| 🟢 | Polish, convenience, minor |
+| ⚪ | Research / exploratory / bug bounty |
+
+---
+
+# SECTION A: Bugs & Stability Fixes
+
+## A1 — Thread Safety
+
+- [x] `A1.1` 🔴 — Make `g_exploitDone`, `g_patching_in_progress` atomic (`_Atomic bool` or `os_atomic`)  
+  _Prompt:_ "Change g_exploitDone and g_patching_in_progress in Tweak.m to use _Atomic bool or os_atomic_store/os_atomic_load. These are read from multiple dispatch queues and the main thread without any memory barrier."
+
+- [ ] `A1.2` 🔴 — Audit all `proc_self()`, `kread64`, `kwrite64` call sites for missing PAC strip  
+  _Prompt:_ "Audit every call to kread64/kwrite64 in kexploit/ and sandbox_escape.m. List every site that reads a kernel pointer but doesn't call xpaci() or kread_ptr() afterward. This causes bogus pointer derefs on arm64e devices."
+
+- [x] `A1.3` 🟠 — `borrow_sandbox_ext()` null-pointer safety + multi-daemon (cfprefsd, securityd, notifyd, lsd)
+  _Prompt:_ "In sandbox.m, borrow_sandbox_ext() calls proc_find_by_name('cfprefsd') without checking if the result is NULL. Add a guard that returns -1 if proc_find_by_name fails. Then extend it to try 'securityd', 'notifyd', 'cfprefsd' in a loop."
+
+- [x] `A1.4` 🟠 — `minizip` function pointer validation — check all 13, not just 2  
+  _Prompt:_ "In Tweak.m loadMinizip(), g_minizipLoaded is set to (p_zipOpen64 && p_unzOpen64). Change boolean to true only if ALL 13 function pointers are non-NULL. Add TweakLog for each missing function."
+
+- [x] `A1.5` 🟡 — Wild pointer deref in `vnode_get_child_vnode` infinite loop (maxIter=4096 guard)  
+  _Prompt:_ "In vnode.m vnode_get_child_vnode(), if the namecache chain loops (corrupted data), the while(1) loop never exits. Add a max iteration counter (e.g. 4096) and return -1 if exceeded."
+
+- [ ] `A1.6` 🟡 — `ensureSSVActive` mutex deadlock possibility with `g_patching_in_progress`  
+  _Prompt:_ "Analyze the call graph of ensureSSVActive() → patch_sandbox_ext() → back to ensureSSVActive(). If any code path re-enters the mutex, we deadlock. Document or add a re-entrancy guard."
+
+- [x] `A1.7` 🟡 — Hardcoded APFS fsnode offsets → named constants in offsets.h (v_data+0x70/0x80/0x84/0x88)  
+  _Prompt:_ "Move v_data+0x80 (uid), +0x84 (gid), +0x88 (mode) from hardcoded magic numbers in permission_utils.m into named constants in offsets.h. Add per-iOS-version overrides. Same for FilzaPadlockBypass.xm v_data+0x70 (UF_IMMUTABLE)."
+
+- [ ] `A1.8` 🟡 — `runSSVDiagnosticsOnce` doesn't clean up on crash  
+  _Prompt:_ "Wrap runSSVDiagnosticsOnce in a @try/@catch or signal handler so the diagnostic directory is always cleaned up even if patch_sandbox_ext() crashes mid-flight."
+
+- [ ] `A1.9` 🟢 — `scheduleExploitOnce` double-registers notification observers  
+  _Prompt:_ "scheduleExploitOnce uses dispatch_once but inside it adds observers for UIApplicationDidFinishLaunching and UIApplicationDidBecomeActive. If the app is backgrounded and re-launched, these fire again — but dispatch_once prevents re-execution so the observer list only has one copy. Verify no leak."
+
+- [x] `A1.10` 🟢 — `TweakLog` is NOT thread-safe (fopen/fclose race) → pthread_mutex_t guard  
+  _Prompt:_ "The shared TweakLog() in utils/tweak_log.h can have two threads calling fopen on the same path simultaneously. Add a pthread_mutex_t guard around the entire function."
+
+- [x] `A1.11` 🟡 — `TweakLog` mutex deadlock if signal handler calls TweakLog (BB-008) → use trylock with stderr fallback  
+  _Prompt:_ "Add pthread_mutex_trylock() to TweakLog. If the lock fails (held by another thread during signal handling), write to stderr instead. This prevents deadlock if an exception handler thread calls TweakLog while the main thread holds the lock."
+
+- [x] `A1.12` 🔴 — `_Atomic bool` reads/writes need `memory_order_acquire`/`memory_order_release` for cross-thread visibility (BB-009)  
+  _Prompt:_ "Replace bare `g_exploitDone = true` with `atomic_store_explicit(&g_exploitDone, true, memory_order_release)` and `if (g_exploitDone)` with `if (atomic_load_explicit(&g_exploitDone, memory_order_acquire))`. Same for g_patching_in_progress. Include <stdatomic.h>."
+
+- [x] `A1.13` 🟡 — Add sanity check: verify APFS fsnode `mode & 0777` is ≤ 0777 before writing ownership fields (BB-012)  
+  _Prompt:_ "In apply_permissions_kernel() in permission_utils.m, read the current mode from v_data+off_apfs_fsnode_mode before writing. Verify it's a valid POSIX mask (0-0777). If it's garbage, the offset is wrong and we should abort instead of corrupting kernel memory."
+
+- [x] `A1.14` 🔴 — Verify thread/machine offsets for A16/A17/A18 on iOS 26.0.1 before any writes (BB-011)  
+  _Prompt:_ "Add a 'known good' verification in kexploit_opa334.m: after offset resolution but before any kwrite, read the value at off_thread_machine_kstackptr. It should be a valid kernel stack address (aligned to 16, within VM_MIN/VM_MAX). If it fails, log and return -1. This prevents corrupting kernel memory with wrong offsets."
+
+---
+
+## A2 — Filza Compatibility
+
+- [ ] `A2.1` 🟠 — Investigate and fix Filza 4.0.2 crash  
+  _Prompt:_ "Obtain Filza 4.0.2 IPA. Decompile it with class-dump or jtool2. Compare NSFileManager subclasses between 4.0.0 and 4.0.2. Look for renamed classes, removed selectors, or changed method signatures in TGRootFileManager, Zipper, TGAlertController, NZFileBrowserController, NZFileItem. Document what broke."
+
+- [ ] `A2.2` 🟡 — Padlock bypass: detect if target classes exist at load time  
+  _Prompt:_ "In FilzaPadlockBypass.xm, add a %ctor that does NSClassFromString for every hooked class (NZFileBrowserController, NZDirectoryController, NZFileItem, NZFileManager, NZTextEditor, NZFileViewer). Log which classes are missing. If all are missing, set a flag to skip all hooks."
+
+- [ ] `A2.3` 🟢 — Test with Filza 4.0.0 on iOS 17.0 and 18.0 for regression  
+  _Prompt:_ "Create a test matrix: Filza 4.0.0 × iOS 17.0, 17.7, 18.0, 18.7, 26.0. For each combo, test: launch, browse /System, create a file, delete a file, zip Documents, unzip to /var/tmp. Mark pass/fail."
+
+---
+
+## A3 — Kernel Exploit Robustness
+
+- [ ] `A3.1` 🔴 — Kernel panic recovery: detect previous crash, disable exploit  
+  _Prompt:_ "Write a crash_counter mechanism: after kexploit_opa334() succeeds, write a timestamp to /var/mobile/Documents/.filza_last_success. On TweakInit, check if .filza_last_success was NOT written AND .filza_tweak_disable is absent — this means last launch crashed during exploit. After 3 detected crashes, create .filza_tweak_disable to prevent infinite reboot loops."
+
+- [ ] `A3.2` 🔴 — A18 device pe_v2: handle mach_vm_allocate failure for 2GB  
+  _Prompt:_ "In kexploit_opa334.m pe_v2(), the 2GB allocation may fail on memory-constrained devices (iPhone with many apps in background). Add a retry with smaller sizes (1GB, 512MB, 256MB) before giving up. Log each attempt."
+
+- [ ] `A3.3` 🟠 — Socket spray failure: handle `socket(AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6)` returning -1  
+  _Prompt:_ "In spray_socket(), if socket() returns -1, the function returns -1 but the caller only checks for MACH_PORT_NULL. Also the returned value is cast to fileport_t. Add proper error propagation up to pe_v1/pe_v2 so the outer loop can retry."
+
+- [ ] `A3.4` 🟠 — `physical_oob_write_mo` async corruption detection  
+  _Prompt:_ "physical_oob_write_mo() does 20 iterations without verifying the write succeeded (unlike the read counterpart which checks the marker). Add a read-back verification: after each write loop, call physical_oob_read_mo and compare the first 8 bytes with what was intended. If they don't match, log and retry."
+
+- [ ] `A3.5` 🟡 — Wired page leak in pe_v2 error path  
+  _Prompt:_ "In pe_v2(), if the exploit succeeds, the cleanup loop `for (NSNumber *addr in wiredAddrs)` deallocates remaining wired pages. But if mach_vm_allocate fails mid-loop or the function returns early due to a failure, wiredAddrs may contain pages that were mlock'd but never freed. Add a cleanup block on all return paths."
+
+- [x] `A3.6` 🟡 — `highestSuccessIdx` grows unbounded across exploit attempts → reset per call  
+  _Prompt:_ "highestSuccessIdx is a global that tracks the best try index for the OOB read race. It grows across multiple exploit attempts. On iOS 26 with potentially different kernel memory layout, this could cause infinite retry (tryIdx goes up to highestSuccessIdx+100 which is now a huge number). Reset to 100 on each new exploit attempt."
+
+---
+
+# SECTION B: Feature Additions
+
+## B1 — Multi-App Support
+
+- [ ] `B1.1` 🟠 — Generic sandbox escape for any app, not just Filza  
+  _Prompt:_ "Modify FilzaApplySandboxExt.plist to accept an array of bundle IDs (or a wildcard). The Tweak.m hooks for TGRootFileManager, Zipper, NZFileBrowserController are Filza-specific, so they should be guarded by a `if (isFilzaProcess)` check. All NSFileManager, sandbox_escape, and kexploit hooks work universally. Add a separate .plist key 'SkipAppSpecificHooks'."
+
+- [ ] `B1.2` 🟠 — Config file for per-app settings  
+  _Prompt:_ "Create /var/mobile/Documents/.filza_tweak_config.plist with keys: EnabledBundles (array of strings), RetryAttempts (int), EnableSSV (bool), LogLevel (string: debug/info/warn). Read at TweakInit. If EnabledBundles is empty or contains current bundle, proceed; otherwise unload."
+
+- [ ] `B1.3` 🟡 — Test with: Santander, iFile, iExplorer, terminal emulators  
+  _Prompt:_ "Test the generic sandbox escape + kexploit with these apps. Document which ones work and which crash. For each non-Filza app: does the app's own file manager pick up the sandbox escape? Or does it need custom hooks?"
+
+- [ ] `B1.4` 🟢 — Standalone .ipa with embedded dylib (no jailbreak required?)  
+  _Prompt:_ "Research: Can we build an .ipa that includes FilzaApplySandboxExt.dylib + a minimal file browser, signed with ldid, and installed via TrollStore or sideloading? This would remove the jailbreak requirement. The kernel exploit works from any process — the only constraint is the sandbox being tight enough to run the exploit."
+
+---
+
+## B2 — Runtime Control
+
+- [x] `B2.1` 🟠 — Runtime disable toggle via flag file (TWEAK_DISABLE_FLAG checked in TweakInit + runExploit)  
+  _Prompt:_ "Add a check at the top of every hook function: if /var/mobile/Documents/.filza_tweak_disable exists, call %orig and return immediately. Also check in runExploit before starting. Add a convenience function `bool tweak_is_disabled(void)`."
+
+- [ ] `B2.2` 🟡 — Reload config without killing Filza  
+  _Prompt:_ "Add a file monitor using dispatch_source (Vnode/DISPATCH_VNODE_WRITE) on the config plist at /var/mobile/Documents/.filza_tweak_config.plist. When it changes, re-read and apply new settings (debug bypass, SSV enable, retry count)."
+
+- [ ] `B2.3` 🟢 — In-app status bar showing exploit state  
+  _Prompt:_ "Add a small UIWindow overlay (like FLEX) that shows: exploit status (running/done/failed), SSV active (yes/no), sandbox escaped (yes/no), current log tail (last 5 lines). Toggle with a gesture or notification."
+
+---
+
+## B3 — Power User Features
+
+- [ ] `B3.1` 🟡 — Built-in terminal emulator / command runner  
+  _Prompt:_ "Add a hidden URL scheme handler (filza-tweak://run?cmd=ls+/) that runs a shell command with the escaped sandbox and returns output. This effectively turns Filza into a root shell. Consider security implications: anyone with the URL can run commands."
+
+- [ ] `B3.2` 🟡 — Process list with kill/suspend capability  
+  _Prompt:_ "Use kutils.h proc_find() + proc_get_p_name() to enumerate all processes from kernel memory. Display in a table view. Add swipe-to-kill (task_terminate via kernel write). This is an iOS task manager without any entitlement."
+
+- [ ] `B3.3` 🟡 — Keychain viewer / dumper  
+  _Prompt:_ "Research the keychain SQLite database at /private/var/Keychains/keychain-2.db. With kernel R/W, can we bypass the keychain access control and read raw rows? Can we decrypt keychain items that are protected by the device UID?"
+
+- [ ] `B3.4` 🟡 — TCC database viewer / modifier  
+  _Prompt:_ "The TCC (Transparency Consent Control) database at /private/var/mobile/Library/TCC/TCC.db controls which apps can access camera, mic, photos, contacts, etc. With full filesystem R/W from the sandbox escape, we can: read all entries, add new entries granting our app all permissions, or delete entries to bypass consent prompts. Write a SQLite browser for this."
+
+- [ ] `B3.5` 🟢 — Hex editor for binary files  
+  _Prompt:_ "Add a hex dump view to Filza's file viewer. Use hexdump.c as the backend. Allow editing individual bytes and writing back with SSV bypass. This enables binary patching of system binaries."
+
+- [ ] `B3.6` 🟢 — File diff viewer  
+  _Prompt:_ "Add a 'diff' button in Filza that compares two selected files side-by-side. Simple line-based diff algorithm. Useful for before/after comparison when editing system plists."
+
+- [ ] `B3.7` 🟢 — Network traffic capture (pcap)  
+  _Prompt:_ "Create a raw socket or use BPF to capture network traffic from within the sandbox-escaped process. Dump to .pcap file. This enables network debugging of any iOS app without a proxy."
+
+---
+
+## B4 — Developer / Debug Features
+
+- [ ] `B4.1` 🟡 — Kernel memory hex dump UI  
+  _Prompt:_ "Add a UI text field where the user enters a kernel address (hex), and the app displays a 256-byte hex dump using kreadbuf. This is a kernel debugger built into Filza. Add a guard that validates the address against VM_MIN/VM_MAX before reading."
+
+- [ ] `B4.2` 🟡 — Export kernel struct offsets as JSON  
+  _Prompt:_ "After offsets_init() completes, dump all offset values as a JSON file to /var/mobile/Documents/kernel_offsets.json. Include device info (hw.machine, iOS version, kernel version). Useful for sharing offset tables with the community."
+
+- [ ] `B4.3` 🟢 — XPF integration: run patchfinder from within the app  
+  _Prompt:_ "Currently init_xpf() is in kpf/patchfinder.m but never called from Tweak.m (offsets are hardcoded). Add a button or config flag that runs init_xpf() to dynamically resolve offsets instead of using the hardcoded table. Compare results against hardcoded values and log discrepancies."
+
+- [ ] `B4.4` 🟢 — System info panel  
+  _Prompt:_ "Display: iOS version, build number, kernel version, device model, CPU family, PAC support, T1SZ, kernel base, kernel slide, exploit success rate. Useful for one-glance diagnostics."
+
+---
+
+# SECTION C: Security Research & Bug Bounty
+
+## C1 — iOS Kernel Vulnerability Hunting
+
+- [ ] `C1.1` ⚪ — Analyze DarkSword's ICMPv6 + IOSurface technique for additional primitives  
+  _Prompt:_ "The DarkSword exploit uses getsockopt on ICMPv6 sockets to leak kernel memory. Study: can we extend this to arbitrary free (UaF)? Can we corrupt the ICMPv6 filter pointer for write-what-where? Document the exact kernel structures involved and look for additional attack surface in inpcb, socket, and icmp6_filter handling."
+
+- [ ] `C1.2` ⚪ — Investigate `physical_oob_read_mo` race window for info leak  
+  _Prompt:_ "The race between pwritev and mach_vm_map creates a window where the physical page backing is freed but the virtual mapping is still accessible. This is a classic info leak primitive. Can we use this to leak kernel ASLR slide without any kernel R/W? Write a clean proof-of-concept."
+
+- [ ] `C1.3` ⚪ — IOSurface race condition research  
+  _Prompt:_ "The exploit uses IOSurfaceCreate with a physical address to create a mapping that survives deallocation. Research: are there other IOSurface properties that can be abused? Look at IOSurfaceRootUserClient external methods for potential arbitrary kernel free or reference count bugs."
+
+- [ ] `C1.4` ⚪ — MIG filter bypass: document the gadget chain  
+  _Prompt:_ "MigFilterBypassThread.m patches migLock, migSbxMsg, and migKernelStackLR in kernel memory. Document EXACTLY which functions are patched, what the original values were, and what they're replaced with. This is a powerful technique for bypassing MIG-based sandbox restrictions. Could this be used independently of the kernel exploit for other attacks?"
+
+- [ ] `C1.5` ⚪ — Search for new kernel vulns: sysctl OOB  
+  _Prompt:_ "Audit all sysctls accessible from the sandbox. Use syz-repro or manual fuzzing to find sysctl handlers that have OOB reads/writes. Focus on networking sysctls (net.inet.*, net.inet6.*) since the exploit already touches these. Use the kernel R/W to verify any suspected vulnerabilities."
+
+- [ ] `C1.6` ⚪ — Search for new kernel vulns: IOUserClient external method dispatch  
+  _Prompt:_ "Enumerate all IOKit services accessible from the container sandbox. For each, enumerate external methods via IOConnectCallMethod. Look for scalar/struct input validation failures that could lead to kernel OOB or type confusion. Use KTRR/KERNEL RW to verify."
+
+- [ ] `C1.7` ⚪ — Search for new kernel vulns: XPC service handlers  
+  _Prompt:_ "Use the sandbox escape to enumerate all XPC services. Fuzz each service's protocol with crafted messages. Look for: unvalidated integer types leading to allocation size errors, missing bounds checks on array indices, or use-after-free in async reply handlers."
+
+---
+
+## C2 — Apple Bug Bounty: Specific Targets
+
+- [ ] `C2.1` ⚪ — TCC bypass via kernel-level .db modification (up to $100,000)  
+  _Prompt:_ "Research Apple Security Bounty categories for TCC bypass. With kernel R/W + filesystem access, we can modify TCC.db directly. Create an automated PoC that: 1) escapes sandbox, 2) modifies TCC.db to add a camera/mic permission entry, 3) demonstrates the permission is active without any user prompt. Document the full chain. Submit to Apple if novel (they may consider this 'requires kernel access' and thus out of scope — check)."
+
+- [ ] `C2.2` ⚪ — Secure Enclave / SEP attack surface (up to $250,000)  
+  _Prompt:_ "Research: Can kernel R/W be used to attack the Secure Enclave Processor? Look at SEP driver (AppleSEPManager) communication path. What happens if we corrupt the shared memory ring buffer between AP and SEP? Can we cause a SEP panic that reveals secure data? This is high-value bug bounty territory."
+
+- [ ] `C2.3` ⚪ — AMFI / code signing bypass (up to $150,000)  
+  _Prompt:_ "With kernel R/W, modify AMFI flags for our process (proc->p_flag bit P_AMFI_DISABLED). Then attempt to load unsigned code or bypass library validation. Document the exact kernel memory write needed. If this allows arbitrary unsigned dylib loading on a non-jailbroken device, it qualifies for bug bounty."
+
+- [ ] `C2.4` ⚪ — Kernel code execution via ROP chain (up to $250,000)  
+  _Prompt:_ "Current exploit gives kernel R/W. Can we escalate to kernel code execution? Research: overwrite a function pointer (sysent table, IOKit vtable, mach trap table) with a gadget address. Build a ROP chain that calls copyout() to send kernel memory to userspace, or modifies the root vnode to give us file access. This demonstrates full kernel compromise."
+
+- [ ] `C2.5` ⚪ — PAC bypass technique research (up to $150,000)  
+  _Prompt:_ "On arm64e devices, kernel pointers are PAC-signed. Our exploit uses xpaci() to strip PAC bits for reads, but writes need re-signing. Research: can we leverage the PACIA gadget found in PAC.m to re-sign arbitrary pointers? Or can we find a signing oracle in the kernel (a function that signs pointers for us based on controlled input)? This would enable arbitrary kernel object forgery."
+
+- [ ] `C2.6` ⚪ — MTE (Memory Tagging Extension) bypass for A19/M5  
+  _Prompt:_ "iPhone 17 and M5 added MTE which tags all heap allocations. The DarkSword exploit relies on heap spraying with fake kernel objects — MTE breaks this because the tags won't match. Research: can we leak the MTE tag generation key? Can we coerce the allocator to reuse a specific tag? Is there a deterministic tag prediction weakness? This is the next frontier."
+
+- [ ] `C2.7` ⚪ — Kernel info leak for KASLR bypass (up to $25,000)  
+  _Prompt:_ "Can we leak the kernel slide without the full exploit? Look for: /proc interfaces that expose kernel addresses, sysctl OIDs that return kernel pointers, kdebug events with kernel addresses, or IOSurface properties that leak physical addresses. A clean KASLR bypass qualifies for a lower-tier bug bounty."
+
+- [ ] `C2.8` ⚪ — Code signing bypass via kernelcache remount  
+  _Prompt:_ "The SSV mounts the root filesystem as read-only with signed hashes. Our overwrite_system_file() changes the mount flag to writable, writes, then restores it. Can we do this permanently? What if we modify the trustcache to trust our own code hash? Research the trustcache structure and see if kernel R/W can add entries."
+
+---
+
+## C3 — Practical Attack Chains
+
+- [ ] `C3.1` ⚪ — Full chain: app install → sandbox escape → persistence → exfiltration  
+  _Prompt:_ "Document a complete attack scenario: user installs a malicious .ipa (via enterprise cert or social engineering), the app exploits DarkSword to escape sandbox, then: installs a launch daemon plist in /Library/LaunchDaemons/, copies a payload dylib to /usr/lib/, and sets up a reverse shell that survives reboot. This demonstrates impact for a bug bounty report."
+
+- [ ] `C3.2` ⚪ — iCloud Keychain exfiltration  
+  _Prompt:_ "With kernel R/W, locate the iCloud Keychain sync daemon's process. Read its memory to extract the keychain decryption keys. Then read /private/var/Keychains/keychain-2.db and decrypt entries. This extracts Safari passwords, Wi-Fi passwords, credit cards, and app credentials stored in iCloud Keychain."
+
+- [ ] `C3.3` ⚪ — iMessage database exfiltration  
+  _Prompt:_ "With filesystem R/W, copy /private/var/mobile/Library/SMS/sms.db (iMessage/SMS database). This contains all messages including deleted ones (SQLite retains data until VACUUM). Parse it and extract all conversations. This is a privacy-critical data exfiltration path."
+
+- [ ] `C3.4` ⚪ — Apple Pay / Wallet NFC emulation  
+  _Prompt:_ "Research: can kernel R/W be used to interact with the NFC controller? Look at the NFC driver in IOKit (PN548, etc.). Can we read card data that's been provisioned to Apple Pay? Can we emulate a payment? This is extremely sensitive and potentially high-value for bug bounty."
+
+---
+
+# SECTION D: Code Quality & Architecture
+
+## D1 — Refactoring
+
+- [ ] `D1.1` 🟡 — Split Tweak.m into multiple files  
+  _Prompt:_ "Tweak.m is 1218 lines and does too many things: hooks, exploit orchestration, SSV activation, diagnostics, logging, UI bypass. Split into: TweakHooks.m (all method swizzling), TweakExploit.m (runExploit + retry), TweakDiagnostics.m (runSSVDiagnosticsOnce), TweakUI.m (uiDebugBypass flag). Keep Tweak.m as the %ctor entry point only."
+
+- [ ] `D1.2` 🟡 — Create a `state.h` for all global state  
+  _Prompt:_ "Move g_exploitDone, g_patching_in_progress, g_ssv_active, g_ui_debug_bypass, and all static globals scattered across files into a single state.h/state.m module with getter/setter functions. This makes state transitions auditable and prevents extern spaghetti."
+
+- [x] `D1.3` 🟡 — Replace printf()/NSLog() with TweakLog() in sandbox.m borrow + sandbox_escape.m (all 18 calls)  
+  _Prompt:_ "Offsets.m, sandbox.m, vnode.m, file.m, kutils.m, krw.m all use printf() for debug output. These go to stdout which in Filza goes nowhere (the app doesn't have a TTY). Replace all with TweakLog() so debug output actually reaches the log file. Add a compile-time flag to disable verbose kernel debug in release builds."
+
+- [ ] `D1.4` 🟢 — Add error code enum for all functions  
+  _Prompt:_ "Right now functions return 0, -1, or a magic number. Create an error code enum: TWEAK_OK, TWEAK_ERR_EXPLOIT_FAILED, TWEAK_ERR_SANDBOX_ESCAPE_FAILED, TWEAK_ERR_SSV_ACTIVATION_FAILED, TWEAK_ERR_KERNEL_PTR_INVALID, etc. Use consistently."
+
+- [ ] `D1.5` 🟢 — Add `__attribute__((cleanup))` for fd/port cleanup  
+  _Prompt:_ "Many functions use open() and close() with early returns that leak fds. Add a cleanup attribute or create a scoped_fd wrapper that auto-closes. This prevents fd exhaustion when the exploit retries multiple times in the same process."
+
+---
+
+## D2 — Testing Infrastructure
+
+- [ ] `D2.1` 🟡 — Unit tests for offset table  
+  _Prompt:_ "Write a test script (Python or Swift) that reads /var/mobile/Documents/kernel_offsets.json (from B4.2) and validates: all offsets are non-zero, ptr fields are within VM_MIN/VM_MAX, sizeof fields are reasonable (<4096), no duplicates. Run after each iOS version bump."
+
+- [ ] `D2.2` 🟡 — Regression test script  
+  _Prompt:_ "Write a shell script that runs inside Filza (via the command runner from B3.1 if implemented, or via a standalone test dylib). Tests: write to /var/tmp, write to /System/Library/.test, create dir in /usr/lib/.test, chmod a file, delete a file, stat a vnode. All should pass. Output pass/fail to /tmp/filza_tests.log."
+
+- [ ] `D2.3` 🟢 — Fuzzing harness for vnode operations  
+  _Prompt:_ "Write a fuzzer that randomly calls vnode_redirect_folder, vnode_redirect_file, hide_path, reveal_path on random paths. Run in a tight loop. Goal: trigger a kernel panic via corrupted vnode data pointer. If you find one, you have a new kernel bug."
+
+- [ ] `D2.4` 🟢 — Memory pressure test  
+  _Prompt:_ "While the exploit is running (socket spray + 2GB wired pages), simultaneously allocate 100MB in the app process. Does the exploit still succeed or does it fail gracefully? If the app is killed by jetsam, the exploit didn't handle low memory properly."
+
+---
+
+## D3 — Documentation
+
+- [ ] `D3.1` 🟢 — Architecture decision records  
+  _Prompt:_ "Create docs/adr/ directory. Write one ADR for each major decision: why ICMPv6 socket technique was chosen, why vnode redirection for SSV instead of remount, why offset tables are hardcoded instead of always using XPF, why pthread_mutex over dispatch_semaphore for SSV."
+
+- [ ] `D3.2` 🟢 — API documentation for kernel primitives  
+  _Prompt:_ "Document every function in krw.h, kutils.h, vnode.h, sandbox.h with: what it does, kernel side effects, calling context requirements (must hold mutex? PAC stripped? safe to call from main thread?), return value semantics."
+
+- [ ] `D3.3` 🟢 — Threat model document  
+  _Prompt:_ "Write docs/threat-model.md: what attacker model does this tweak assume? What's the trust boundary? What would Apple need to change to break each component? How long can this technique survive across iOS updates?"
+
+---
+
+# SECTION E: iOS Version / Device Expansion
+
+- [ ] `E1.1` 🟠 — iOS 26.1 preparation  
+  _Prompt:_ "Set up monitoring: when iOS 26.1 beta drops, immediately obtain the kernelcache. Run XPF on it. Compare all offsets with the 26.0 table. Document every changed offset. Add a new block in offsets.m for 26.1+. Test on a real device if available."
+
+- [ ] `E1.2` 🟡 — iOS 25.x backport  
+  _Prompt:_ "Does iOS 25 exist? If yes, does our offset table cover it? The offsets_init range check allows 17.0–26.0.x. If there's a 25.x, we need a block for it. Check the kernel version from the XNU source code drop."
+
+- [ ] `E1.3` 🟡 — iPad-specific testing  
+  _Prompt:_ "Test on iPad Pro (M1/M2/M4), iPad Air, iPad mini. Some iPads have different kernel cache layouts (larger page sizes, different device tree). Verify offsets are correct for iPad-specific SoCs."
+
+- [ ] `E1.4` 🟢 — Apple TV / HomePod  
+  _Prompt:_ "tvOS uses the same XNU kernel. Can the exploit run on Apple TV? The socket spray + IOSurface technique should work. But tvOS has no Filza. Test with a standalone test app to verify kernel R/W works."
+
+- [ ] `E1.5` 🟢 — visionOS  
+  _Prompt:_ "Apple Vision Pro runs visionOS which is based on iOS. Could the exploit work there? The UI is different (no Filza equivalent), but the kernel is similar. Research for curiosity / bug bounty."
+
+---
+
+# SECTION F: Daily Prompts (Copy-Paste Ready)
+
+Use these prompts directly with the AI each day. Format: `Fix A1.1 in [filename]`
+
+### Week 1: Thread Safety & Stability
+
+```
+Day 1: "Implement A1.1 — Make g_exploitDone and g_patching_in_progress use _Atomic bool in Tweak.m. Review all reads/writes to ensure they go through atomic operations."
+
+Day 2: "Implement A1.2 — Audit every kread64/kwrite64 call in kexploit/, sandbox_escape.m, SSVUtils.m, and permission_utils.m for missing xpaci() or kread_ptr() on PAC devices."
+
+Day 3: "Implement A1.3 — Add null-pointer safety to borrow_sandbox_ext() in sandbox.m. Extend to try multiple daemons: cfprefsd, securityd, notifyd."
+
+Day 4: "Implement A1.10 — Add pthread_mutex_t to TweakLog() in utils/tweak_log.h for thread-safe file appending."
+
+Day 5: "Implement A1.4 — Fix minizip validation in Tweak.m: check all 13 function pointers, not just 2. Log which ones are missing."
+```
+
+### Week 2: Filza Compatibility
+
+```
+Day 1: "Implement A2.2 — In FilzaPadlockBypass.xm, add %ctor class existence checks for all hooked classes. Log missing classes."
+
+Day 2: "Implement A2.1 — Research Filza 4.0.2 vs 4.0.0 class differences. Document what changed and why it crashes."
+
+Day 3: "Implement A3.1 — Add crash detection and automatic disable after 3 consecutive kernel panics."
+
+Day 4: "Implement A1.5 — Add max iteration guard to vnode_get_child_vnode() infinite loop."
+
+Day 5: "Implement A3.4 — Add read-back verification to physical_oob_write_mo()."
+```
+
+### Week 3: Feature Additions
+
+```
+Day 1: "Implement B1.1 — Add multi-app support to FilzaApplySandboxExt.plist. Guard Filza-specific hooks with isFilzaProcess check."
+
+Day 2: "Implement B1.2 — Create config plist reader at TweakInit. Support: EnabledBundles, RetryAttempts, EnableSSV, LogLevel."
+
+Day 3: "Implement B2.1 — Add runtime disable toggle via .filza_tweak_disable flag file. Check in every hook + runExploit."
+
+Day 4: "Implement B4.2 — Export all kernel offsets as JSON after offsets_init() completes."
+
+Day 5: "Implement B4.4 — Display system info panel: iOS version, device, CPU family, kernel base, exploit success rate."
+```
+
+### Week 4: Bug Bounty Research
+
+```
+Day 1: "Research C2.1 — TCC bypass via kernel-level TCC.db modification. Write a proof of concept that grants camera access without user consent."
+
+Day 2: "Research C2.3 — AMFI bypass via kernel memory write. Can we set P_AMFI_DISABLED flag for our process?"
+
+Day 3: "Research C2.7 — Find a KASLR info leak. Audit /proc, sysctl, and IOSurface for kernel pointer exposure."
+
+Day 4: "Research C1.2 — Document the physical_oob_read_mo race window as an info leak primitive. Write a clean PoC."
+
+Day 5: "Research C2.4 — Kernel ROP chain building. Find a gadget in the kernelcache that gives us code execution from kernel R/W."
+```
+
+### Week 5+: Device Matrix Testing
+
+```
+Day 1: "Implement D2.2 — Write a regression test script that validates sandbox escape + SSV write after exploit."
+
+Day 2: "Implement E1.1 — Prepare for iOS 26.1: write a script that compares XPF output between 26.0.1 and 26.1 kernelcaches."
+
+Day 3: "Implement D1.1 — Split Tweak.m into TweakHooks.m + TweakExploit.m + TweakDiagnostics.m + TweakUI.m."
+
+Day 4: "Implement B3.4 — TCC database viewer: read /private/var/mobile/Library/TCC/TCC.db and display in a table."
+
+Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, read decryption keys from its memory, decrypt keychain.db entries."
+```
+
+---
+
+# SECTION F: New Exploit Techniques (inspired by kfd, TrollStore, opainject)
+
+## F1 — PUAF as Fallback Exploit
+
+- [ ] `F1.1` ⚪ — Study kfd's PhysPuppet (CVE-2023-23536, $52.5K) for A12-A15 fallback  
+  _Prompt:_ "Read felix-pb/kfd/writeups/physpuppet.md. The exploitation is through IOSurface manipulation. Can we implement physpuppet as a fallback if pe_v1 fails? Our codebase already has IOSurface framework linked. Write a puaf_physpuppet.c file that fits into our kexploit/ directory."
+
+- [ ] `F1.2` ⚪ — Study kfd's Landa (CVE-2023-41974, $70K) — reachable from App Sandbox  
+  _Prompt:_ "Read felix-pb/kfd/writeups/landa.md. Landa uses a vulnerability in IOSurface event handling. Check if this was fixed in iOS 17.0. If our target is 17.0+, it's patched — but the writeup is valuable for understanding PUAF primitives."
+
+- [ ] `F1.3` ⚪ — Implement `kopen()`-style clean API for our exploit  
+  _Prompt:_ "Refactor kexploit_opa334() to match kfd's clean API: kopen(puaf_pages, puaf_method, kread_method, kwrite_method). Hide the complexity behind a function that returns success/failure. This makes the exploit reusable for other projects."
+
+- [ ] `F1.4` ⚪ — Write detailed DarkSword writeup (like kfd's writeups/)  
+  _Prompt:_ "Write a dark-sword.md document explaining: (1) ICMPv6 socket spray technique, (2) physical OOB read/write via IOSurface, (3) how the race between pwritev and mach_vm_map creates the primitive, (4) how socket PCB corruption enables kernel R/W. Use kfd's writeup style as reference. Include diagrams."
+
+## F2 — Cross-Process Injection (opainject-style)
+
+- [ ] `F2.1` ⚪ — Extract sandbox_escape into standalone dylib injectable into any process  
+  _Prompt:_ "Study opa334/opainject — it uses ROP chains to call dlopen() in a remote process. Can we build a standalone dylib that: (1) achieves kernel R/W via DarkSword, (2) walks the target process's sandbox extension table, (3) patches it to '/'. Make it work WITHOUT MobileSubstrate (just as a dylib you inject)."
+
+- [ ] `F2.2` ⚪ — Implement ROP-based dylib injection for iOS 26  
+  _Prompt:_ "opainject's ROP method (rop_inject.m) constructs a ROP chain on the target thread's stack. Study the gadget finding technique. Can we use our kernel R/W to find gadgets in the kernelcache instead of userspace? This would bypass PAC on arm64e."
+
+- [ ] `F2.3` ⚪ — Inject into a system daemon to get CS_PLATFORMIZED  
+  _Prompt:_ "TrollStore notes that `CS_PLATFORMIZED` is needed for tweak injection into system processes. With kernel R/W, can we set the flag on our process or disable the check? Research: proc.p_flag CS_PLATFORMIZED bit position, AMFI trust cache structure."
+
+## F3 — Standalone App (TrollStore-style)
+
+- [ ] `F3.1` ⚪ — Package the exploit as a standalone .ipa installable via TrollStore  
+  _Prompt:_ "Build a minimal SwiftUI app (like kfd's ContentView.swift) that has a single button: 'Exploit'. When pressed, it runs kexploit_opa334() → sandbox_escape() → displays a file browser. Bundle as .ipa, sign with ldid, test with TrollStore."
+
+- [ ] `F3.2` ⚪ — Add arbitrary entitlements via TrollStore's ldid signing  
+  _Prompt:_ "Research TrollStore's entitlement injection: it signs binaries with ldid -S<entitlements.plist> preserving custom entitlements. What entitlements would a standalone kernel exploit app need? com.apple.private.security.no-sandbox? task_for_pid-allow? IOKit access?"
+
+- [ ] `F3.3` ⚪ — Implement persistence: re-exploit on app launch  
+  _Prompt:_ "Unlike the tweak (which loads with Filza), a standalone app must re-run the exploit on each launch. Add a fast path: if /var/mobile/.sbx_check is writable (sandbox already escaped from a previous run), skip the exploit and just re-enable SSV. Store kernel slide across launches."
+
+## F4 — MTE Bypass Research (iPhone 17+)
+
+- [ ] `F4.1` ⚪ — Research MTE tag generation in iOS 26 kernel  
+  _Prompt:_ "iPhone 17 and M5 iPads have MTE (Memory Tagging Extension) which tags all heap allocations with 4-bit tags stored in the top byte of pointers. Our exploit relies on heap spraying (fake kernel objects) — MTE breaks this because object tags won't match. Research: How does XNU select MTE tags? Is the tag deterministic? Can we leak the tag seed from a kernel info leak?"
+
+- [ ] `F4.2` ⚪ — Check if kfd has any MTE workarounds  
+  _Prompt:_ "Search felix-pb/kfd issues and commits for MTE discussion. Does kfd work on M2/M3 Macs with MTE enabled? If so, what technique do they use? Adapt to iOS."
+
+- [ ] `F4.3` ⚪ — MTE tag oracle: find a kernel path that returns allocated heap tags  
+  _Prompt:_ "If we can find any kernel API that returns allocated object pointers to userspace (retain/release pattern, zone statistics, mach port names), we can extract the tag bits and predict future allocations. Search for: kernel pointers leaked via sysctl, proc_info, or IOKit registry properties."
+
+---
+
+# SECTION G: Other App Targets (Beyond Filza)
+
+## G1 — File Managers
+
+- [ ] `G1.1` 🟡 — Add Santander file manager support  
+  _Prompt:_ "Santander (open source iOS file manager) uses different classes than Filza. Reverse-engineer its file browsing controller. Add hooks for its equivalent of NZFileBrowserController. The sandbox escape + SSV bypass should work identically."
+
+- [ ] `G1.2` 🟡 — Add iFile support  
+  _Prompt:_ "iFile was the classic jailbreak file manager. Check if it still compiles for iOS 17+. If so, add hooks for its file operation classes. May need different root helper bypass logic."
+
+## G2 — System Apps
+
+- [ ] `G2.1` ⚪ — Inject into Safari for WebContent sandbox escape  
+  _Prompt:_ "Safari's renderer runs in the WebContent sandbox (tighter than App Sandbox — no file access, no IOKit). Can DarkSword's ICMPv6 spray work from WebContent? kfd's Smith method works from WebContent. Test: can we create sockets from WebContent sandbox?"
+
+- [ ] `G2.2` ⚪ — Inject into SpringBoard for system-wide access  
+  _Prompt:_ "SpringBoard runs as root with full platformization. If we can inject our dylib into SpringBoard (via jailbreak or exploit), the kernel R/W already gives us everything. The sandbox escape is unnecessary for SpringBoard."
+
+- [ ] `G2.3` ⚪ — Inject into installd for permanent IPA sideloading  
+  _Prompt:_ "installd is the daemon that installs IPAs. With kernel R/W from a process injected into installd, we could bypass code signature checks completely. This is like having TrollStore with kernel privileges."
+
+## G3 — Terminal / Shell
+
+- [ ] `G3.1` 🟡 — Test with NewTerm / MobileTerminal  
+  _Prompt:_ "If kernel R/W is achieved from a terminal emulator, can we call system() or posix_spawn() with full filesystem access? The sandbox escape should make /bin/sh accessible. Test: run 'ls /System/Library' after exploit."
+
+- [ ] `G3.2` 🟡 — Embedded SSH server in the tweak  
+  _Prompt:_ "Bundle dropbear SSH server. After sandbox escape, spawn it on port 2222. Connect from any machine. This gives remote root shell via Filza acting as a trojan."
+
+---
+
+# SECTION H: Architecture & Writing
+
+## H1 — Writeup Documentation (kfd-style)
+
+- [ ] `H1.1` ⚪ — Write dark-sword-technique.md  
+  _Prompt:_ "Follow kfd's writeup format: (1) abstract, (2) vulnerability description, (3) primitive achieved, (4) exploitation steps with code snippets, (5) Apple's fix. Include the ICMPv6 socket spray technique and the IOSurface physical OOB race window."
+
+- [ ] `H1.2` ⚪ — Write sandbox-extension-patching.md  
+  _Prompt:_ "Document: (1) how the kernel stores sandbox extensions (struct layout), (2) how we walk from proc to ext_set, (3) what each field patch does, (4) the borrow_sandbox_ext fallback, (5) how Apple could prevent this (integrity check on sandbox data)."
+
+- [ ] `H1.3` ⚪ — Write ssv-bypass-via-vnode.md  
+  _Prompt:_ "Document the SSV architecture (APFS snapshots, MNT_RDONLY flag, seal verification). Explain how vnode data pointer swap bypasses all protections. Discuss why this is possible even with SSV enforcement."
+
+## H2 — Knowledge Base
+
+- [ ] `H2.1` 🟡 — Create iOS kernel exploitation glossary  
+  _Prompt:_ "Write docs/glossary.md defining: PUAF, PPL, KTRR, SPTM, MTE, PAC, SMR, AP, SEP, KASLR, DART, SMMU, IOMMU, AMFI, TCC, SIP, SSV, APFS fsnode. Each entry should be 2-3 sentences with a 'why it matters' note."
+
+- [ ] `H2.2` 🟡 — Create offset resolution guide  
+  _Prompt:_ "Document how to find new kernel struct offsets: (1) get kernelcache from device, (2) decompress with XPF decompress.c, (3) run jtool2 --analyze, (4) use IDA/Ghidra to find struct access patterns, (5) verify against KDK struct dump. Include example walkthrough for one offset."
+
+- [ ] `H2.3` 🟡 — Create a 'how to add a new device/iOS version' checklist  
+  _Prompt:_ "Step-by-step: 1) get kernelcache, 2) run offsets_init locally with print debugging, 3) find which offsets changed, 4) add new block in offsets.m, 5) test on device, 6) commit with device name + iOS version in commit message."
+
+---
+
+# SECTION I: External References & Research Materials
+
+## I1 — Must-Read Repos
+
+| Repo | Stars | Key Takeaway |
+|------|-------|-------------|
+| [felix-pb/kfd](https://github.com/felix-pb/kfd) | 1K | PUAF primitive, clean API, detailed writeups |
+| [opa334/TrollStore](https://github.com/opa334/TrollStore) | 21.9K | CoreTrust AMFI bypass, permasigned IPAs, arbitrary entitlements |
+| [opa334/opainject](https://github.com/opa334/opainject) | 272 | ROP-based dylib injection into remote processes |
+| [opa334/Dopamine](https://github.com/opa334/Dopamine) | — | Modern jailbreak for iOS 15-16 using kfd |
+| [opa334/XPF](https://github.com/opa334/XPF) | — | Kernel offset finder (already integrated in our project) |
+| [34306/FilzaJailedDS](https://github.com/34306/FilzaJailedDS) | — | Original repo this project was forked from |
+
+## I2 — Key CVEs in This Space
+
+| CVE | Name | Bounty | Technique |
+|-----|------|--------|-----------|
+| CVE-2023-23536 | PhysPuppet | $52,500 | IOSurface dangling PTEs |
+| CVE-2023-32434 | Smith | — | WebContent-reachable PUAF |
+| CVE-2023-41974 | Landa | $70,000 | IOSurface event handling UAF |
+| CVE-2022-46689 | MacDirtyCow | — | Kernel write via page table manipulation |
+| — | CoreTrust #1 | — | First AMFI multiple-signers bug |
+| — | CoreTrust #2 | — | Second AMFI bug (TrollStore 2.0) |
+| DarkSword | (unnamed) | Not submitted | ICMPv6 + IOSurface socket corruption → kernel R/W |
+
+---
+
+# SECTION J: W0lfSword-Beta — iOS Exploit Menu
+
+> **W0lfSword-Beta is a SUPERSET of W0lfSword.** It includes every original command (build, deploy, status, audit, log, toggle, offsets, targets, clean, doctor, help) unchanged, plus an interactive exploit menu layer. The original `./W0lfSword` script stays untouched.
+
+## J1 — Interactive Menu (no-args mode)
+
+- [ ] `J1.1` 🟠 — Main menu: arrow-key navigation with arctic wolf theme  
+  _Prompt:_ "When ./W0lfSword-Beta is run with no arguments, show an interactive menu: [1] Quick Exploit, [2] Configure, [3] Deploy Only, [4] Device Manager, [5] Log Viewer, [6] Diagnostics, [7] Profiles, [8] History, [q] Quit. Use `select` or read-based navigation with color highlighting. Same arctic wolf palette as W0lfSword."
+
+- [ ] `J1.2` 🟠 — Quick Exploit — one-button exploit chain  
+  _Prompt:_ "Quick Exploit: read saved config (profile), build .deb, deploy to device, SSH to verify /tmp/FilzaTweak.log shows 'SANDBOX ESCAPED', display success/failure with color. If exploit fails, auto-retry up to configured max. Show live log tail during the process."
+
+- [ ] `J1.3` 🟡 — Configure menu — select exploit method, target app, retries  
+  _Prompt:_ "Interactive configure: pick exploit technique (DarkSword pe_v1/pe_v2/PUAF auto), target app (Filza/Santander/NewTerm/standalone), retry count (1-10), SSV enable toggle, log level. Save to active profile. Show current settings with colored labels."
+
+## J2 — Profile System
+
+- [ ] `J2.1` 🟠 — Save/load exploit profiles (JSON in .w0lfsword/profiles/)  
+  _Prompt:_ "Create a profile system that saves: profile_name, device_ip, target_bundle_id, exploit_method, retry_count, ssv_enabled, last_success_timestamp. Store as JSON files in .w0lfsword/profiles/<name>.json. './W0lfSword-Beta profile save my-ip14' and './W0lfSword-Beta profile load my-ip14'."
+
+- [ ] `J2.2` 🟡 — Profile list with colored status  
+  _Prompt:_ "`./W0lfSword-Beta profile list` shows all saved profiles in a table: name, device IP, target, exploit method, last success date. Color-code: green=last exploit succeeded, red=last failed, dim=untested."
+
+- [ ] `J2.3` 🟢 — Auto-detect profile on startup  
+  _Prompt:_ "On launch, check .w0lfsword/profiles/ for a 'default' profile. If found, auto-load it. If multiple profiles exist but no default, show the list and ask which to use."
+
+## J3 — Device Manager
+
+- [ ] `J3.1` 🟠 — Multi-device management  
+  _Prompt:_ "`./W0lfSword-Beta device add 192.168.1.5 --name 'iPhone 14'` saves device to .w0lfsword/devices.json. `./W0lfSword-Beta device list` shows all devices with ping status, iOS version (via SSH query), last exploit result. `./W0lfSword-Beta device switch <ip>` sets active device."
+
+- [ ] `J3.2` 🟡 — Device info: iOS version, model, kernel version  
+  _Prompt:_ "`./W0lfSword-Beta device info` SSHs into active device and runs: uname -a, sw_vers, sysctl hw.machine hw.cpufamily. Displays in a formatted panel. Caches results for offline viewing."
+
+## J4 — Live Exploit Monitoring
+
+- [ ] `J4.1` 🟠 — Real-time log monitor with exploit state detection  
+  _Prompt:_ "`./W0lfSword-Beta monitor` tail -f /tmp/FilzaTweak.log on device via SSH. Parse incoming lines and display: green spinner during exploit phase, checkmark when 'SANDBOX ESCAPED' detected, red X if 'ERROR' or retry exhausted. Show elapsed time since exploit start. Press Ctrl+C to exit."
+
+- [ ] `J4.2` 🟡 — Exploit stage progress bar  
+  _Prompt:_ "During Quick Exploit, show a progress indicator: [1/5] Building... → [2/5] Deploying... → [3/5] Waiting for exploit... → [4/5] Verifying sandbox escape... → [5/5] Done. Each stage updates in place with color."
+
+## J5 — Exploit History & Stats
+
+- [ ] `J5.1` 🟡 — Exploit attempt logger  
+  _Prompt:_ "After every exploit run (success or failure), append to .w0lfsword/history.json: timestamp, device_ip, ios_version, device_model, exploit_method, retry_count, result (success/fail). `./W0lfSword-Beta history` displays a formatted table."
+
+- [ ] `J5.2` 🟢 — Success rate dashboard  
+  _Prompt:_ "`./W0lfSword-Beta history stats` shows: total attempts, success rate %, avg retries per success, best/worst device, per-iOS-version breakdown. ASCII bar chart for visual comparison."
+
+## J6 — Original W0lfSword Commands (all preserved)
+
+- [ ] `J6.1` 🟠 — Route all original W0lfSword commands through W0lfSword-Beta  
+  _Prompt:_ "W0lfSword-Beta build|extract|deploy|status|audit|log|toggle|offsets|targets|clean|doctor|help — each calls the identical logic from original W0lfSword. Use source or function reuse so there's no code duplication. Original W0lfSword remains untouched."
+
+- [ ] `J6.2` 🟡 — Add --json flag to status/audit/offsets for machine-readable output  
+  _Prompt:_ "`./W0lfSword-Beta status --json` outputs JSON for programmatic use. `./W0lfSword-Beta offsets --json` outputs offset table as JSON. Useful for CI or external tools."
+
+## J7 — Polish
+
+- [ ] `J7.1` 🟢 — Same arctic wolf ASCII art on launch  
+  _Prompt:_ "W0lfSword-Beta shows the same wolf art as W0lfSword, but with 'BETA' tag in the header. Keep the pale blue/gray arctic palette identical."
+
+- [ ] `J7.2` 🟢 — Sound on exploit success (optional, macOS only)  
+  _Prompt:_ "After successful sandbox escape detection in monitor mode, play a system sound (afplay /System/Library/Sounds/Glass.aiff). Toggle with --sound flag."
+
+- [ ] `J7.3` 🟢 — Colored diff output comparing builds  
+  _Prompt:_ "`./W0lfSword-Beta diff` shows git diff with syntax highlighting for .m/.xm/.h files. Useful before deploy to verify what changed."
+
+---
+
+# STATS
+
+| Section | Total Items | Completed | Remaining |
+|---------|------------|-----------|-----------|
+| A1 — Thread Safety | 14 | 10 | 4 |
+| A2 — Filza Compatibility | 3 | 0 | 3 |
+| A3 — Kernel Exploit Robustness | 6 | 1 | 5 |
+| B1 — Multi-App Support | 4 | 0 | 4 |
+| B2 — Runtime Control | 3 | 1 | 2 |
+| B3 — Power User Features | 7 | 0 | 7 |
+| B4 — Developer Features | 4 | 0 | 4 |
+| C1 — Kernel Vuln Hunting | 7 | 0 | 7 |
+| C2 — Bug Bounty Targets | 8 | 0 | 8 |
+| C3 — Attack Chains | 4 | 0 | 4 |
+| D1 — Refactoring | 5 | 1 | 4 |
+| D2 — Testing | 4 | 0 | 4 |
+| D3 — Documentation | 3 | 0 | 3 |
+| E1 — Version/Device Expansion | 5 | 0 | 5 |
+| F1 — PUAF Fallback | 4 | 0 | 4 |
+| F2 — Cross-Process Injection | 3 | 0 | 3 |
+| F3 — Standalone App | 3 | 0 | 3 |
+| F4 — MTE Bypass | 3 | 0 | 3 |
+| G1 — File Managers | 2 | 0 | 2 |
+| G2 — System Apps | 3 | 0 | 3 |
+| G3 — Terminal / Shell | 2 | 0 | 2 |
+| H1 — Writeups | 3 | 0 | 3 |
+| H2 — Knowledge Base | 3 | 0 | 3 |
+| I1 — Reference Repos | — | — | — |
+| I2 — Key CVEs | — | — | — |
+| J1 — Interactive Menu | 3 | 0 | 3 |
+| J2 — Profile System | 3 | 0 | 3 |
+| J3 — Device Manager | 2 | 0 | 2 |
+| J4 — Live Monitoring | 2 | 0 | 2 |
+| J5 — History & Stats | 2 | 0 | 2 |
+| J6 — Original Commands | 2 | 0 | 2 |
+| J7 — Polish | 3 | 0 | 3 |
+| **TOTAL** | **115** | **13** | **102** |
+
+---
+
+*Last updated: 2026-08-09*

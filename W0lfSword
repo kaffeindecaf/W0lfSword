@@ -1,0 +1,761 @@
+#!/bin/bash
+# ╔══════════════════════════════════════════════════════════════╗
+# ║                      W0lfSword v0.8                          ║
+# ║  iOS Kernel Exploit Toolkit — DarkSword Engine              ║
+# ║  Made by kaffeindecaf — github.com/kaffeindecaf             ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# Usage: ./W0lfSword <command> [args...]
+#
+# ── Build & Deploy ──────────────────────
+#   build          — Compile + create .deb
+#   extract        — Extract .dylib from built .deb
+#   deploy  <ip>   — scp + install + restart on device
+#
+# ── Diagnostics ─────────────────────────
+#   status         — Project health overview
+#   audit          — Static analysis (braces, printf, offsets)
+#   log     [n]    — Fetch device debug log (color-coded)
+#   doctor         — Environment check
+#
+# ── Device Control ─────────────────────
+#   toggle  on|off — Enable/disable exploit on device
+#   offsets [ver]  — Validate offset table coverage
+#
+# ── Utilities ──────────────────────────
+#   clean          — Clean build artifacts + temp files
+#   targets        — Show all supported apps/tweaks
+#   help           — Show this message
+
+set -euo pipefail
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_DIR"
+
+# ═══════════════════════════════════════════════════════════════
+#  ARCTIC WOLF COLOR PALETTE
+# ═══════════════════════════════════════════════════════════════
+
+CLR_WOLF='\033[38;5;153m'     # Pale arctic blue
+CLR_ICE='\033[38;5;195m'      # Ice white-blue
+CLR_FROST='\033[38;5;117m'    # Frosted blue
+CLR_SNOW='\033[38;5;255m'     # Bright snow white
+CLR_STEEL='\033[38;5;109m'    # Steel gray-blue
+CLR_MOON='\033[38;5;188m'     # Moonlight gray
+CLR_EYE='\033[38;5;39m'       # Wolf eye blue (for highlights)
+CLR_BLOOD='\033[0;31m'        # Error red
+CLR_GREEN='\033[0;32m'        # Success green
+CLR_AMBER='\033[1;33m'        # Warning amber
+NC='\033[0m'
+BOLD='\033[1m'
+DIM='\033[2m'
+
+ICON_OK="${CLR_GREEN}✓${NC}"
+ICON_ERR="${CLR_BLOOD}✗${NC}"
+ICON_WARN="${CLR_AMBER}⚠${NC}"
+ICON_INFO="${CLR_ICE}ℹ${NC}"
+
+# ═══════════════════════════════════════════════════════════════
+#  ASCII ART — ARCTIC WOLF
+# ═══════════════════════════════════════════════════════════════
+
+show_wolf() {
+    echo -e "${CLR_WOLF}"
+    cat << 'WOLF'
+                             __
+                         .d$$b
+                       .' TO$;\
+                      /  : TP._;
+                     / _.;  :Tb|
+                    /   /   ;j$j
+                _.-"       d$$$$
+              .' ..       d$$$$;
+             /  /P'      d$$$$P. |\
+            /   "      .d$$$P' |\^"l
+          .'           `T$P^"""""  :
+      ._.'      _.'                ;
+   `-.-".-'-' ._.       _.-"    .-"
+ `.-" _____  ._              .-"
+-.(g$$$$$$$b.              .'
+  ""^^T$$$P^)            .(:
+    _/  -"  /.'         /:/;
+ ._.'-'`-'  ")/         /;/;
+`-.-"..--""   " /         /  ;
+.-" ..--""        -'          :
+..--""--.-"         (\      .-(\
+  ..--""              `-\(\/;`
+    _.                      :
+                            ;`-
+                           :\
+                           ;
+WOLF
+    echo -e "${NC}"
+}
+
+show_banner() {
+    echo -e ""
+    show_wolf
+    echo -e "  ${CLR_SNOW}${BOLD}W0lfSword${NC}  ${CLR_WOLF}iOS Kernel Exploit Toolkit${NC}"
+    echo -e "  ${DIM}DarkSword Engine — Made by kaffeindecaf${NC}"
+    echo -e "  ${CLR_STEEL}────────────────────────────────────────────${NC}"
+    echo -e ""
+}
+
+show_banner_mini() {
+    echo -e "${CLR_WOLF}[W0lfSword]${NC} ${DIM}$*${NC}"
+}
+
+show_targets_banner() {
+    echo -e ""
+    echo -e "  ${CLR_SNOW}${BOLD}Available Targets${NC}"
+    echo -e "  ${CLR_STEEL}────────────────────────────────────────────${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  UTILITY FUNCTIONS
+# ═══════════════════════════════════════════════════════════════
+
+check_theos() {
+    if [ -z "${THEOS:-}" ]; then
+        if [ -d "$HOME/theos" ]; then
+            export THEOS="$HOME/theos"
+        else
+            echo -e "  ${ICON_ERR} THEOS not set and ~/theos not found"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+find_deb() {
+    ls -t packages/*.deb 2>/dev/null | head -1
+}
+
+get_device_ip() {
+    if [ -n "${1:-}" ]; then
+        echo "$1"
+        return 0
+    fi
+    if [ -f "$PROJECT_DIR/.device_ip" ]; then
+        cat "$PROJECT_DIR/.device_ip"
+        return 0
+    fi
+    echo ""
+}
+
+step_ok()   { echo -e "  ${ICON_OK} $1"; }
+step_info() { echo -e "  ${ICON_INFO} $1"; }
+step_warn() { echo -e "  ${ICON_WARN} $1"; }
+step_err()  { echo -e "  ${ICON_ERR} $1"; }
+step_hdr()  { echo -e ""; echo -e "  ${CLR_FROST}${BOLD}$1${NC}"; echo -e "  ${CLR_STEEL}$(printf '─%.0s' $(seq 1 ${#1}))${NC}"; }
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: build
+# ═══════════════════════════════════════════════════════════════
+
+cmd_build() {
+    show_banner_mini "compiling..."
+    check_theos || exit 1
+
+    echo ""
+    step_hdr "W0lfSword Build"
+
+    if make package 2>&1 | tail -6; then
+        local deb
+        deb=$(find_deb)
+        if [ -n "$deb" ]; then
+            echo ""
+            step_ok "Build successful"
+            step_info "Package: $(basename "$deb") ($(du -h "$deb" | cut -f1))"
+        else
+            step_warn "Build completed but no .deb found in packages/"
+        fi
+    else
+        echo ""
+        step_err "Build failed — check output above"
+        step_info "Run ${CLR_FROST}./W0lfSword doctor${NC} to diagnose"
+        exit 1
+    fi
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: extract
+# ═══════════════════════════════════════════════════════════════
+
+cmd_extract() {
+    show_banner_mini "extracting dylib..."
+    echo ""
+
+    local deb
+    deb=$(find_deb)
+    if [ -z "$deb" ]; then
+        step_err "No .deb found — run ${CLR_FROST}./W0lfSword build${NC} first"
+        exit 1
+    fi
+
+    step_info "Source: $(basename "$deb")"
+    local extract_dir="/tmp/w0lf_extract_$$"
+    mkdir -p "$extract_dir"
+    dpkg-deb -x "$deb" "$extract_dir/" 2>/dev/null
+    dpkg-deb -e "$deb" "$extract_dir/DEBIAN/" 2>/dev/null
+
+    local dylib
+    dylib=$(find "$extract_dir" -name '*.dylib' -type f 2>/dev/null | head -1)
+    if [ -z "$dylib" ]; then
+        step_err "No .dylib found in package"
+        rm -rf "$extract_dir"
+        exit 1
+    fi
+
+    cp "$dylib" "$PROJECT_DIR/W0lfSword.dylib"
+    step_ok "Extracted: W0lfSword.dylib ($(du -h W0lfSword.dylib | cut -f1))"
+
+    local ftype
+    ftype=$(file W0lfSword.dylib 2>/dev/null | cut -d: -f2-)
+    [ -n "$ftype" ] && step_info "Type: $ftype"
+
+    rm -rf "$extract_dir"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: deploy
+# ═══════════════════════════════════════════════════════════════
+
+cmd_deploy() {
+    local device_ip
+    device_ip=$(get_device_ip "${1:-}")
+
+    if [ -z "$device_ip" ]; then
+        step_err "No device IP specified"
+        echo -e ""
+        echo -e "  ${CLR_FROST}Usage:${NC} ./W0lfSword deploy 192.168.1.5"
+        echo -e "  ${DIM}Or save once: echo '192.168.1.5' > .device_ip${NC}"
+        exit 1
+    fi
+
+    show_banner_mini "deploying to ${CLR_EYE}$device_ip${NC}..."
+    echo ""
+
+    # SSH check
+    if ! ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$device_ip" "echo ok" 2>/dev/null | grep -q ok; then
+        step_err "Cannot SSH to root@$device_ip"
+        step_info "Make sure OpenSSH is installed and device is on same network"
+        exit 1
+    fi
+    step_ok "SSH connected"
+
+    local deb
+    deb=$(find_deb)
+    if [ -z "$deb" ]; then
+        step_err "No .deb found — run ${CLR_FROST}./W0lfSword build${NC} first"
+        exit 1
+    fi
+
+    echo ""
+    step_hdr "Transfer"
+
+    local remote_path="/tmp/$(basename "$deb")"
+    if scp -o StrictHostKeyChecking=no "$deb" "root@$device_ip:$remote_path" 2>/dev/null; then
+        step_ok "Copied $(basename "$deb")"
+    else
+        step_err "scp transfer failed"
+        exit 1
+    fi
+
+    step_hdr "Install"
+    local install_out
+    install_out=$(ssh -o StrictHostKeyChecking=no "root@$device_ip" "dpkg -i '$remote_path' 2>&1; rm -f '$remote_path'")
+    echo -e "  ${DIM}$install_out${NC}"
+    step_ok "Package installed"
+
+    step_hdr "Activate"
+    ssh -o StrictHostKeyChecking=no "root@$device_ip" "killall -9 Filza 2>/dev/null; echo ok" >/dev/null 2>&1
+    step_ok "Process restarted — open app on device"
+
+    echo "$device_ip" > "$PROJECT_DIR/.device_ip"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: status
+# ═══════════════════════════════════════════════════════════════
+
+cmd_status() {
+    show_banner
+
+    # Git
+    local branch dirty
+    branch=$(git branch --show-current 2>/dev/null || echo "?")
+    if git diff --quiet 2>/dev/null; then
+        dirty="${CLR_GREEN}clean${NC}"
+    else
+        dirty="${CLR_AMBER}dirty${NC}"
+    fi
+
+    # Build
+    local deb dylib
+    deb=$(find_deb)
+    dylib=$(find . -name '*.dylib' -not -path './.theos/*' -type f 2>/dev/null | head -1)
+
+    # Device
+    local dev_status="${DIM}not configured${NC}"
+    if [ -f "$PROJECT_DIR/.device_ip" ]; then
+        local saved_ip
+        saved_ip=$(cat "$PROJECT_DIR/.device_ip")
+        if ping -c1 -W1 "$saved_ip" 2>/dev/null | grep -q '1 received'; then
+            dev_status="${CLR_GREEN}$saved_ip reachable${NC}"
+        else
+            dev_status="${CLR_AMBER}$saved_ip (offline)${NC}"
+        fi
+    fi
+
+    # ROADMAP
+    local done=0 total=0 pct=0
+    if [ -f ROADMAP.md ]; then
+        done=$(grep -c '\[x\]' ROADMAP.md 2>/dev/null || echo 0)
+        total=$(grep -c '\- \[.\]' ROADMAP.md 2>/dev/null || echo 0)
+        [ "$total" -gt 0 ] && pct=$(( done * 100 / total ))
+    fi
+
+    echo -e "  ${CLR_FROST}${BOLD}System${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    echo -e "  Git:      branch=${CLR_EYE}$branch${NC}  ($dirty)"
+    if [ -n "$deb" ]; then
+        local age=$(( ($(date +%s) - $(stat -c %Y "$deb" 2>/dev/null || stat -f %m "$deb" 2>/dev/null || echo 0)) / 60 ))
+        echo -e "  Build:    ${CLR_GREEN}$(basename "$deb")${NC} (${age}m ago)"
+    else
+        echo -e "  Build:    ${CLR_BLOOD}not built${NC}"
+    fi
+    if [ -n "$dylib" ]; then
+        echo -e "  Dylib:    ${CLR_FROST}$dylib${NC} ($(du -h "$dylib" | cut -f1))"
+    fi
+    echo ""
+
+    echo -e "  ${CLR_FROST}${BOLD}Device${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    echo -e "  Target:   $dev_status"
+    echo ""
+
+    echo -e "  ${CLR_FROST}${BOLD}Progress${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    echo -e "  ROADMAP:  ${CLR_EYE}$done/$total${NC} done (${pct}%)"
+    echo -e "  Docs:     $(find . -maxdepth 1 -name '*.md' | wc -l) markdown files, $(find . -maxdepth 1 -name '*.sh' | wc -l) scripts"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: audit
+# ═══════════════════════════════════════════════════════════════
+
+cmd_audit() {
+    show_banner_mini "running static analysis..."
+    echo ""
+
+    local issues=0
+
+    step_hdr "Brace Balance"
+    for f in Tweak.m sandbox_escape.m kexploit/sandbox.m kexploit/offsets.m \
+             kexploit/kexploit_opa334.m kexploit/vnode.m utils/permission_utils.m \
+             FilzaPadlockBypass.xm SSV/SSVUtils.m; do
+        [ ! -f "$f" ] && continue
+        local result
+        result=$(python3 -c "
+b=0; p=0
+for c in open('$f').read():
+    if c=='{': b+=1
+    elif c=='}': b-=1
+    elif c=='(': p+=1
+    elif c==')': p-=1
+print(b,p)
+" 2>/dev/null || echo "? ?")
+        local b=$(echo "$result" | awk '{print $1}')
+        local p=$(echo "$result" | awk '{print $2}')
+        if [ "$b" = "0" ] && [ "$p" = "0" ]; then
+            echo -e "    ${ICON_OK} $f" 
+        else
+            echo -e "    ${ICON_ERR} $f (braces=$b parens=$p)"
+            ((issues++)) || true
+        fi
+    done
+    echo ""
+
+    step_hdr "printf → TweakLog"
+    local printf_count
+    printf_count=$(grep -r 'printf(' kexploit/*.m kpf/*.m utils/*.c 2>/dev/null | grep -v '//printf\|snprintf' | wc -l || echo 0)
+    if [ "$printf_count" -gt 0 ]; then
+        echo -e "    ${ICON_WARN} $printf_count printf() calls not yet converted"
+        local main_count=$(grep -c 'printf(' kexploit/kexploit_opa334.m 2>/dev/null || echo 0)
+        echo -e "    ${DIM}  kexploit_opa334.m: $main_count calls${NC}"
+    else
+        echo -e "    ${ICON_OK} All printf() converted to TweakLog()"
+    fi
+    echo ""
+
+    step_hdr "Kernel R/W Safety"
+    local kread_sites
+    kread_sites=$(grep -rn 'kread64(' kexploit/ sandbox_escape.m SSV/ utils/ 2>/dev/null | wc -l || echo 0)
+    echo -e "    ${ICON_INFO} $kread_sites kread64() call sites (manual PAC review needed)"
+    echo ""
+
+    if [ "$issues" -eq 0 ]; then
+        echo -e "  ${CLR_GREEN}${BOLD}Audit passed${NC}"
+    else
+        echo -e "  ${CLR_BLOOD}${BOLD}Audit found $issues issue(s)${NC}"
+    fi
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: log
+# ═══════════════════════════════════════════════════════════════
+
+cmd_log() {
+    local device_ip lines
+    device_ip=$(get_device_ip "${2:-}")
+    lines="${1:-50}"
+
+    if [ -z "$device_ip" ]; then
+        step_err "No device configured — use ${CLR_FROST}./W0lfSword deploy <ip>${NC} first"
+        exit 1
+    fi
+
+    show_banner_mini "fetching last $lines lines from ${CLR_EYE}$device_ip${NC}..."
+    echo ""
+
+    ssh -o StrictHostKeyChecking=no "root@$device_ip" \
+        "tail -$lines /tmp/FilzaTweak.log 2>/dev/null || echo '(no log yet)'" \
+        2>/dev/null | while IFS= read -r line; do
+
+        if   echo "$line" | grep -q '\*\*\*'; then
+            echo -e "  ${CLR_GREEN}${BOLD}$line${NC}"
+        elif echo "$line" | grep -q 'ERROR\|FAILED\|invalid\|failed'; then
+            echo -e "  ${CLR_BLOOD}$line${NC}"
+        elif echo "$line" | grep -q 'WARNING\|warn\|Retry'; then
+            echo -e "  ${CLR_AMBER}$line${NC}"
+        elif echo "$line" | grep -q 'succeeded\|success\|set active=1\|ESCAPED'; then
+            echo -e "  ${CLR_GREEN}$line${NC}"
+        elif echo "$line" | grep -q '\[SSV\]\|\[Tweak\]\|\[SBX\]'; then
+            echo -e "  ${CLR_FROST}$line${NC}"
+        else
+            echo -e "  ${DIM}$line${NC}"
+        fi
+    done
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: toggle
+# ═══════════════════════════════════════════════════════════════
+
+cmd_toggle() {
+    local action="${1:-}"
+
+    if [ "$action" != "on" ] && [ "$action" != "off" ]; then
+        echo -e "  ${CLR_FROST}Usage:${NC} ./W0lfSword toggle on   (disable exploit)"
+        echo -e "         ${CLR_FROST}./W0lfSword toggle off${NC}  (enable exploit)"
+        exit 1
+    fi
+
+    local device_ip
+    device_ip=$(get_device_ip "${2:-}")
+    [ -z "$device_ip" ] && { step_err "No device configured"; exit 1; }
+
+    if [ "$action" = "on" ]; then
+        ssh -o StrictHostKeyChecking=no "root@$device_ip" \
+            "touch /var/mobile/Documents/.filza_tweak_disable" 2>/dev/null
+        step_ok "Exploit DISABLED (flag file created)"
+    else
+        ssh -o StrictHostKeyChecking=no "root@$device_ip" \
+            "rm -f /var/mobile/Documents/.filza_tweak_disable" 2>/dev/null
+        step_ok "Exploit ENABLED (flag file removed)"
+    fi
+    step_info "Restart the target app to apply"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: offsets
+# ═══════════════════════════════════════════════════════════════
+
+cmd_offsets() {
+    local target_ver="${1:-}"
+
+    show_banner_mini "offset coverage..."
+    echo ""
+
+    step_hdr "iOS Version Blocks"
+    if [ -f kexploit/offsets.m ]; then
+        grep -n 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO' kexploit/offsets.m | while read -r line; do
+            local lineno ver
+            lineno=$(echo "$line" | cut -d: -f1)
+            ver=$(echo "$line" | grep -o '@"[^"]*"' | tr -d '@"')
+            echo -e "    ${CLR_FROST}Line $lineno${NC}  →  ${CLR_SNOW}$ver${NC}"
+        done
+    fi
+    echo ""
+
+    step_hdr "SoC Coverage"
+    for cpu in A10 A13Above A15Above A16Above A17Above A18Above; do
+        local count
+        count=$(grep -c "is$cpu" kexploit/offsets.m 2>/dev/null || echo 0)
+        echo -e "    ${cpu}: ${CLR_EYE}$count${NC} override blocks"
+    done
+    echo ""
+
+    if [ -n "$target_ver" ]; then
+        if grep -q "@\"$target_ver\"" kexploit/offsets.m 2>/dev/null; then
+            step_ok "iOS $target_ver — block found"
+        else
+            step_warn "iOS $target_ver — no explicit block (inherits from earlier)"
+        fi
+        echo ""
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: targets
+# ═══════════════════════════════════════════════════════════════
+
+cmd_targets() {
+    show_banner
+
+    show_targets_banner
+    echo -e "  ${CLR_EYE}${BOLD}Current: Filza File Manager${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    echo -e "  Bundle:   com.tigisoftware.Filza"
+    echo -e "  Status:   ${CLR_GREEN}Fully supported${NC}"
+    echo -e "  Hooks:    TGRootFileManager, Zipper, NZFileBrowserController,"
+    echo -e "            NZFileItem, NZDirectoryController, NZFileManager,"
+    echo -e "            NZTextEditor, NZFileViewer, TGAlertController,"
+    echo -e "            LSApplicationWorkspace, ApplicationItem, NSFileManager"
+    echo ""
+
+    show_targets_banner
+    echo -e "  ${CLR_AMBER}${BOLD}Planned: Additional Targets${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    echo ""
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "Santander"  "Open-source file manager"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "iFile"       "Legacy file manager"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "NewTerm"     "Terminal emulator"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "Safari"      "WebContent sandbox escape"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "SpringBoard" "System-wide root"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "installd"    "Permanent IPA sideloading"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "Cydia/Sileo" "Package managers"
+    echo ""
+    echo -e "  ${DIM}See ROADMAP.md Section G for full target list${NC}"
+    echo ""
+
+    show_targets_banner
+    echo -e "  ${CLR_MOON}${BOLD}Exploit Techniques${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    echo ""
+    printf "  ${CLR_STEEL}%-20s${NC} %s\n" "DarkSword"     "ICMPv6 + IOSurface (primary)"
+    printf "  ${CLR_STEEL}%-20s${NC} %s\n" "PUAF/PhysPuppet" "kfd-style fallback (planned)"
+    printf "  ${CLR_STEEL}%-20s${NC} %s\n" "ROP Injection"   "opainject cross-process (planned)"
+    printf "  ${CLR_STEEL}%-20s${NC} %s\n" "MTE Bypass"      "iPhone 17+ research"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: clean
+# ═══════════════════════════════════════════════════════════════
+
+cmd_clean() {
+    show_banner_mini "cleaning..."
+    echo ""
+
+    step_info "make clean..."
+    make clean >/dev/null 2>&1 || true
+    step_ok "Build artifacts removed"
+
+    step_info "Removing temp extracts..."
+    rm -rf /tmp/w0lf_extract_* /tmp/filza_extract_* 2>/dev/null || true
+    rm -f W0lfSword.dylib FilzaApplySandboxExt.dylib 2>/dev/null || true
+    step_ok "Temp files removed"
+
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: doctor
+# ═══════════════════════════════════════════════════════════════
+
+cmd_doctor() {
+    show_banner
+
+    local all_ok=true
+    local theos_dir="${THEOS:-$HOME/theos}"
+
+    step_hdr "Toolchain"
+    echo ""
+
+    check_ok() {
+        local label="$1" icon="$2"
+        printf "  %-30s " "$label"
+        echo -e "$icon"
+    }
+
+    # THEOS
+    if [ -n "${THEOS:-}" ] || [ -d "$HOME/theos" ]; then
+        check_ok "THEOS" "${CLR_GREEN}✓${NC}"
+    else
+        check_ok "THEOS" "${CLR_BLOOD}✗  install: theos.dev${NC}"
+        all_ok=false
+    fi
+
+    # SDK
+    if [ -d "$theos_dir/sdks" ] && ls "$theos_dir/sdks/"*.sdk >/dev/null 2>&1; then
+        local sdk_ver
+        sdk_ver=$(ls "$theos_dir/sdks/"*.sdk 2>/dev/null | head -1 | grep -oP '\d+\.\d+' | head -1)
+        check_ok "iOS SDK" "${CLR_GREEN}✓ (${sdk_ver})${NC}"
+    else
+        check_ok "iOS SDK" "${CLR_AMBER}⚠  download from theos/sdks${NC}"
+    fi
+
+    # dpkg-deb
+    if command -v dpkg-deb &>/dev/null; then
+        check_ok "dpkg-deb" "${CLR_GREEN}✓${NC}"
+    else
+        check_ok "dpkg-deb" "${CLR_BLOOD}✗  brew install dpkg${NC}"
+        all_ok=false
+    fi
+
+    # clang
+    if command -v clang &>/dev/null; then
+        local cv=$(clang --version 2>/dev/null | head -1 | awk '{print $NF}' | cut -d. -f1)
+        check_ok "clang" "${CLR_GREEN}✓ (v${cv})${NC}"
+    else
+        check_ok "clang" "${CLR_BLOOD}✗  xcode-select --install${NC}"
+        all_ok=false
+    fi
+
+    # ldid
+    if command -v ldid &>/dev/null; then
+        check_ok "ldid" "${CLR_GREEN}✓${NC}"
+    else
+        check_ok "ldid" "${CLR_AMBER}⚠  optional (code signing)${NC}"
+    fi
+
+    # ssh
+    if command -v ssh &>/dev/null; then
+        check_ok "ssh" "${CLR_GREEN}✓${NC}"
+    else
+        check_ok "ssh" "${CLR_AMBER}⚠  needed for deploy/log${NC}"
+    fi
+
+    # git
+    if command -v git &>/dev/null; then
+        check_ok "git" "${CLR_GREEN}✓${NC}"
+    else
+        check_ok "git" "${CLR_AMBER}⚠  needed for version control${NC}"
+    fi
+
+    # fakeroot
+    if command -v fakeroot &>/dev/null; then
+        check_ok "fakeroot" "${CLR_GREEN}✓${NC}"
+    else
+        check_ok "fakeroot" "${CLR_AMBER}⚠  optional (packaging)${NC}"
+    fi
+
+    # Device
+    if [ -f "$PROJECT_DIR/.device_ip" ]; then
+        local saved_ip
+        saved_ip=$(cat "$PROJECT_DIR/.device_ip")
+        if ping -c1 -W1 "$saved_ip" 2>/dev/null | grep -q '1 received'; then
+            check_ok "Device ($saved_ip)" "${CLR_GREEN}✓ reachable${NC}"
+        else
+            check_ok "Device ($saved_ip)" "${CLR_AMBER}⚠ offline${NC}"
+        fi
+    else
+        check_ok "Device" "${DIM}— not configured${NC}"
+    fi
+
+    echo ""
+    if $all_ok; then
+        echo -e "  ${CLR_GREEN}${BOLD}All critical tools present — ready to hunt.${NC}"
+    else
+        echo -e "  ${CLR_BLOOD}${BOLD}Some tools missing — install them above before building.${NC}"
+    fi
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  COMMAND: help
+# ═══════════════════════════════════════════════════════════════
+
+cmd_help() {
+    show_banner
+
+    echo -e "  ${CLR_FROST}${BOLD}Usage:${NC} ${CLR_SNOW}./W0lfSword <command> [args...]${NC}"
+    echo ""
+
+    echo -e "  ${CLR_FROST}${BOLD}Build & Deploy${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "build"          "Compile tweak + create .deb package"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "extract"        "Extract .dylib from built .deb"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "deploy <ip>"    "scp → install → restart on device"
+    echo ""
+
+    echo -e "  ${CLR_FROST}${BOLD}Diagnostics${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "status"         "Project health: git, build, ROADMAP %"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "audit"          "Static analysis: braces, printf, offsets"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "log [n]"        "Fetch device debug log (color-coded)"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "doctor"         "Check environment: THEOS, SDK, ssh, clang"
+    echo ""
+
+    echo -e "  ${CLR_FROST}${BOLD}Device Control${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "toggle on|off"  "Enable/disable exploit on device"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "offsets [ver]"  "Validate offset table coverage"
+    echo ""
+
+    echo -e "  ${CLR_FROST}${BOLD}Info${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "targets"        "Show all supported apps + techniques"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "clean"          "Clean build artifacts + temp files"
+    printf "  ${CLR_EYE}%-15s${NC} %s\n" "help"           "Show this message"
+    echo ""
+
+    echo -e "  ${CLR_FROST}${BOLD}Quick Start${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    echo -e "    ${CLR_EYE}./W0lfSword doctor${NC}         # Check your setup"
+    echo -e "    ${CLR_EYE}./W0lfSword build${NC}          # Build the tweak"
+    echo -e "    ${CLR_EYE}./W0lfSword deploy 192.168.1.5${NC}  # Install on device"
+    echo -e "    ${CLR_EYE}./W0lfSword log${NC}            # Watch the debug output"
+    echo -e "    ${CLR_EYE}./W0lfSword status${NC}         # Project overview"
+    echo -e "    ${CLR_EYE}./W0lfSword targets${NC}        # See what's supported"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  MAIN DISPATCH
+# ═══════════════════════════════════════════════════════════════
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        build)      cmd_build "$@";;
+        extract)    cmd_extract "$@";;
+        deploy)     cmd_deploy "$@";;
+        status)     cmd_status "$@";;
+        audit)      cmd_audit "$@";;
+        log)        cmd_log "$@";;
+        toggle)     cmd_toggle "$@";;
+        offsets)    cmd_offsets "$@";;
+        targets)    cmd_targets "$@";;
+        clean)      cmd_clean "$@";;
+        doctor)     cmd_doctor "$@";;
+        help|--help|-h) cmd_help "$@";;
+        *)
+            echo -e "${CLR_BLOOD}Unknown command: $cmd${NC}"
+            echo -e "Run ${CLR_FROST}./W0lfSword help${NC} for usage"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

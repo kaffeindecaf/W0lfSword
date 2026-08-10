@@ -1,0 +1,75 @@
+
+BUG_BOUNTY.md
+AUDIT_REPORT.md
+DEBUG_TRACKING.md
+CONTEXT.md
+TODAY.md
+for_myself.txt
+REPO_SETUP.md
+BUILD.md
+# Build artifacts
+.theos/
+packages/
+*.deb
+
+# Compiled binaries
+*.dylib
+!**/lib*.dylib
+W0lfSword.dylib
+FilzaApplySandboxExt.dylib
+
+# Tool data (local)
+.w0lfsword/
+.device_ip
+
+# OS noise
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+\#*\#
+
+# Editor/IDE
+.vscode/
+.idea/
+*.xcworkspace
+*.xcuserdata
+*.xcuserstate
+DerivedData/
+
+# Logs
+*.log
+/tmp/
+
+# macOS
+__MACOSX/
+*.dmg
+*.pkg
+
+# Archives
+*.tar.gz
+*.zip
+*.rar
+
+# Core dumps
+core
+*.core
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Sensitive files (in case any get created)
+*.pem
+*.p12
+*.key
+*.mobileprovision
+credentials.*
+.env

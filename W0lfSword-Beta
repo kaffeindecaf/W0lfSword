@@ -1,0 +1,635 @@
+#!/bin/bash
+# ╔══════════════════════════════════════════════════════════════╗
+# ║                      W0lfSword-Beta v0.8                     ║
+# ║  iOS Kernel Exploit Toolkit — Interactive Exploit Menu       ║
+# ║  Made by kaffeindecaf — github.com/kaffeindecaf             ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# W0lfSword-Beta is a SUPERSET of W0lfSword.
+# It includes every original command PLUS an interactive exploit menu.
+# Original ./W0lfSword remains untouched.
+#
+# ── Menu (no args) ──────────────────────
+#   Interactive arrow-key menu for exploit operations
+#
+# ── All W0lfSword Commands ─────────────
+#   build, extract, deploy, status, audit, log, toggle,
+#   offsets, targets, clean, doctor, help
+#
+# ── New Beta Commands ──────────────────
+#   profile save|load|list  — Manage exploit profiles
+#   device add|list|switch|info — Multi-device management
+#   history [stats]         — Exploit attempt history
+#   monitor                 — Real-time log viewer
+#   quick                   — One-command: build → deploy → verify
+
+set -euo pipefail
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_DIR"
+
+# ═══════════════════════════════════════════════════════════════
+#  ARCTIC WOLF COLOR PALETTE
+# ═══════════════════════════════════════════════════════════════
+
+CLR_WOLF='\033[38;5;153m'
+CLR_ICE='\033[38;5;195m'
+CLR_FROST='\033[38;5;117m'
+CLR_SNOW='\033[38;5;255m'
+CLR_STEEL='\033[38;5;109m'
+CLR_MOON='\033[38;5;188m'
+CLR_EYE='\033[38;5;39m'
+CLR_BLOOD='\033[0;31m'
+CLR_GREEN='\033[0;32m'
+CLR_AMBER='\033[1;33m'
+NC='\033[0m'
+BOLD='\033[1m'
+DIM='\033[2m'
+ICON_OK="${CLR_GREEN}✓${NC}"
+ICON_ERR="${CLR_BLOOD}✗${NC}"
+ICON_WARN="${CLR_AMBER}⚠${NC}"
+ICON_INFO="${CLR_ICE}ℹ${NC}"
+
+# ═══════════════════════════════════════════════════════════════
+#  ASCII ART — ARCTIC WOLF
+# ═══════════════════════════════════════════════════════════════
+
+show_wolf() {
+    echo -e "${CLR_WOLF}"
+    cat << 'WOLF'
+                             __
+                         .d$$b
+                       .' TO$;\
+                      /  : TP._;
+                     / _.;  :Tb|
+                    /   /   ;j$j
+                _.-"       d$$$$
+              .' ..       d$$$$;
+             /  /P'      d$$$$P. |\
+            /   "      .d$$$P' |\^"l
+          .'           `T$P^"""""  :
+      ._.'      _.'                ;
+   `-.-".-'-' ._.       _.-"    .-"
+ `.-" _____  ._              .-"
+-.(g$$$$$$$b.              .'
+  ""^^T$$$P^)            .(:
+    _/  -"  /.'         /:/;
+ ._.'-'`-'  ")/         /;/;
+`-.-"..--""   " /         /  ;
+.-" ..--""        -'          :
+..--""--.-"         (\      .-(\
+  ..--""              `-\(\/;`
+    _.                      :
+                            ;`-
+                           :\
+                           ;
+WOLF
+    echo -e "${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  UTILITY FUNCTIONS
+# ═══════════════════════════════════════════════════════════════
+
+DATA_DIR="$PROJECT_DIR/.w0lfsword"
+mkdir -p "$DATA_DIR/profiles" "$DATA_DIR"
+
+check_theos() {
+    if [ -z "${THEOS:-}" ] && [ -d "$HOME/theos" ]; then export THEOS="$HOME/theos"; fi
+    [ -n "${THEOS:-}" ] && return 0 || return 1
+}
+
+find_deb() { ls -t packages/*.deb 2>/dev/null | head -1; }
+
+get_device_ip() {
+    [ -n "${1:-}" ] && echo "$1" && return 0
+    local active
+    active=$(cat "$DATA_DIR/active_device" 2>/dev/null || echo "")
+    [ -n "$active" ] && echo "$active" && return 0
+    cat "$PROJECT_DIR/.device_ip" 2>/dev/null || echo ""
+}
+
+step_ok()   { echo -e "  ${ICON_OK} $1"; }
+step_info() { echo -e "  ${ICON_INFO} $1"; }
+step_warn() { echo -e "  ${ICON_WARN} $1"; }
+step_err()  { echo -e "  ${ICON_ERR} $1"; }
+step_hdr()  { echo -e "\n  ${CLR_FROST}${BOLD}$1${NC}"; echo -e "  ${CLR_STEEL}$(printf '─%.0s' $(seq 1 ${#1}))${NC}"; }
+
+# ═══════════════════════════════════════════════════════════════
+#  ORIGINAL W0LFSWORD COMMANDS (preserved)
+# ═══════════════════════════════════════════════════════════════
+
+cmd_build() {
+    echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}building...${NC}"
+    check_theos || { step_err "THEOS not set"; return 1; }
+    make package 2>&1 | tail -6
+    local deb=$(find_deb)
+    if [ -n "$deb" ]; then
+        step_ok "Build: $(basename "$deb") ($(du -h "$deb" | cut -f1))"
+    else
+        step_err "Build failed"
+    fi
+}
+
+cmd_extract() {
+    echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}extracting...${NC}"
+    local deb=$(find_deb)
+    [ -z "$deb" ] && { step_err "No .deb — build first"; return 1; }
+    local edir="/tmp/w0lf_extract_$$"; mkdir -p "$edir"
+    dpkg-deb -x "$deb" "$edir/" 2>/dev/null
+    local dylib=$(find "$edir" -name '*.dylib' -type f 2>/dev/null | head -1)
+    [ -z "$dylib" ] && { step_err "No dylib in package"; rm -rf "$edir"; return 1; }
+    cp "$dylib" "$PROJECT_DIR/W0lfSword.dylib"
+    step_ok "Extracted: W0lfSword.dylib ($(du -h W0lfSword.dylib | cut -f1))"
+    rm -rf "$edir"
+}
+
+cmd_deploy() {
+    local ip=$(get_device_ip "${1:-}")
+    [ -z "$ip" ] && { step_err "No device IP"; return 1; }
+    echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}deploying to ${CLR_EYE}$ip${NC}...${NC}"
+
+    if ! ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$ip" "echo ok" 2>/dev/null | grep -q ok; then
+        step_err "SSH failed to root@$ip"; return 1
+    fi
+
+    local deb=$(find_deb)
+    [ -z "$deb" ] && { step_err "No .deb — build first"; return 1; }
+    local rp="/tmp/$(basename "$deb")"
+    scp -o StrictHostKeyChecking=no "$deb" "root@$ip:$rp" 2>/dev/null
+    local out=$(ssh -o StrictHostKeyChecking=no "root@$ip" "dpkg -i '$rp' 2>&1; rm -f '$rp'")
+    step_ok "Installed: $(echo "$out" | tail -1)"
+    ssh -o StrictHostKeyChecking=no "root@$ip" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
+    step_ok "App restarted"
+    echo "$ip" > "$DATA_DIR/active_device"
+}
+
+cmd_status() {
+    show_wolf
+    echo -e "  ${CLR_SNOW}${BOLD}W0lfSword-Beta${NC}  ${CLR_WOLF}iOS Exploit Menu${NC}"
+    echo -e "  ${DIM}DarkSword Engine — Made by kaffeindecaf${NC}"
+    echo -e "  ${CLR_STEEL}────────────────────────────────────────────${NC}\n"
+
+    local branch=$(git branch --show-current 2>/dev/null || echo "?")
+    local dirty="clean"
+    git diff --quiet 2>/dev/null || dirty="${CLR_AMBER}dirty${NC}"
+
+    local done=0 total=0 pct=0
+    [ -f ROADMAP.md ] && done=$(grep -c '\[x\]' ROADMAP.md 2>/dev/null || echo 0)
+    [ -f ROADMAP.md ] && total=$(grep -c '\- \[.\]' ROADMAP.md 2>/dev/null || echo 0)
+    [ "$total" -gt 0 ] && pct=$(( done * 100 / total ))
+
+    local ip=$(get_device_ip)
+    local dev_name="${DIM}none${NC}"
+    [ -n "$ip" ] && ping -c1 -W1 "$ip" 2>/dev/null | grep -q '1 received' && dev_name="${CLR_GREEN}$ip${NC}" || dev_name="${CLR_AMBER}$ip (offline)${NC}"
+
+    local profile="none"
+    [ -f "$DATA_DIR/active_profile" ] && profile="${CLR_EYE}$(cat "$DATA_DIR/active_profile")${NC}"
+
+    echo -e "  Git:      ${CLR_EYE}$branch${NC} ($dirty)"
+    echo -e "  ROADMAP:  ${CLR_EYE}$done/$total${NC} (${pct}%)"
+    echo -e "  Device:   $dev_name"
+    echo -e "  Profile:  $profile"
+    echo ""
+}
+
+cmd_audit() {
+    echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}auditing...${NC}"
+    local issues=0
+    for f in Tweak.m sandbox_escape.m kexploit/sandbox.m kexploit/offsets.m \
+             kexploit/kexploit_opa334.m kexploit/vnode.m utils/permission_utils.m; do
+        [ ! -f "$f" ] && continue
+        local r=$(python3 -c "b=0;p=0;[exec('global b,p;b+=\\'{\\'==c and 1 or \\'}\\'==c and -1 or 0;p+=\\')\\''==c and 1 or \\'(\\''==c and -1 or 0') for c in open('$f').read()];print(b,p)" 2>/dev/null || echo "? ?")
+        local b=$(echo "$r" | awk '{print $1}') p=$(echo "$r" | awk '{print $2}')
+        if [ "$b" = "0" ] && [ "$p" = "0" ]; then echo -e "  ${ICON_OK} $f"
+        else echo -e "  ${ICON_ERR} $f (braces=$b parens=$p)"; ((issues++)) || true; fi
+    done
+    [ "$issues" -eq 0 ] && echo -e "  ${CLR_GREEN}${BOLD}Audit passed${NC}" || echo -e "  ${CLR_BLOOD}${BOLD}$issues issue(s)${NC}"
+}
+
+cmd_log() {
+    local ip=$(get_device_ip "${2:-}") lines="${1:-50}"
+    [ -z "$ip" ] && { step_err "No device"; return 1; }
+    echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}log from ${CLR_EYE}$ip${NC}...${NC}\n"
+    ssh -o StrictHostKeyChecking=no "root@$ip" "tail -$lines /tmp/FilzaTweak.log 2>/dev/null || echo '(no log)'" 2>/dev/null | while IFS= read -r l; do
+        if echo "$l" | grep -q '\*\*\*'; then echo -e "  ${CLR_GREEN}${BOLD}$l${NC}"
+        elif echo "$l" | grep -q 'ERROR\|FAILED\|invalid'; then echo -e "  ${CLR_BLOOD}$l${NC}"
+        elif echo "$l" | grep -q 'WARNING\|warn\|Retry'; then echo -e "  ${CLR_AMBER}$l${NC}"
+        elif echo "$l" | grep -q 'succeeded\|ESCAPED\|active=1'; then echo -e "  ${CLR_GREEN}$l${NC}"
+        elif echo "$l" | grep -q '\[SSV\]\|\[Tweak\]\|\[SBX\]'; then echo -e "  ${CLR_FROST}$l${NC}"
+        else echo -e "  ${DIM}$l${NC}"; fi
+    done
+}
+
+cmd_toggle() {
+    local action="${1:-}" ip=$(get_device_ip "${2:-}")
+    [ "$action" != "on" ] && [ "$action" != "off" ] && { echo -e "Usage: ${CLR_FROST}./W0lfSword-Beta toggle on|off${NC}"; return 1; }
+    [ -z "$ip" ] && { step_err "No device"; return 1; }
+    if [ "$action" = "on" ]; then
+        ssh -o StrictHostKeyChecking=no "root@$ip" "touch /var/mobile/Documents/.filza_tweak_disable" 2>/dev/null
+        step_ok "Exploit DISABLED"
+    else
+        ssh -o StrictHostKeyChecking=no "root@$ip" "rm -f /var/mobile/Documents/.filza_tweak_disable" 2>/dev/null
+        step_ok "Exploit ENABLED"
+    fi
+}
+
+cmd_offsets() {
+    echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}offset coverage...${NC}\n"
+    grep -n 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO' kexploit/offsets.m 2>/dev/null | while read -r line; do
+        local ln=$(echo "$line" | cut -d: -f1) ver=$(echo "$line" | grep -o '@"[^"]*"' | tr -d '@"')
+        echo -e "  ${CLR_FROST}Line $ln${NC}  →  ${CLR_SNOW}$ver${NC}"
+    done
+    echo ""
+    for cpu in A10 A13Above A15Above A16Above A17Above A18Above; do
+        local c=$(grep -c "is$cpu" kexploit/offsets.m 2>/dev/null || echo 0)
+        echo -e "  $cpu: ${CLR_EYE}$c${NC} blocks"
+    done
+}
+
+cmd_targets() {
+    show_wolf
+    echo -e "  ${CLR_SNOW}${BOLD}W0lfSword-Beta — Targets${NC}\n"
+    echo -e "  ${CLR_EYE}${BOLD}Current: Filza File Manager${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    echo -e "  Bundle:   com.tigisoftware.Filza"
+    echo -e "  Status:   ${CLR_GREEN}Fully supported${NC}\n"
+    echo -e "  ${CLR_AMBER}${BOLD}Planned${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────────${NC}"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "Santander" "File manager"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "NewTerm" "Terminal"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "SpringBoard" "System-wide"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "installd" "IPA sideloading"
+    printf "  ${CLR_FROST}%-20s${NC} %s\n" "Standalone" "No jailbreak .ipa"
+    echo ""
+}
+
+cmd_clean() {
+    make clean >/dev/null 2>&1 || true
+    rm -rf /tmp/w0lf_extract_* W0lfSword.dylib FilzaApplySandboxExt.dylib 2>/dev/null || true
+    step_ok "Cleaned"
+}
+
+cmd_doctor() {
+    echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}doctor...${NC}\n"
+    local ok=true
+    check() { printf "  %-25s " "$1"; shift; "$@" 2>/dev/null && echo -e "${CLR_GREEN}✓${NC}" || { echo -e "${CLR_BLOOD}✗${NC}"; ok=false; }; }
+    [ -n "${THEOS:-}" ] || [ -d "$HOME/theos" ] && echo -e "  ${CLR_GREEN}✓${NC} THEOS" || { echo -e "  ${CLR_BLOOD}✗${NC} THEOS"; ok=false; }
+    command -v dpkg-deb &>/dev/null && echo -e "  ${CLR_GREEN}✓${NC} dpkg-deb" || { echo -e "  ${CLR_BLOOD}✗${NC} dpkg-deb"; ok=false; }
+    command -v clang &>/dev/null && echo -e "  ${CLR_GREEN}✓${NC} clang" || { echo -e "  ${CLR_BLOOD}✗${NC} clang"; ok=false; }
+    command -v ssh &>/dev/null && echo -e "  ${CLR_GREEN}✓${NC} ssh" || echo -e "  ${CLR_AMBER}⚠${NC} ssh (optional)"
+    command -v git &>/dev/null && echo -e "  ${CLR_GREEN}✓${NC} git" || echo -e "  ${CLR_AMBER}⚠${NC} git"
+    $ok && echo -e "\n  ${CLR_GREEN}${BOLD}Ready to hunt.${NC}" || echo -e "\n  ${CLR_BLOOD}${BOLD}Fix missing tools above.${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  BETA COMMANDS — Profiles
+# ═══════════════════════════════════════════════════════════════
+
+cmd_profile() {
+    local action="${1:-list}" name="${2:-}"
+
+    case "$action" in
+        save)
+            [ -z "$name" ] && { echo -e "Usage: ${CLR_FROST}./W0lfSword-Beta profile save <name>${NC}"; return 1; }
+            local ip=$(get_device_ip)
+            cat > "$DATA_DIR/profiles/$name.json" << EOF
+{
+  "name": "$name",
+  "device_ip": "${ip:-}",
+  "target": "com.tigisoftware.Filza",
+  "exploit_method": "darksword_auto",
+  "retry_count": 5,
+  "ssv_enabled": true,
+  "saved_at": "$(date -Iseconds)"
+}
+EOF
+            echo "$name" > "$DATA_DIR/active_profile"
+            step_ok "Profile saved: ${CLR_EYE}$name${NC}"
+            ;;
+
+        load)
+            [ -z "$name" ] && { step_err "Usage: profile load <name>"; return 1; }
+            if [ -f "$DATA_DIR/profiles/$name.json" ]; then
+                echo "$name" > "$DATA_DIR/active_profile"
+                local saved_ip=$(python3 -c "import json; print(json.load(open('$DATA_DIR/profiles/$name.json')).get('device_ip',''))" 2>/dev/null || echo "")
+                [ -n "$saved_ip" ] && echo "$saved_ip" > "$DATA_DIR/active_device"
+                step_ok "Profile loaded: ${CLR_EYE}$name${NC}"
+                [ -n "$saved_ip" ] && step_info "Device: ${CLR_EYE}$saved_ip${NC}"
+            else
+                step_err "Profile '$name' not found"
+            fi
+            ;;
+
+        list)
+            echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}profiles...${NC}\n"
+            if ls "$DATA_DIR/profiles/"*.json >/dev/null 2>&1; then
+                printf "  ${CLR_FROST}%-15s %-20s %s${NC}\n" "NAME" "DEVICE" "SAVED"
+                echo -e "  ${CLR_STEEL}$(printf '─%.0s' {1..55})${NC}"
+                for f in "$DATA_DIR/profiles/"*.json; do
+                    local n=$(basename "$f" .json)
+                    local dip=$(python3 -c "import json; print(json.load(open('$f')).get('device_ip','-'))" 2>/dev/null || echo "-")
+                    local ts=$(python3 -c "import json; print(json.load(open('$f')).get('saved_at','-'))" 2>/dev/null | cut -dT -f1 || echo "-")
+                    local marker=" "
+                    [ "$(cat "$DATA_DIR/active_profile" 2>/dev/null)" = "$n" ] && marker="${CLR_EYE}*${NC}"
+                    printf "  %s ${CLR_EYE}%-14s${NC} %-20s %s\n" "$marker" "$n" "$dip" "$ts"
+                done
+            else
+                echo -e "  ${DIM}No profiles saved yet.${NC}"
+            fi
+            ;;
+        *)
+            echo -e "Usage: ${CLR_FROST}./W0lfSword-Beta profile save|load|list [name]${NC}";;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  BETA COMMANDS — Device Manager
+# ═══════════════════════════════════════════════════════════════
+
+cmd_device() {
+    local action="${1:-list}" arg="${2:-}"
+
+    case "$action" in
+        add)
+            [ -z "$arg" ] && { echo -e "Usage: ${CLR_FROST}./W0lfSword-Beta device add <ip> [--name <label>]${NC}"; return 1; }
+            local dname="${3:-$(echo "$arg" | tr '.' '-')}"
+            echo "$arg" > "$DATA_DIR/active_device"
+            # Append to devices list
+            echo "$arg $dname" >> "$DATA_DIR/devices.list" 2>/dev/null
+            step_ok "Device added: ${CLR_EYE}$arg${NC} ($dname)"
+            ;;
+
+        switch)
+            [ -z "$arg" ] && { step_err "Usage: device switch <ip>"; return 1; }
+            echo "$arg" > "$DATA_DIR/active_device"
+            step_ok "Active device: ${CLR_EYE}$arg${NC}"
+            ;;
+
+        list)
+            echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}devices...${NC}\n"
+            local active=$(get_device_ip)
+            if [ -f "$DATA_DIR/devices.list" ]; then
+                printf "  ${CLR_FROST}%-5s %-18s %-10s %s${NC}\n" "" "IP" "STATUS" "NAME"
+                echo -e "  ${CLR_STEEL}$(printf '─%.0s' {1..50})${NC}"
+                sort -u "$DATA_DIR/devices.list" | while read -r dip dname; do
+                    local mark=" "
+                    [ "$dip" = "$active" ] && mark="${CLR_EYE}*${NC}"
+                    local ping_status="${CLR_GREEN}online${NC}"
+                    ping -c1 -W1 "$dip" 2>/dev/null | grep -q '1 received' || ping_status="${DIM}offline${NC}"
+                    printf "  %s ${CLR_EYE}%-17s${NC} %-10s %s\n" "$mark" "$dip" "$ping_status" "$dname"
+                done
+            else
+                echo -e "  ${DIM}No devices saved. Use 'device add <ip>'${NC}"
+            fi
+            ;;
+
+        info)
+            local dip="${arg:-$(get_device_ip)}"
+            [ -z "$dip" ] && { step_err "No device specified"; return 1; }
+            echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}device info for ${CLR_EYE}$dip${NC}...${NC}\n"
+            if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$dip" "echo ok" 2>/dev/null | grep -q ok; then
+                local ios=$(ssh -o StrictHostKeyChecking=no "root@$dip" "sw_vers -productVersion" 2>/dev/null || echo "?")
+                local model=$(ssh -o StrictHostKeyChecking=no "root@$dip" "sysctl -n hw.machine" 2>/dev/null || echo "?")
+                local kern=$(ssh -o StrictHostKeyChecking=no "root@$dip" "sysctl -n kern.osversion" 2>/dev/null || echo "?")
+                echo -e "  ${CLR_FROST}iOS:${NC}       $ios"
+                echo -e "  ${CLR_FROST}Model:${NC}     $model"
+                echo -e "  ${CLR_FROST}Kernel:${NC}    $kern"
+                echo -e "  ${CLR_FROST}IP:${NC}        $dip"
+            else
+                step_err "Cannot reach $dip"
+            fi
+            ;;
+
+        *)
+            echo -e "Usage: ${CLR_FROST}./W0lfSword-Beta device add|list|switch|info [ip]${NC}";;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  BETA COMMANDS — History
+# ═══════════════════════════════════════════════════════════════
+
+cmd_history() {
+    local action="${1:-show}"
+
+    case "$action" in
+        stats)
+            echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}exploit stats...${NC}\n"
+            if [ -f "$DATA_DIR/history.json" ]; then
+                local total=$(grep -c '"result"' "$DATA_DIR/history.json" 2>/dev/null || echo 0)
+                local success=$(grep -c '"success"' "$DATA_DIR/history.json" 2>/dev/null || echo 0)
+                local pct=0; [ "$total" -gt 0 ] && pct=$(( success * 100 / total ))
+                echo -e "  Attempts:   ${CLR_EYE}$total${NC}"
+                echo -e "  Successes:  ${CLR_GREEN}$success${NC}"
+                echo -e "  Rate:       ${CLR_EYE}$pct%${NC}"
+                # ASCII bar
+                local bar=""; for ((i=0; i<pct/5; i++)); do bar+="█"; done
+                for ((i=pct/5; i<20; i++)); do bar+="░"; done
+                echo -e "  [${CLR_GREEN}$bar${NC}]"
+            else
+                echo -e "  ${DIM}No exploit history yet.${NC}"
+            fi
+            ;;
+        show)
+            echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}history...${NC}\n"
+            if [ -f "$DATA_DIR/history.json" ]; then
+                cat "$DATA_DIR/history.json" | while read -r line; do
+                    local ts=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.readline()).get('timestamp',''))" 2>/dev/null || echo "")
+                    local res=$(echo "$line" | python3 -c "import sys,json; r=json.loads(sys.stdin.readline()).get('result',''); print(r)" 2>/dev/null || echo "")
+                    local color="${CLR_GREEN}"; [ "$res" != "success" ] && color="${CLR_BLOOD}"
+                    echo -e "  ${color}[$res]${NC} ${DIM}$ts${NC}"
+                done
+            else
+                echo -e "  ${DIM}No exploit history yet.${NC}"
+            fi
+            ;;
+        *)
+            echo -e "Usage: ${CLR_FROST}./W0lfSword-Beta history [stats]${NC}";;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  BETA COMMANDS — Monitor
+# ═══════════════════════════════════════════════════════════════
+
+cmd_monitor() {
+    local ip=$(get_device_ip)
+    [ -z "$ip" ] && { step_err "No device configured"; return 1; }
+    echo -e "${CLR_WOLF}[W0lfSword-Beta]${NC} ${DIM}monitoring ${CLR_EYE}$ip${NC} — Ctrl+C to stop...${NC}\n"
+    ssh -o StrictHostKeyChecking=no "root@$ip" "tail -f /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null | while IFS= read -r l; do
+        if echo "$l" | grep -q '\*\*\*'; then echo -e "  ${CLR_GREEN}${BOLD}$l${NC}"
+        elif echo "$l" | grep -q 'ERROR\|FAILED'; then echo -e "  ${CLR_BLOOD}$l${NC}"
+        elif echo "$l" | grep -q 'Retry\|WARNING'; then echo -e "  ${CLR_AMBER}$l${NC}"
+        elif echo "$l" | grep -q 'ESCAPED\|active=1'; then echo -e "  ${CLR_GREEN}$l${NC}"
+        else echo -e "  ${DIM}$l${NC}"; fi
+    done
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  BETA COMMANDS — Quick (one-shot exploit)
+# ═══════════════════════════════════════════════════════════════
+
+cmd_quick() {
+    show_wolf
+    echo -e "  ${CLR_SNOW}${BOLD}W0lfSword-Beta — Quick Exploit${NC}\n"
+    local ip=$(get_device_ip)
+    [ -z "$ip" ] && { step_err "No device configured. Use 'device add <ip>' first."; return 1; }
+
+    # Stage 1: Build
+    echo -e "  ${CLR_EYE}[1/4]${NC} Building..."
+    check_theos || { step_err "THEOS not set"; return 1; }
+    make package >/dev/null 2>&1
+    local deb=$(find_deb)
+    [ -z "$deb" ] && { step_err "Build failed"; return 1; }
+    step_ok "Built $(basename "$deb")"
+
+    # Stage 2: Deploy
+    echo -e "  ${CLR_EYE}[2/4]${NC} Deploying..."
+    local rp="/tmp/$(basename "$deb")"
+    scp -o StrictHostKeyChecking=no "$deb" "root@$ip:$rp" 2>/dev/null
+    ssh -o StrictHostKeyChecking=no "root@$ip" "dpkg -i '$rp' 2>&1; rm -f '$rp'" >/dev/null 2>&1
+    ssh -o StrictHostKeyChecking=no "root@$ip" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
+    step_ok "Deployed"
+
+    # Stage 3: Wait for exploit
+    echo -e "  ${CLR_EYE}[3/4]${NC} Waiting for exploit (10s)..."
+    sleep 10
+
+    # Stage 4: Verify
+    echo -e "  ${CLR_EYE}[4/4]${NC} Verifying sandbox escape..."
+    local log=$(ssh -o StrictHostKeyChecking=no "root@$ip" "tail -20 /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null || echo "")
+    if echo "$log" | grep -q "ESCAPED"; then
+        step_ok "${CLR_GREEN}${BOLD}SANDBOX ESCAPED — exploit successful${NC}"
+        echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$ip\",\"result\":\"success\"}" >> "$DATA_DIR/history.json"
+    else
+        step_err "Sandbox escape not confirmed — check logs with './W0lfSword-Beta log'"
+        echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$ip\",\"result\":\"fail\"}" >> "$DATA_DIR/history.json"
+    fi
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  INTERACTIVE MENU (no args)
+# ═══════════════════════════════════════════════════════════════
+
+show_menu() {
+    show_wolf
+    echo -e "  ${CLR_SNOW}${BOLD}W0lfSword-Beta${NC}  ${CLR_WOLF}iOS Exploit Menu${NC}"
+    echo -e "  ${DIM}DarkSword Engine — Made by kaffeindecaf${NC}"
+    echo -e "  ${CLR_STEEL}────────────────────────────────────────────${NC}"
+    echo ""
+    echo -e "  ${CLR_EYE}${BOLD}[1]${NC}  Quick Exploit      ${DIM}Build → Deploy → Verify${NC}"
+    echo -e "  ${CLR_EYE}${BOLD}[2]${NC}  Deploy Only        ${DIM}Install on device${NC}"
+    echo -e "  ${CLR_EYE}${BOLD}[3]${NC}  Device Manager     ${DIM}Add/switch devices${NC}"
+    echo -e "  ${CLR_EYE}${BOLD}[4]${NC}  Live Monitor       ${DIM}Real-time log viewer${NC}"
+    echo -e "  ${CLR_EYE}${BOLD}[5]${NC}  Profiles           ${DIM}Save/load configs${NC}"
+    echo -e "  ${CLR_EYE}${BOLD}[6]${NC}  History            ${DIM}Exploit stats${NC}"
+    echo -e "  ${CLR_EYE}${BOLD}[7]${NC}  Diagnostics        ${DIM}Doctor, audit, status${NC}"
+    echo -e "  ${CLR_EYE}${BOLD}[8]${NC}  Targets            ${DIM}Supported apps${NC}"
+    echo ""
+    echo -e "  ${CLR_EYE}${BOLD}[q]${NC}  Quit"
+    echo ""
+    echo -ne "  ${CLR_FROST}W0lfSword >${NC} "
+}
+
+run_menu() {
+    while true; do
+        show_menu
+        read -r choice
+        echo ""
+        case "$choice" in
+            1) cmd_quick;;
+            2) cmd_deploy;;
+            3) echo -e "  ${CLR_FROST}Device commands:${NC} list | add <ip> | switch <ip> | info [ip]"
+               echo -ne "  ${CLR_FROST}device >${NC} "; read -r dcmd
+               cmd_device $dcmd;;
+            4) cmd_monitor;;
+            5) echo -e "  ${CLR_FROST}Profile commands:${NC} list | save <name> | load <name>"
+               echo -ne "  ${CLR_FROST}profile >${NC} "; read -r pcmd
+               cmd_profile $pcmd;;
+            6) cmd_history stats; cmd_history show;;
+            7) cmd_doctor; echo ""; cmd_audit; echo ""; cmd_status;;
+            8) cmd_targets;;
+            q|Q|quit|exit) echo -e "  ${CLR_WOLF}~ howl later ~${NC}\n"; exit 0;;
+            *) echo -e "  ${ICON_WARN} Unknown option — try 1-8 or q";;
+        esac
+        echo ""; echo -ne "  ${DIM}Press enter to continue...${NC}"; read -r; echo ""
+    done
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  HELP
+# ═══════════════════════════════════════════════════════════════
+
+cmd_help() {
+    show_wolf
+    echo -e "  ${CLR_SNOW}${BOLD}W0lfSword-Beta${NC}  ${CLR_WOLF}iOS Exploit Menu${NC}"
+    echo -e "  ${DIM}DarkSword Engine — Made by kaffeindecaf${NC}"
+    echo -e "  ${CLR_STEEL}────────────────────────────────────────────${NC}\n"
+
+    echo -e "  ${CLR_FROST}${BOLD}Menu (no args):${NC}  Interactive arrow-key exploit menu\n"
+    echo -e "  ${CLR_FROST}${BOLD}All W0lfSword Commands:${NC}"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "build" "Compile + package"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "deploy <ip>" "Install on device"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "status" "Project overview"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "audit" "Static analysis"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "log [n]" "Device log"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "toggle on|off" "Disable/enable"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "offsets" "Version coverage"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "targets" "Supported apps"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "clean" "Clean artifacts"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "doctor" "Check environment"
+    echo ""
+    echo -e "  ${CLR_FROST}${BOLD}New Beta Commands:${NC}"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "quick" "One-shot: build→deploy→verify"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "profile ..." "Save/load exploit configs"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "device ..." "Multi-device manager"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "history" "Exploit stats"
+    printf "    ${CLR_EYE}%-15s${NC} %s\n" "monitor" "Real-time log tail"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  MAIN DISPATCH
+# ═══════════════════════════════════════════════════════════════
+
+main() {
+    local cmd="${1:-}"
+
+    # No args → interactive menu
+    if [ -z "$cmd" ]; then
+        run_menu
+        return 0
+    fi
+
+    shift || true
+
+    case "$cmd" in
+        # Original W0lfSword commands
+        build)     cmd_build "$@";;
+        extract)   cmd_extract "$@";;
+        deploy)    cmd_deploy "$@";;
+        status)    cmd_status "$@";;
+        audit)     cmd_audit "$@";;
+        log)       cmd_log "$@";;
+        toggle)    cmd_toggle "$@";;
+        offsets)   cmd_offsets "$@";;
+        targets)   cmd_targets "$@";;
+        clean)     cmd_clean "$@";;
+        doctor)    cmd_doctor "$@";;
+        # New Beta commands
+        quick)     cmd_quick "$@";;
+        profile)   cmd_profile "$@";;
+        device)    cmd_device "$@";;
+        history)   cmd_history "$@";;
+        monitor)   cmd_monitor "$@";;
+        # Help
+        help|--help|-h) cmd_help "$@";;
+        *)
+            echo -e "${CLR_BLOOD}Unknown: $cmd${NC}"
+            echo -e "Run ${CLR_FROST}./W0lfSword-Beta${NC} for menu or ${CLR_FROST}./W0lfSword-Beta help${NC}"
+            ;;
+    esac
+}
+
+main "$@"

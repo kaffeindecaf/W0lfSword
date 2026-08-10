@@ -1,5 +1,6 @@
 @import UIKit;
 #import <stdbool.h>
+#import <stdatomic.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <xpc/xpc.h>
@@ -21,12 +22,29 @@
 #import "FilzaPadlockBypass.h"
 #import "utils/permission_utils.h"
 
-bool g_exploitDone = false;
-bool g_patching_in_progress = false;
+#include "utils/tweak_log.h"
 
-static const char *getTweakLogPath(void);
-static void TweakLog(const char *format, ...);
-static void runSSVDiagnosticsOnce(void);
+_Atomic bool g_exploitDone = false;
+_Atomic bool g_patching_in_progress = false;
+
+#define TWEAK_DISABLE_FLAG "/var/mobile/Documents/.filza_tweak_disable"
+
+static inline bool exploit_is_done(void) {
+    return atomic_load_explicit(&g_exploitDone, memory_order_acquire);
+}
+static inline bool exploit_is_patching(void) {
+    return atomic_load_explicit(&g_patching_in_progress, memory_order_acquire);
+}
+static inline void exploit_set_done(void) {
+    atomic_store_explicit(&g_exploitDone, true, memory_order_release);
+}
+static inline void exploit_set_patching(bool v) {
+    atomic_store_explicit(&g_patching_in_progress, v, memory_order_release);
+}
+
+static bool tweak_is_disabled(void) {
+    return (access(TWEAK_DISABLE_FLAG, F_OK) == 0);
+}
 
 #pragma mark - Root Helper Hooks
 
@@ -104,8 +122,16 @@ static void loadMinizip(void) {
     p_unzReadCurrentFile = dlsym(RTLD_DEFAULT, "unzReadCurrentFile");
     p_unzCloseCurrentFile = dlsym(RTLD_DEFAULT, "unzCloseCurrentFile");
     p_unzClose = dlsym(RTLD_DEFAULT, "unzClose");
-    g_minizipLoaded = (p_zipOpen64 && p_unzOpen64);
-    NSLog(@"[Tweak] minizip loaded: %d (zip=%p unz=%p)", g_minizipLoaded, p_zipOpen64, p_unzOpen64);
+    g_minizipLoaded = (p_zipOpen64 && p_zipOpenNewFileInZip64 && p_zipWriteInFileInZip &&
+                        p_zipCloseFileInZip && p_zipClose &&
+                        p_unzOpen64 && p_unzGoToFirstFile && p_unzGoToNextFile &&
+                        p_unzGetCurrentFileInfo64 && p_unzOpenCurrentFilePassword &&
+                        p_unzReadCurrentFile && p_unzCloseCurrentFile && p_unzClose);
+    NSLog(@"[Tweak] minizip loaded: %d (zip=%p zipNew=%p zipWrite=%p zipCloseFile=%p zipClose=%p unz=%p unzFirst=%p unzNext=%p unzInfo=%p unzPassword=%p unzRead=%p unzCloseCurrent=%p unzClose=%p)",
+          g_minizipLoaded, p_zipOpen64, p_zipOpenNewFileInZip64, p_zipWriteInFileInZip,
+          p_zipCloseFileInZip, p_zipClose, p_unzOpen64, p_unzGoToFirstFile, p_unzGoToNextFile,
+          p_unzGetCurrentFileInfo64, p_unzOpenCurrentFilePassword, p_unzReadCurrentFile,
+          p_unzCloseCurrentFile, p_unzClose);
 }
 
 static IMP orig_ZipFiles = NULL, orig_unZipFile = NULL, orig_unZipFilePassword = NULL;
@@ -532,10 +558,55 @@ static BOOL sealedSystemPath(NSString *path) {
 static BOOL g_ssv_active = NO;
 static BOOL g_ssv_activation_attempt_inflight = NO;
 static uint64_t g_last_ssv_activation_attempt_ms = 0;
+static pthread_mutex_t g_ssv_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// UI debug mode: make Filza behave as writable everywhere for testing/logging.
-// This does not guarantee real kernel/filesystem write privileges.
-static BOOL g_ui_debug_bypass = YES;
+static void ensureSSVActive(void) {
+    if (g_ssv_active) return;
+    if (!exploit_is_done()) {
+        TweakLog("[SSV] Exploit not done yet, cannot activate SSV");
+        return;
+    }
+
+    pthread_mutex_lock(&g_ssv_mutex);
+    if (g_ssv_active) { pthread_mutex_unlock(&g_ssv_mutex); return; }
+
+    if (exploit_is_patching()) {
+        TweakLog("[SSV] Patch already in progress, skipping recursive call");
+        pthread_mutex_unlock(&g_ssv_mutex);
+        return;
+    }
+    if (g_ssv_activation_attempt_inflight) {
+        TweakLog("[SSV] Activation attempt already inflight, skipping");
+        pthread_mutex_unlock(&g_ssv_mutex);
+        return;
+    }
+    uint64_t now = now_ms();
+    if (g_last_ssv_activation_attempt_ms != 0 && (now - g_last_ssv_activation_attempt_ms) < 1500) {
+        TweakLog("[SSV] Activation throttled (%llums since last attempt)", now - g_last_ssv_activation_attempt_ms);
+        pthread_mutex_unlock(&g_ssv_mutex);
+        return;
+    }
+    g_ssv_activation_attempt_inflight = YES;
+    g_last_ssv_activation_attempt_ms = now;
+    pthread_mutex_unlock(&g_ssv_mutex);
+
+    int maxAttempts = 3;
+    for (int attempt = 0; attempt < maxAttempts && !g_ssv_active; attempt++) {
+        if (attempt > 0) {
+            TweakLog("[SSV] Retry attempt %d/%d", attempt + 1, maxAttempts);
+            usleep(300000);
+        }
+        int pret = patch_sandbox_ext();
+        TweakLog("[SSV] ensureSSVActive patch_sandbox_ext attempt %d returned %d", attempt + 1, pret);
+        if (pret == 0) {
+            g_ssv_active = YES;
+            TweakLog("[SSV] ensureSSVActive set active=1");
+            break;
+        }
+    }
+
+    g_ssv_activation_attempt_inflight = NO;
+}
 
 static NSString *uiDebugBypassOnFlagPath(void) {
     NSString *docs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
@@ -559,8 +630,7 @@ static void refreshUIDebugBypassFlag(void) {
     } else if (hasOn) {
         g_ui_debug_bypass = YES;
     } else {
-        // Default to enabled for easier testing unless user explicitly disables.
-        g_ui_debug_bypass = YES;
+        g_ui_debug_bypass = NO;
     }
     TweakLog("[SSV][UI] bypass=%d (onFlag=%s offFlag=%s)",
              g_ui_debug_bypass,
@@ -623,37 +693,6 @@ static uint64_t now_ms(void) {
     return (uint64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
 }
 
-static void ensureSSVActive(void) {
-    TweakLog("[SSV] ensureSSVActive start, active=%d", g_ssv_active);
-    if (g_ssv_active) return;
-    if (!g_exploitDone) {
-        TweakLog("[SSV] Exploit not done yet, cannot activate SSV");
-        return;
-    }
-    if (g_patching_in_progress) {
-        TweakLog("[SSV] Patch already in progress, skipping recursive call");
-        return;
-    }
-    if (g_ssv_activation_attempt_inflight) {
-        TweakLog("[SSV] Activation attempt already inflight, skipping");
-        return;
-    }
-    uint64_t now = now_ms();
-    if (g_last_ssv_activation_attempt_ms != 0 && (now - g_last_ssv_activation_attempt_ms) < 1500) {
-        TweakLog("[SSV] Activation throttled (%llums since last attempt)", now - g_last_ssv_activation_attempt_ms);
-        return;
-    }
-    g_ssv_activation_attempt_inflight = YES;
-    g_last_ssv_activation_attempt_ms = now;
-    int pret = patch_sandbox_ext();
-    g_ssv_activation_attempt_inflight = NO;
-    TweakLog("[SSV] ensureSSVActive patch_sandbox_ext returned %d", pret);
-    if (pret == 0) {
-        g_ssv_active = YES;
-        TweakLog("[SSV] ensureSSVActive set active=1");
-    }
-}
-
 static IMP orig_isWritableFileAtPath = NULL;
 static IMP orig_isReadableFileAtPath = NULL;
 static IMP orig_attributesOfItemAtPath_error = NULL;
@@ -710,7 +749,7 @@ static BOOL hook_createDirectoryAtPath(id self, SEL _cmd, NSString *path, BOOL c
     NSError **errRef = error ? error : &localError;
 
     if (ssvProtectedPath(path)) {
-        if (g_exploitDone) {
+        if (exploit_is_done()) {
             ensureSSVActive();
         }
         TweakLog("[SSV] createDirectoryAtPath override for protected path: %s", [path UTF8String]);
@@ -769,7 +808,7 @@ static BOOL hook_createDirectoryAtPath(id self, SEL _cmd, NSString *path, BOOL c
 
 static BOOL hook_copyItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, NSString *dst, NSError **error) {
     if (ssvProtectedPath(src) || ssvProtectedPath(dst)) {
-        if (g_exploitDone) {
+        if (exploit_is_done()) {
             ensureSSVActive();
         }
         TweakLog("[SSV] copyItemAtPath override for %s -> %s", [src UTF8String], [dst UTF8String]);
@@ -980,36 +1019,6 @@ static void installHooks(void) {
 
 #pragma mark - Exploit (silent, background)
 
-static const char *getTweakLogPath(void) {
-    static char path[PATH_MAX];
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSString *tmp = NSTemporaryDirectory();
-        if (!tmp || tmp.length == 0) tmp = @"/tmp";
-        NSString *file = [tmp stringByAppendingPathComponent:@"FilzaSSVDebug.log"];
-        const char *cpath = [file fileSystemRepresentation];
-        strlcpy(path, cpath, sizeof(path));
-    });
-    return path;
-}
-
-static void TweakLog(const char *format, ...) {
-    char buffer[1024];
-    va_list args;
-    va_start(args, format);
-    int n = vsnprintf(buffer, sizeof(buffer), format, args);
-    va_end(args);
-    if (n < 0) return;
-    if (n >= (int)sizeof(buffer)) n = sizeof(buffer) - 1;
-    buffer[n++] = '\n';
-
-    int fd = open(getTweakLogPath(), O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd >= 0) {
-        write(fd, buffer, n);
-        close(fd);
-    }
-}
-
 static void logProbeResult(const char *op, NSString *path, BOOL ok, NSError *err, int savedErrno) {
     TweakLog("[SSV][DIAG] %s path=%s ok=%d errno=%d(%s) nsErr=%ld domain=%s desc=%s",
              op,
@@ -1026,64 +1035,76 @@ static void runSSVDiagnosticsOnce(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         NSFileManager *fm = [NSFileManager defaultManager];
-        NSString *systemDir = @"/System/.filza_ssv_diag_dir";
-        NSString *systemFile = @"/System/.filza_ssv_diag_file";
-        NSString *varDir = @"/private/var/tmp/filza_ssv_diag_dir";
+        NSString *diagDir  = @"/private/var/tmp/filza_ssv_diag_dir";
+        NSString *diagFile = @"/private/var/tmp/filza_ssv_diag_file";
 
         NSError *err = nil;
         errno = 0;
-        BOOL systemDirOk = [fm createDirectoryAtPath:systemDir withIntermediateDirectories:NO attributes:nil error:&err];
-        logProbeResult("mkdir", systemDir, systemDirOk, err, errno);
+        BOOL dirOk = [fm createDirectoryAtPath:diagDir withIntermediateDirectories:YES attributes:nil error:&err];
+        logProbeResult("mkdir", diagDir, dirOk, err, errno);
 
         err = nil;
         errno = 0;
-        int fd = open([systemFile UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        int fd = open([diagFile UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0644);
         BOOL fileOk = (fd >= 0);
         if (fileOk) {
             const char *payload = "filza-ssv-diagnostic\n";
             write(fd, payload, (unsigned)strlen(payload));
             close(fd);
-        }
-        logProbeResult("create_file", systemFile, fileOk, nil, errno);
-        if (fileOk) {
             errno = 0;
-            int delRet = unlink([systemFile UTF8String]);
-            BOOL delOk = (delRet == 0);
-            logProbeResult("delete_file", systemFile, delOk, nil, errno);
+            int delRet = unlink([diagFile UTF8String]);
+            logProbeResult("delete_file", diagFile, (delRet == 0), nil, errno);
         }
+        logProbeResult("create_file", diagFile, fileOk, nil, errno);
 
-        err = nil;
-        errno = 0;
-        BOOL varDirOk = [fm createDirectoryAtPath:varDir withIntermediateDirectories:YES attributes:nil error:&err];
-        logProbeResult("mkdir", varDir, varDirOk, err, errno);
-        if (varDirOk) {
+        if (dirOk) {
             err = nil;
-            BOOL rmOk = [fm removeItemAtPath:varDir error:&err];
-            logProbeResult("rmdir", varDir, rmOk, err, errno);
-        }
-
-        if (systemDirOk) {
-            err = nil;
-            BOOL rmSystemOk = [fm removeItemAtPath:systemDir error:&err];
-            logProbeResult("rmdir", systemDir, rmSystemOk, err, errno);
+            BOOL rmOk = [fm removeItemAtPath:diagDir error:&err];
+            logProbeResult("rmdir", diagDir, rmOk, err, errno);
         }
     });
 }
 
 static void runExploit(void) {
-    TweakLog("[Tweak] Running kexploit...");
-    int kret = kexploit_opa334();
-    if (kret != 0) {
-        TweakLog("[Tweak] kexploit failed: %d", kret);
+    if (tweak_is_disabled()) { TweakLog("[Tweak] Disabled, skipping exploit"); return; }
+    static int attemptCount = 0;
+    attemptCount++;
+
+    if (exploit_is_done()) {
+        TweakLog("[Tweak] Exploit already done, skipping runExploit (attempt=%d)", attemptCount);
         return;
     }
 
-    TweakLog("[Tweak] kexploit succeeded, escaping sandbox...");
+    TweakLog("[Tweak] Exploit attempt #%d...", attemptCount);
+
+    int kret = kexploit_opa334();
+    if (kret != 0) {
+        TweakLog("[Tweak] kexploit failed: %d (attempt %d)", kret, attemptCount);
+        // Retry up to 5 times with increasing delay (README: "2-3 attempts before working")
+        if (attemptCount < 5) {
+            int64_t delay = (int64_t)(attemptCount * 2.0 * NSEC_PER_SEC);
+            TweakLog("[Tweak] Scheduling retry #%d in %lld seconds", attemptCount + 1, (long long)(attemptCount * 2));
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay),
+                dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                runExploit();
+            });
+        }
+        return;
+    }
+
+    TweakLog("[Tweak] kexploit succeeded (attempt %d), escaping sandbox...", attemptCount);
     uint64_t self_proc_addr = proc_self();
     int sret = sandbox_escape(self_proc_addr);
     TweakLog("[Tweak] sandbox_escape returned %d", sret);
     if (sret == 0) {
-        g_exploitDone = true;
+        exploit_set_done();
+    } else if (attemptCount < 5) {
+        TweakLog("[Tweak] sandbox_escape failed, scheduling retry");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+            dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            runExploit();
+        });
+        return;
     }
 
     // Enable SSV write access
@@ -1096,8 +1117,22 @@ static void runExploit(void) {
             TweakLog("[Tweak] check_sandbox_var_rw confirmed, running diagnostics");
             runSSVDiagnosticsOnce();
         } else {
-            TweakLog("[Tweak] check_sandbox_var_rw not confirmed, skipping diagnostics");
+            TweakLog("[Tweak] check_sandbox_var_rw not confirmed, retrying patch");
+            exploit_set_patching(false);
+            if (attemptCount < 5) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
+                    dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                    TweakLog("[Tweak] Retrying patch_sandbox_ext");
+                    patch_sandbox_ext();
+                });
+            }
         }
+    } else if (attemptCount < 5) {
+        TweakLog("[Tweak] patch_sandbox_ext failed, scheduling retry");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
+            dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            patch_sandbox_ext();
+        });
     }
 }
 
@@ -1115,13 +1150,11 @@ static void scheduleExploitOnce(void) {
 #pragma mark - Entry Point
 
 __attribute__((constructor)) void TweakInit(void) {
-    // Initialize debug log file
-    FILE *f = fopen(getTweakLogPath(), "a");
-    if (f) {
-        fprintf(f, "\n\n=== TWEAK LOADED ===\n");
-        fclose(f);
+    if (tweak_is_disabled()) {
+        TweakLog("[Tweak] Disabled by flag file — unloading");
+        return;
     }
-    
+    TweakLog("\n=== TWEAK LOADED ===");
     TweakLog("[Tweak] TweakInit started");
     refreshUIDebugBypassFlag();
     installHooks();

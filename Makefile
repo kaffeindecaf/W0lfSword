@@ -1,5 +1,5 @@
 TARGET := iphone:clang:latest:15.0
-ARCHS = arm64 arm64e
+ARCHS = arm64
 
 include $(THEOS)/makefiles/common.mk
 
@@ -24,7 +24,7 @@ FilzaApplySandboxExt_FILES += kpf/patchfinder.m
 FilzaApplySandboxExt_FILES += XPF/src/xpf.c XPF/src/common.c XPF/src/decompress.c XPF/src/bad_recovery.c XPF/src/non_ppl.c XPF/src/ppl.c
 
 # --- Filza Padlock Bypass ---
-FilzaApplySandboxExt_FILES += FilzaPadlockBypass.m
+FilzaApplySandboxExt_FILES += FilzaPadlockBypass.xm
 
 # --- ChOma ---
 FilzaApplySandboxExt_FILES += XPF/external/ChOma/src/arm64.c XPF/external/ChOma/src/Base64.c XPF/external/ChOma/src/BufferedStream.c XPF/external/ChOma/src/CodeDirectory.c XPF/external/ChOma/src/CSBlob.c XPF/external/ChOma/src/DER.c XPF/external/ChOma/src/DyldSharedCache.c XPF/external/ChOma/src/Entitlements.c XPF/external/ChOma/src/Fat.c XPF/external/ChOma/src/FileStream.c XPF/external/ChOma/src/Host.c XPF/external/ChOma/src/MachO.c XPF/external/ChOma/src/MachOLoadCommand.c XPF/external/ChOma/src/MemoryStream.c XPF/external/ChOma/src/PatchFinder.c XPF/external/ChOma/src/PatchFinder_arm64.c XPF/external/ChOma/src/Util.c
