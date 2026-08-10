@@ -266,8 +266,8 @@
 - [ ] `C1.3` ⚪ — IOSurface race condition research  
   _Prompt:_ "The exploit uses IOSurfaceCreate with a physical address to create a mapping that survives deallocation. Research: are there other IOSurface properties that can be abused? Look at IOSurfaceRootUserClient external methods for potential arbitrary kernel free or reference count bugs."
 
-- [ ] `C1.4` ⚪ — MIG filter bypass: document the gadget chain  
-  _Prompt:_ "MigFilterBypassThread.m patches migLock, migSbxMsg, and migKernelStackLR in kernel memory. Document EXACTLY which functions are patched, what the original values were, and what they're replaced with. This is a powerful technique for bypassing MIG-based sandbox restrictions. Could this be used independently of the kernel exploit for other attacks?"
+- [x] `C1.4` ⚪ — MIG filter bypass: document the gadget chain  
+  _Documented in docs/MIG_FILTER_BYPASS.md: migLock, migSbxMsg, migKernelStackLR, kernel stack layout, bypass thread lifecycle, lck_rw_t structure._
 
 - [ ] `C1.5` ⚪ — Search for new kernel vulns: sysctl OOB  
   _Prompt:_ "Audit all sysctls accessible from the sandbox. Use syz-repro or manual fuzzing to find sysctl handlers that have OOB reads/writes. Focus on networking sysctls (net.inet.*, net.inet6.*) since the exploit already touches these. Use the kernel R/W to verify any suspected vulnerabilities."
@@ -369,8 +369,8 @@
 - [ ] `D3.2` 🟢 — API documentation for kernel primitives  
   _Prompt:_ "Document every function in krw.h, kutils.h, vnode.h, sandbox.h with: what it does, kernel side effects, calling context requirements (must hold mutex? PAC stripped? safe to call from main thread?), return value semantics."
 
-- [ ] `D3.3` 🟢 — Threat model document  
-  _Prompt:_ "Write docs/threat-model.md: what attacker model does this tweak assume? What's the trust boundary? What would Apple need to change to break each component? How long can this technique survive across iOS updates?"
+- [x] `D3.3` 🟢 — Threat model document  
+  _Written in docs/THREAT_MODEL.md: component breakdown, Apple fix options, survival ratings, mitigation strategy._
 
 ---
 
@@ -555,7 +555,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 ## H1 — Writeup Documentation (kfd-style)
 
-- [ ] `H1.1` ⚪ — Write dark-sword-technique.md  
+- [x] `H1.1` ⚪ — Write dark-sword-technique.md  
   _Prompt:_ "Follow kfd's writeup format: (1) abstract, (2) vulnerability description, (3) primitive achieved, (4) exploitation steps with code snippets, (5) Apple's fix. Include the ICMPv6 socket spray technique and the IOSurface physical OOB race window."
 
 - [ ] `H1.2` ⚪ — Write sandbox-extension-patching.md  
@@ -566,7 +566,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 ## H2 — Knowledge Base
 
-- [ ] `H2.1` 🟡 — Create iOS kernel exploitation glossary  
+- [x] `H2.1` 🟡 — Create iOS kernel exploitation glossary  
   _Prompt:_ "Write docs/glossary.md defining: PUAF, PPL, KTRR, SPTM, MTE, PAC, SMR, AP, SEP, KASLR, DART, SMMU, IOMMU, AMFI, TCC, SIP, SSV, APFS fsnode. Each entry should be 2-3 sentences with a 'why it matters' note."
 
 - [ ] `H2.2` 🟡 — Create offset resolution guide  
@@ -704,12 +704,12 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | B2 — Runtime Control | 3 | 1 | 2 |
 | B3 — Power User Features | 7 | 0 | 7 |
 | B4 — Developer Features | 4 | 0 | 4 |
-| C1 — Kernel Vuln Hunting | 7 | 0 | 7 |
+| C1 — Kernel Vuln Hunting | 7 | 1 | 6 |
 | C2 — Bug Bounty Targets | 8 | 0 | 8 |
 | C3 — Attack Chains | 4 | 0 | 4 |
 | D1 — Refactoring | 5 | 4 | 1 |
 | D2 — Testing | 4 | 0 | 4 |
-| D3 — Documentation | 3 | 0 | 3 |
+| D3 — Documentation | 3 | 1 | 2 |
 | E1 — Version/Device Expansion | 5 | 0 | 5 |
 | F1 — PUAF Fallback | 4 | 0 | 4 |
 | F2 — Cross-Process Injection | 3 | 0 | 3 |
@@ -718,8 +718,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | G1 — File Managers | 2 | 0 | 2 |
 | G2 — System Apps | 3 | 0 | 3 |
 | G3 — Terminal / Shell | 2 | 0 | 2 |
-| H1 — Writeups | 3 | 0 | 3 |
-| H2 — Knowledge Base | 3 | 0 | 3 |
+| H1 — Writeups | 3 | 1 | 2 |
+| H2 — Knowledge Base | 3 | 1 | 2 |
 | I1 — Reference Repos | — | — | — |
 | I2 — Key CVEs | — | — | — |
 | J1 — Interactive Menu | 3 | 3 | 0 |
@@ -730,7 +730,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J6 — Original Commands | 2 | 1 | 1 |
 | J7 — Polish | 3 | 1 | 2 |
 | J8 — Beta UX (new) | 6 | 0 | 6 |
-| **TOTAL** | **149** | **41** | **108** |
+| **TOTAL** | **149** | **45** | **104** |
 
 ---
 
