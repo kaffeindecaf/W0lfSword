@@ -1,1 +1,1 @@
-{ Filter = { Bundles = ( "com.tigisoftware.Filza" ); }; }
+{ Filter = { Bundles = ( "com.tigisoftware.Filza", "com.tigisoftware.Filza000" ); }; }

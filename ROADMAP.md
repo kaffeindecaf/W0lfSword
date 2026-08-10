@@ -68,14 +68,20 @@
 
 ## A2 — Filza Compatibility
 
-- [ ] `A2.1` 🟠 — Investigate and fix Filza 4.0.2 crash  
-  _Prompt:_ "Obtain Filza 4.0.2 IPA. Decompile it with class-dump or jtool2. Compare NSFileManager subclasses between 4.0.0 and 4.0.2. Look for renamed classes, removed selectors, or changed method signatures in TGRootFileManager, Zipper, TGAlertController, NZFileBrowserController, NZFileItem. Document what broke."
+- [x] `A2.1` 🟠 — Investigate and fix Filza 4.0.2 crash  
+  _IPA analysis 2026-08-10: Both IPAs extracted and compared._  
+  **Root cause: Bundle ID mismatch.** Filza 4.0.0 = `com.tigisoftware.Filza`, Filza 4.0.2 = `com.tigisoftware.Filza000`. MobileSubstrate plist filters on `com.tigisoftware.Filza` — so the dylib never injects into 4.0.2. All class names (TGRootFileManager, TGAlertController, NewActivationViewController, etc.) and selectors (`spawnRoot:args:pid:`, `showAlertWithTitle:text:cancelButton:otherButtons:completion:`, `isRootHelperAvailable`, `sendObjectWithReplySync:` etc.) are **identical** between both versions. The NZ* classes (NZFileBrowserController, NZDirectoryController, NZFileItem, NZFileManager, NZTextEditor, NZFileViewer) do NOT exist in **either** binary — those hooks are dead code for both versions.  
+  **Fix:** Update `FilzaApplySandboxExt.plist` Filter Bundles array to include `com.tigisoftware.Filza000`.  
+  **Remaining risk:** 4.0.0 binary is actually newer (2025-03-02) than 4.0.2 (2024-07-24) — versioning is misleading. Consider adding both bundle IDs and a wildcard fallback.
 
-- [ ] `A2.2` 🟡 — Padlock bypass: detect if target classes exist at load time  
+- [x] `A2.2` 🟡 — Padlock bypass: detect if target classes exist at load time  
   _Prompt:_ "In FilzaPadlockBypass.xm, add a %ctor that does NSClassFromString for every hooked class (NZFileBrowserController, NZDirectoryController, NZFileItem, NZFileManager, NZTextEditor, NZFileViewer). Log which classes are missing. If all are missing, set a flag to skip all hooks."
 
 - [ ] `A2.3` 🟢 — Test with Filza 4.0.0 on iOS 17.0 and 18.0 for regression  
   _Prompt:_ "Create a test matrix: Filza 4.0.0 × iOS 17.0, 17.7, 18.0, 18.7, 26.0. For each combo, test: launch, browse /System, create a file, delete a file, zip Documents, unzip to /var/tmp. Mark pass/fail."
+
+- [ ] `A2.4` 🟠 — FilzaPadlockBypass NZ* hooks are dead code — replace with TG* equivalents  
+  _IPA analysis 2026-08-10: The NZ* classes (NZFileBrowserController, NZDirectoryController, NZFileItem, NZFileManager, NZTextEditor, NZFileViewer) do NOT exist in Filza 4.0.0 or 4.0.2. The actual Filza uses TG* prefixes (TGFileBrowserController, TGDirectoryController, etc.). Our `%hook NZFileBrowserController` hooks silently install on non-existent classes — they never fire. Need to reverse-engineer the actual TG* class hierarchy and point hooks at the right targets. Affects all 17 padlock bypass hooks.
 
 ---
 
@@ -530,68 +536,85 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 ## J1 — Interactive Menu (no-args mode)
 
-- [ ] `J1.1` 🟠 — Main menu: arrow-key navigation with arctic wolf theme  
-  _Prompt:_ "When ./W0lfSword-Beta is run with no arguments, show an interactive menu: [1] Quick Exploit, [2] Configure, [3] Deploy Only, [4] Device Manager, [5] Log Viewer, [6] Diagnostics, [7] Profiles, [8] History, [q] Quit. Use `select` or read-based navigation with color highlighting. Same arctic wolf palette as W0lfSword."
+- [x] `J1.1` 🟠 — Main menu: arctic wolf theme, numbered menu, spinner, verbose mode  
+  _Done 2026-08-10: checkra1n-style ╔═╗ header, 8-option menu with dim subtitles, 0.5s spinner on every action, -v/--verbose flag, `W0lfSword ▸` prompt._
 
-- [ ] `J1.2` 🟠 — Quick Exploit — one-button exploit chain  
-  _Prompt:_ "Quick Exploit: read saved config (profile), build .deb, deploy to device, SSH to verify /tmp/FilzaTweak.log shows 'SANDBOX ESCAPED', display success/failure with color. If exploit fails, auto-retry up to configured max. Show live log tail during the process."
+- [x] `J1.2` 🟠 — Quick Exploit — one-button exploit chain  
+  _Done: 4-stage progress (Build → Deploy → Wait → Verify), dot animation during device wait, ╔══ SUCCESS ══╗ box on escape confirmed, auto-log success/fail to history.json._
 
-- [ ] `J1.3` 🟡 — Configure menu — select exploit method, target app, retries  
-  _Prompt:_ "Interactive configure: pick exploit technique (DarkSword pe_v1/pe_v2/PUAF auto), target app (Filza/Santander/NewTerm/standalone), retry count (1-10), SSV enable toggle, log level. Save to active profile. Show current settings with colored labels."
+- [x] `J1.3` 🟡 — Configure menu (basic: via profile save/load)  
+  _Done 2026-08-10: profile save captures current device/target/retry settings, profile load restores. Full interactive configure wizard still pending._
 
 ## J2 — Profile System
 
-- [ ] `J2.1` 🟠 — Save/load exploit profiles (JSON in .w0lfsword/profiles/)  
-  _Prompt:_ "Create a profile system that saves: profile_name, device_ip, target_bundle_id, exploit_method, retry_count, ssv_enabled, last_success_timestamp. Store as JSON files in .w0lfsword/profiles/<name>.json. './W0lfSword-Beta profile save my-ip14' and './W0lfSword-Beta profile load my-ip14'."
+- [x] `J2.1` 🟠 — Save/load exploit profiles (JSON in .w0lfsword/profiles/)  
+  _Done: cmd_profile save|load|list with JSON storage, active profile tracking._
 
-- [ ] `J2.2` 🟡 — Profile list with colored status  
-  _Prompt:_ "`./W0lfSword-Beta profile list` shows all saved profiles in a table: name, device IP, target, exploit method, last success date. Color-code: green=last exploit succeeded, red=last failed, dim=untested."
+- [x] `J2.2` 🟡 — Profile list with colored status  
+  _Done: table with * active marker, device IP, saved date._
 
 - [ ] `J2.3` 🟢 — Auto-detect profile on startup  
-  _Prompt:_ "On launch, check .w0lfsword/profiles/ for a 'default' profile. If found, auto-load it. If multiple profiles exist but no default, show the list and ask which to use."
+  _Prompt:_ "On launch, check .w0lfsword/profiles/ for a 'default' profile. If found, auto-load it."
 
 ## J3 — Device Manager
 
-- [ ] `J3.1` 🟠 — Multi-device management  
-  _Prompt:_ "`./W0lfSword-Beta device add 192.168.1.5 --name 'iPhone 14'` saves device to .w0lfsword/devices.json. `./W0lfSword-Beta device list` shows all devices with ping status, iOS version (via SSH query), last exploit result. `./W0lfSword-Beta device switch <ip>` sets active device."
+- [x] `J3.1` 🟠 — Multi-device management  
+  _Done: cmd_device add|list|switch with ping-based online/offline status._
 
-- [ ] `J3.2` 🟡 — Device info: iOS version, model, kernel version  
-  _Prompt:_ "`./W0lfSword-Beta device info` SSHs into active device and runs: uname -a, sw_vers, sysctl hw.machine hw.cpufamily. Displays in a formatted panel. Caches results for offline viewing."
+- [x] `J3.2` 🟡 — Device info: iOS version, model, kernel version  
+  _Done: cmd_device info SSHs to device, shows sw_vers + sysctl hw.machine + kern.osversion._
 
 ## J4 — Live Exploit Monitoring
 
-- [ ] `J4.1` 🟠 — Real-time log monitor with exploit state detection  
-  _Prompt:_ "`./W0lfSword-Beta monitor` tail -f /tmp/FilzaTweak.log on device via SSH. Parse incoming lines and display: green spinner during exploit phase, checkmark when 'SANDBOX ESCAPED' detected, red X if 'ERROR' or retry exhausted. Show elapsed time since exploit start. Press Ctrl+C to exit."
+- [x] `J4.1` 🟠 — Real-time log monitor with exploit state detection  
+  _Done: cmd_monitor tails /tmp/FilzaTweak.log via SSH, color-codes lines (▓ success, ✗ error, ▸ retry, ✓ escaped)._
 
-- [ ] `J4.2` 🟡 — Exploit stage progress bar  
-  _Prompt:_ "During Quick Exploit, show a progress indicator: [1/5] Building... → [2/5] Deploying... → [3/5] Waiting for exploit... → [4/5] Verifying sandbox escape... → [5/5] Done. Each stage updates in place with color."
+- [x] `J4.2` 🟡 — Exploit stage progress bar  
+  _Done: cmd_quick shows [1/4]...[4/4] stages with in-place dot animation._
 
 ## J5 — Exploit History & Stats
 
-- [ ] `J5.1` 🟡 — Exploit attempt logger  
-  _Prompt:_ "After every exploit run (success or failure), append to .w0lfsword/history.json: timestamp, device_ip, ios_version, device_model, exploit_method, retry_count, result (success/fail). `./W0lfSword-Beta history` displays a formatted table."
+- [x] `J5.1` 🟡 — Exploit attempt logger  
+  _Done: cmd_quick writes {timestamp, device, result} to history.json on every run._
 
-- [ ] `J5.2` 🟢 — Success rate dashboard  
-  _Prompt:_ "`./W0lfSword-Beta history stats` shows: total attempts, success rate %, avg retries per success, best/worst device, per-iOS-version breakdown. ASCII bar chart for visual comparison."
+- [x] `J5.2` 🟢 — Success rate dashboard  
+  _Done: cmd_history stats shows attempts/success/fail/rate with █░ ASCII bar chart._
 
 ## J6 — Original W0lfSword Commands (all preserved)
 
-- [ ] `J6.1` 🟠 — Route all original W0lfSword commands through W0lfSword-Beta  
-  _Prompt:_ "W0lfSword-Beta build|extract|deploy|status|audit|log|toggle|offsets|targets|clean|doctor|help — each calls the identical logic from original W0lfSword. Use source or function reuse so there's no code duplication. Original W0lfSword remains untouched."
+- [x] `J6.1` 🟠 — Route all original W0lfSword commands through W0lfSword-Beta  
+  _Done: all 12 commands (build, extract, deploy, status, audit, log, toggle, offsets, targets, clean, doctor, help) are fully reimplemented in W0lfSword-Beta._
 
-- [ ] `J6.2` 🟡 — Add --json flag to status/audit/offsets for machine-readable output  
-  _Prompt:_ "`./W0lfSword-Beta status --json` outputs JSON for programmatic use. `./W0lfSword-Beta offsets --json` outputs offset table as JSON. Useful for CI or external tools."
+- [ ] `J6.2` 🟡 — Add --json flag to status/audit/offsets for machine-readable output
 
 ## J7 — Polish
 
-- [ ] `J7.1` 🟢 — Same arctic wolf ASCII art on launch  
-  _Prompt:_ "W0lfSword-Beta shows the same wolf art as W0lfSword, but with 'BETA' tag in the header. Keep the pale blue/gray arctic palette identical."
+- [x] `J7.1` 🟢 — Arctic wolf ASCII art + themed header  
+  _Done: show_header() with ╔═╗ box, arctic palette consistent with main W0lfSword._
 
-- [ ] `J7.2` 🟢 — Sound on exploit success (optional, macOS only)  
-  _Prompt:_ "After successful sandbox escape detection in monitor mode, play a system sound (afplay /System/Library/Sounds/Glass.aiff). Toggle with --sound flag."
+- [ ] `J7.2` 🟢 — Sound on exploit success (optional, macOS only)
 
-- [ ] `J7.3` 🟢 — Colored diff output comparing builds  
-  _Prompt:_ "`./W0lfSword-Beta diff` shows git diff with syntax highlighting for .m/.xm/.h files. Useful before deploy to verify what changed."
+- [ ] `J7.3` 🟢 — Colored diff output comparing builds
+
+## J8 — Beta UX (newly added 2026-08-10)
+
+- [ ] `J8.1` 🟡 — Clear screen on menu entry / re-draw support  
+  _The `draw_menu()` function calls `clear` but on some terminals this causes flicker. Switch to `tput` or ANSI cursor-home for smoother redraw._
+
+- [ ] `J8.2` 🟢 — Default profile auto-load on startup  
+  _Check for `default` profile in .w0lfsword/profiles/ and load it automatically if present._
+
+- [ ] `J8.3` 🟢 — Verbose mode remembers state across menu sessions  
+  _Currently -v only works on direct commands, not in the interactive menu. Add a `:verbose` toggle command in the menu._
+
+- [ ] `J8.4` 🟢 — ASCII progress bar during Quick Exploit wait period  
+  _Replace the 10 dots with a smooth filling bar: [▓▓▓▓░░░░░░] 40%._
+
+- [ ] `J8.5` 🟢 — Exploit profile: per-app target selection  
+  _Allow profile to specify target bundle ID, so different profiles can target different Filza versions (Filza vs Filza000)._
+
+- [ ] `J8.6` 🟢 — Color-coded diff subcommand  
+  _`./W0lfSword-Beta diff` shows uncommitted changes with syntax-aware coloring for .m/.xm/.h files._
 
 ---
 
@@ -600,7 +623,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | Section | Total Items | Completed | Remaining |
 |---------|------------|-----------|-----------|
 | A1 — Thread Safety | 14 | 10 | 4 |
-| A2 — Filza Compatibility | 3 | 0 | 3 |
+| A2 — Filza Compatibility | 4 | 2 | 2 |
 | A3 — Kernel Exploit Robustness | 6 | 1 | 5 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
 | B2 — Runtime Control | 3 | 1 | 2 |
@@ -609,7 +632,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | C1 — Kernel Vuln Hunting | 7 | 0 | 7 |
 | C2 — Bug Bounty Targets | 8 | 0 | 8 |
 | C3 — Attack Chains | 4 | 0 | 4 |
-| D1 — Refactoring | 5 | 1 | 4 |
+| D1 — Refactoring | 5 | 3 | 2 |
 | D2 — Testing | 4 | 0 | 4 |
 | D3 — Documentation | 3 | 0 | 3 |
 | E1 — Version/Device Expansion | 5 | 0 | 5 |
@@ -624,15 +647,16 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | H2 — Knowledge Base | 3 | 0 | 3 |
 | I1 — Reference Repos | — | — | — |
 | I2 — Key CVEs | — | — | — |
-| J1 — Interactive Menu | 3 | 0 | 3 |
-| J2 — Profile System | 3 | 0 | 3 |
-| J3 — Device Manager | 2 | 0 | 2 |
-| J4 — Live Monitoring | 2 | 0 | 2 |
-| J5 — History & Stats | 2 | 0 | 2 |
-| J6 — Original Commands | 2 | 0 | 2 |
-| J7 — Polish | 3 | 0 | 3 |
-| **TOTAL** | **115** | **13** | **102** |
+| J1 — Interactive Menu | 3 | 3 | 0 |
+| J2 — Profile System | 3 | 2 | 1 |
+| J3 — Device Manager | 2 | 2 | 0 |
+| J4 — Live Monitoring | 2 | 2 | 0 |
+| J5 — History & Stats | 2 | 2 | 0 |
+| J6 — Original Commands | 2 | 1 | 1 |
+| J7 — Polish | 3 | 1 | 2 |
+| J8 — Beta UX (new) | 6 | 0 | 6 |
+| **TOTAL** | **119** | **31** | **88** |
 
 ---
 
-*Last updated: 2026-08-09*
+*Last updated: 2026-08-10*
