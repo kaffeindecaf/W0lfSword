@@ -36,6 +36,8 @@ D='\033[2m'
 # ═══════════════════════════════════════════════════════════════
 
 VERBOSE=false
+DEBUG=false
+YES_MODE=false
 
 # ── Spinner animation (0.5s) ──────────────────────────────────
 
@@ -629,7 +631,7 @@ draw_menu() {
     echo -e "  ${C_EYE}${B}[ 8 ]${NC}  Targets            ${C_DIM}Supported apps${NC}"
     echo ""
     echo -e "  ${C_DIM}───${NC}"
-    echo -e "  ${C_DIM}quick:${NC}  ${C_EYE}b${NC}=build  ${C_EYE}d${NC}=deploy  ${C_EYE}s${NC}=status  ${C_EYE}l${NC}=log  ${C_EYE}m${NC}=monitor  ${C_EYE}c${NC}=clean"
+    echo -e "  ${C_DIM}quick:${NC}  ${C_EYE}b${NC}=build  ${C_EYE}d${NC}=deploy  ${C_EYE}a${NC}=adderall  ${C_EYE}s${NC}=status  ${C_EYE}l${NC}=log  ${C_EYE}m${NC}=monitor  ${C_EYE}c${NC}=clean"
     echo -e "  ${C_EYE}${B}[ q ]${NC}  Quit               ${C_DIM}╱  howl later${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
@@ -658,6 +660,7 @@ run_menu() {
             # Quick shortcuts
             b|B|build)    cmd_build || true;;
             d|D|deploy)   cmd_deploy || true;;
+            a|A|adderall) cmd_adderall || true;;
             s|S|status)   cmd_status || true;;
             l|L|log)      cmd_log 50 || true;;
             m|M|monitor)  cmd_monitor || true;;
@@ -673,6 +676,331 @@ run_menu() {
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  ADDERALL — Fully Automated Exploit Deployment
+# ═══════════════════════════════════════════════════════════════
+
+# Prompt helper — respects --yes
+confirm() {
+    $YES_MODE && return 0
+    local msg="${1:-Continue?}"
+    echo -ne "  ${C_AMB}${msg} [y/N]${NC} "; read -r ans
+    [ "$ans" = "y" ] || [ "$ans" = "Y" ] && return 0
+    return 1
+}
+
+# Pulse animation — runs in background, stopped by killing $PULSE_PID
+start_pulse() {
+    local msg="$1"
+    local frames=( '▓' '▒' '░' '▒' )
+    while true; do
+        for f in "${frames[@]}"; do
+            printf "\r  ${C_EYE}%s${NC} ${C_GREY}%s${NC}" "$f" "$msg"
+            sleep 0.15
+        done
+    done
+}
+
+stop_pulse() {
+    [ -n "${PULSE_PID:-}" ] && kill "$PULSE_PID" 2>/dev/null || true
+    wait "${PULSE_PID:-}" 2>/dev/null || true
+    PULSE_PID=""
+    printf "\r\033[K"
+}
+
+cmd_adderall() {
+    show_header
+    echo ""
+    echo -e "  ${C_AMB}${B}╔════════════════════════════════════════════════╗${NC}"
+    echo -e "  ${C_AMB}${B}║         W0lfSword ADDERALL — Auto Exploit         ║${NC}"
+    echo -e "  ${C_AMB}${B}╚════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  ${C_DIM}Fully automated: discover device, check offsets, build, deploy, verify${NC}"
+    echo -e "  ${C_DIM}Run with --yes to skip prompts, -vv for extreme verbosity${NC}"
+    echo ""
+
+    # ── Phase 0: Sudo check ──────────────────────────────────
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "  ${C_RED}✗ This command needs root. Re-run with:${NC}"
+        echo -e "    ${C_FROST}sudo ./W0lfSword adderall${NC}"
+        return 1
+    fi
+
+    local IP="" IOS_VER="" DEV_MODEL="" CPU_FAMILY="" EXPLOIT_METHOD="auto"
+    local DEV_NAME=""
+
+    # ── Phase 1: Device Discovery ─────────────────────────────
+    section "Phase 1 — Device Discovery"
+    echo ""
+
+    if command -v idevice_id &>/dev/null; then
+        local usb_uuid; usb_uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
+        if [ -n "$usb_uuid" ]; then
+            echo -e "  ${C_GRN}✓${NC} USB device detected: ${C_EYE}$usb_uuid${NC}"
+            DEV_MODEL=$(ideviceinfo -k HardwareModel 2>/dev/null || echo "unknown")
+            IOS_VER=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
+            DEV_NAME=$(ideviceinfo -k DeviceName 2>/dev/null || echo "iPhone")
+            vlog "ideviceinfo: model=$DEV_MODEL ios=$IOS_VER name=$DEV_NAME"
+
+            # Try to pair
+            if ! ideviceinfo -k ProductVersion &>/dev/null; then
+                echo -e "  ${C_AMB}⚠${NC} Device needs pairing..."
+                start_pulse "pairing" & PULSE_PID=$!
+                idevicepair pair 2>/dev/null || true
+                stop_pulse
+                IOS_VER=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
+            fi
+        fi
+    fi
+
+    # If no USB, try WiFi/SSH
+    if [ -z "$IOS_VER" ]; then
+        IP=$(get_device_ip)
+        if [ -n "$IP" ]; then
+            echo -e "  ${C_GRN}✓${NC} Saved device: ${C_EYE}$IP${NC}"
+            if ping -c1 -W1 "$IP" >/dev/null 2>&1; then
+                echo -e "  ${C_GRN}✓${NC} Device online via WiFi"
+                IOS_VER=$(ssh -o StrictHostKeyChecking=no "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
+                DEV_MODEL=$(ssh -o StrictHostKeyChecking=no "root@$IP" "sysctl -n hw.machine" 2>/dev/null || echo "")
+            else
+                echo -e "  ${C_RED}✗${NC} Device offline — use USB or add device IP"
+            fi
+        fi
+        if [ -z "$IOS_VER" ]; then
+            echo -ne "  ${C_FROST}Enter device IP (or press enter for USB only):${NC} "; read -r IP
+            [ -n "$IP" ] && IOS_VER=$(ssh -o StrictHostKeyChecking=no "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
+        fi
+    fi
+
+    if [ -z "$IOS_VER" ]; then
+        echo -e "  ${C_RED}✗ No device found — connect via USB or configure SSH IP${NC}"
+        return 1
+    fi
+
+    echo ""
+    echo -e "  ${C_EYE}${B}$DEV_NAME${NC} — ${C_GRN}iOS $IOS_VER${NC} • ${C_EYE}$DEV_MODEL${NC}"
+
+    # Determine SoC CPU family for exploit method
+    case "$DEV_MODEL" in
+        iPhone1[0-6],*|iPad1[3-6],*) CPU_FAMILY="A12-A16" EXPLOIT_METHOD="pe_v1";;
+        iPhone17,*)                 CPU_FAMILY="A17" EXPLOIT_METHOD="pe_v1";;
+        iPhone18,*)                 CPU_FAMILY="A18" EXPLOIT_METHOD="pe_v2";;
+        *)                          CPU_FAMILY="unknown" EXPLOIT_METHOD="auto";;
+    esac
+    echo -e "  CPU: ${C_EYE}$CPU_FAMILY${NC}  •  Exploit: ${C_AMB}$EXPLOIT_METHOD${NC}"
+
+    # ── Phase 2: Environment Check ───────────────────────────
+    echo ""
+    section "Phase 2 — Environment"
+    echo ""
+    local missing=""
+    check_theos || missing="$missing theos"
+    command -v clang &>/dev/null    || missing="$missing clang"
+    command -v dpkg-deb &>/dev/null || missing="$missing dpkg"
+    command -v ssh &>/dev/null      || missing="$missing ssh"
+
+    if [ -z "$missing" ]; then
+        echo -e "  ${C_GRN}✓${NC} All build tools present"
+    else
+        echo -e "  ${C_AMB}⚠ Missing:${C_RED}$missing${NC}"
+        if confirm "Install missing packages?"; then
+            apt update -qq 2>/dev/null
+            apt install -y clang lld dpkg theos 2>/dev/null || true
+            echo -e "  ${C_GRN}✓${NC} Installation attempted — re-run doctor to verify"
+        fi
+    fi
+
+    # Attempt USB pairing
+    if [ -n "$usb_uuid" ]; then
+        if idevicepair validate 2>/dev/null | grep -q 'paired'; then
+            echo -e "  ${C_GRN}✓${NC} USB pairing valid"
+        else
+            echo -e "  ${C_AMB}⚠${NC} USB not paired — running idevicepair pair..."
+            start_pulse "pairing" & PULSE_PID=$!
+            idevicepair pair 2>/dev/null || true
+            stop_pulse
+            echo -e "  ${C_GRN}✓${NC} Pairing done"
+        fi
+    fi
+
+    # SSH check (WiFi)
+    if [ -n "$IP" ]; then
+        ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$IP" "echo ok" 2>/dev/null | grep -q ok \
+            && echo -e "  ${C_GRN}✓${NC} SSH to $IP: ok" \
+            || echo -e "  ${C_AMB}⚠${NC} SSH to $IP failed — check OpenSSH on device"
+    fi
+
+    # ── Phase 3: Offset Check ────────────────────────────────
+    echo ""
+    section "Phase 3 — Offset Coverage"
+    echo ""
+    local ver_major; ver_major=$(echo "$IOS_VER" | cut -d. -f1)
+    local ver_block; ver_block=$(grep -c "@\"$IOS_VER" kexploit/offsets.m 2>/dev/null || echo 0)
+
+    if [ "$ver_block" -gt 0 ]; then
+        echo -e "  ${C_GRN}✓${NC} iOS $IOS_VER has ${C_EYE}$ver_block${NC} explicit offset blocks"
+    else
+        echo -e "  ${C_AMB}⚠${NC} iOS $IOS_VER not explicitly in offsets.m"
+        if confirm "Attempt to auto-pull kernelcache and run XPF?"; then
+            echo -e "  ${C_DIM}(kernelcache extraction requires SSH + root on device)${NC}"
+            if [ -n "$IP" ]; then
+                start_pulse "pulling kernelcache" & PULSE_PID=$!
+                # Grab kernelcache from device
+                local kc_path="/tmp/kernelcache_$IOS_VER"
+                ssh -o StrictHostKeyChecking=no "root@$IP" \
+                    "dd if=/dev/rdisk0s1s1 of=/tmp/kc bs=1M count=32 2>/dev/null; lzma -d /tmp/kc -c > /tmp/kc_raw 2>/dev/null" 2>/dev/null || true
+                scp -o StrictHostKeyChecking=no "root@$IP:/tmp/kc_raw" "$kc_path" 2>/dev/null || true
+                stop_pulse
+                if [ -f "$kc_path" ] && [ -s "$kc_path" ]; then
+                    echo -e "  ${C_GRN}✓${NC} Kernelcache pulled ($(du -h "$kc_path" | cut -f1))"
+                    echo -e "  ${C_DIM}Run XPF manually: XPF/src/xpf $kc_path > offsets_new.txt${NC}"
+                else
+                    echo -e "  ${C_AMB}⚠${NC} Kernelcache pull failed — might need different device path"
+                fi
+            else
+                echo -e "  ${C_RED}✗${NC} No SSH — kernelcache pull needs WiFi connection"
+            fi
+        fi
+    fi
+    vlog "iOS $IOS_VER — offset blocks: $ver_block"
+
+    # ── Phase 4: Configuration ───────────────────────────────
+    echo ""
+    section "Phase 4 — Configuration"
+    echo ""
+
+    local TARGET_BUNDLE="com.tigisoftware.Filza"
+    if confirm "Target Filza 4.0.2 (com.tigisoftware.Filza000) instead of 4.0.0?"; then
+        TARGET_BUNDLE="com.tigisoftware.Filza000"
+    fi
+    echo -e "  ${C_GREY}Target:${NC}  ${C_EYE}$TARGET_BUNDLE${NC}"
+
+    if [ "$EXPLOIT_METHOD" = "auto" ]; then
+        echo -ne "  ${C_FROST}Exploit method [auto/pe_v1/pe_v2]:${NC} "; read -r em
+        [ -n "$em" ] && EXPLOIT_METHOD="$em"
+    fi
+    echo -e "  ${C_GREY}Exploit:${NC} ${C_AMB}$EXPLOIT_METHOD${NC}"
+
+    local RETRY_COUNT=5
+    echo -ne "  ${C_FROST}Retry count [5]:${NC} "; read -r rc
+    [ -n "$rc" ] && RETRY_COUNT="$rc"
+
+    local ENABLE_SSV=true
+    confirm "Enable SSV bypass?" || ENABLE_SSV=false
+    echo -e "  ${C_GREY}SSV:${NC}     $($ENABLE_SSV && echo "${C_GRN}yes${NC}" || echo "${C_DIM}no${NC}")"
+
+    local PROFILE_NAME="${DEV_MODEL}-${IOS_VER}"
+    echo -ne "  ${C_FROST}Profile name [$PROFILE_NAME]:${NC} "; read -r pn
+    [ -n "$pn" ] && PROFILE_NAME="$pn"
+
+    echo ""
+    echo -e "  ${C_STEEL}${B}── Configuration Summary ──${NC}"
+    printf "  ${C_GREY}%-12s${NC} %s\n" "Device"    "$DEV_NAME ($DEV_MODEL)"
+    printf "  ${C_GREY}%-12s${NC} %s\n" "iOS"       "$IOS_VER"
+    printf "  ${C_GREY}%-12s${NC} %s\n" "Target"    "$TARGET_BUNDLE"
+    printf "  ${C_GREY}%-12s${NC} %s\n" "Exploit"   "$EXPLOIT_METHOD"
+    printf "  ${C_GREY}%-12s${NC} %d\n" "Retries"   "$RETRY_COUNT"
+    printf "  ${C_GREY}%-12s${NC} %s\n" "SSV"       "$($ENABLE_SSV && echo 'yes' || echo 'no')"
+    printf "  ${C_GREY}%-12s${NC} %s\n" "Profile"   "$PROFILE_NAME"
+    echo ""
+
+    confirm "Proceed with deployment?" || { echo -e "  ${C_DIM}Aborted.${NC}"; return 0; }
+
+    # Save profile
+    mkdir -p "$DATA_DIR/profiles"
+    [ -n "$IP" ] && echo "$IP" > "$DATA_DIR/active_device"
+    cat > "$DATA_DIR/profiles/$PROFILE_NAME.json" << EOF
+{
+  "name": "$PROFILE_NAME",
+  "device_ip": "${IP:-}",
+  "device_model": "$DEV_MODEL",
+  "ios_version": "$IOS_VER",
+  "target": "$TARGET_BUNDLE",
+  "exploit_method": "$EXPLOIT_METHOD",
+  "retry_count": $RETRY_COUNT,
+  "ssv_enabled": $ENABLE_SSV,
+  "saved_at": "$(date -Iseconds)"
+}
+EOF
+    echo "$PROFILE_NAME" > "$DATA_DIR/active_profile"
+
+    # ── Phase 5: Build → Deploy → Verify ─────────────────────
+    echo ""
+    section "Phase 5 — Build, Deploy, Verify"
+    echo ""
+
+    stage "1/5" "Building..."
+    check_theos || { err "THEOS not set"; return 1; }
+    local build_out
+    if $DEBUG; then
+        build_out=$(make package 2>&1)
+        echo "$build_out" | tail -15
+    else
+        make package >/dev/null 2>&1
+    fi
+    local ec=$?
+    local deb; deb=$(find_deb)
+    [ $ec -ne 0 ] || [ -z "$deb" ] && { err "Build failed"; $VERBOSE && echo "$build_out" | tail -5; return 1; }
+    ok "Built $(basename "$deb") ($(du -h "$deb" | cut -f1))"
+
+    # Ensure we have a deploy target
+    if [ -z "$IP" ] && [ -n "$usb_uuid" ]; then
+        echo -ne "  ${C_FROST}No SSH IP. Enter device IP for deploy:${NC} "; read -r IP
+        [ -z "$IP" ] && { err "Cannot deploy without IP"; return 1; }
+        echo "$IP" > "$DATA_DIR/active_device"
+    fi
+
+    stage "2/5" "Deploying to $IP..."
+    local rp="/tmp/$(basename "$deb")"
+    scp -o StrictHostKeyChecking=no "$deb" "root@$IP:$rp" >/dev/null 2>&1 || { err "SCP failed"; return 1; }
+    ssh -o StrictHostKeyChecking=no "root@$IP" "dpkg -i '$rp' >/dev/null 2>&1; rm -f '$rp'" 2>/dev/null \
+        || { err "dpkg install failed"; return 1; }
+    ssh -o StrictHostKeyChecking=no "root@$IP" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
+    ok "Deployed + Filza restarted"
+
+    stage "3/5" "Waiting for exploit..."
+    local dots=""
+    for i in $(seq 1 12); do
+        dots+="."
+        printf "\r  ${C_EYE}[3/5]${NC} Waiting for exploit${dots}"
+        sleep 1
+    done
+    echo ""
+
+    stage "4/5" "Verifying sandbox escape..."
+    local log; log=$(ssh -o StrictHostKeyChecking=no "root@$IP" "tail -30 /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null || echo "")
+    $DEBUG && echo -e "  ${C_DIM}── Log tail ──${NC}\n$log\n  ${C_DIM}──────────────${NC}"
+
+    stage "5/5" "Final result..."
+    echo ""
+
+    if echo "$log" | grep -q "ESCAPED"; then
+        echo -e "  ${C_GRN}${B}  ╔════════════════════════════════════════════╗${NC}"
+        echo -e "  ${C_GRN}${B}  ║      SANDBOX ESCAPED — EXPLOIT SUCCESS     ║${NC}"
+        echo -e "  ${C_GRN}${B}  ╚════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "  ${C_GRN}Device $DEV_NAME ($IOS_VER) is now fully exploited${NC}"
+        echo -e "  ${C_DIM}SSV writes: $($ENABLE_SSV && echo 'enabled' || echo 'disabled')${NC}"
+
+        # Mark success
+        ssh -o StrictHostKeyChecking=no "root@$IP" "touch /var/mobile/Documents/.filza_last_success" 2>/dev/null || true
+
+        # History
+        echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$IP\",\"ios\":\"$IOS_VER\",\"model\":\"$DEV_MODEL\",\"result\":\"success\"}" >> "$DATA_DIR/history.json"
+    else
+        echo -e "  ${C_RED}${B}  ╔════════════════════════════════════════════╗${NC}"
+        echo -e "  ${C_RED}${B}  ║      ESCAPE NOT CONFIRMED                   ║${NC}"
+        echo -e "  ${C_RED}${B}  ╚════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "  ${C_AMB}Tips:${NC}"
+        echo -e "  • Check offsets:  ${C_FROST}./W0lfSword offsets $IOS_VER${NC}"
+        echo -e "  • View full log:  ${C_FROST}./W0lfSword log 100${NC}"
+        echo -e "  • Verify offsets.m covers iOS $IOS_VER and $DEV_MODEL"
+        echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$IP\",\"ios\":\"$IOS_VER\",\"result\":\"fail\"}" >> "$DATA_DIR/history.json"
+    fi
+    echo ""
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -703,11 +1031,13 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "history"      "Exploit stats + chart"
     echo ""
     section "Exploit Workflow"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "quick"        "One-shot exploit chain"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "adderall"     "Auto-discover → build → deploy → verify"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "quick"        "One-shot exploit chain (needs configured device)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "profile ..."  "Save/load exploit configs"
     printf "  ${C_EYE}%-14s${NC} %s\n" "device ..."   "Multi-device manager"
     echo ""
-    echo -e "  ${C_DIM}Tip: from menu, type 'b' to build, 'd' to deploy, 's' for status.${NC}"
+    echo -e "  ${C_DIM}Flags: -v verbose  -vv debug  -y/--yes skip prompts${NC}"
+    echo -e "  ${C_DIM}Tip: from menu, type 'b' to build, 'a' for adderall.${NC}"
     echo ""
 }
 
@@ -716,16 +1046,17 @@ cmd_help() {
 # ═══════════════════════════════════════════════════════════════
 
 main() {
-    # Parse verbose flag
+    # Parse flags
     for a in "$@"; do
-        [ "$a" = "-v" ] || [ "$a" = "--verbose" ] && VERBOSE=true && break
+        [ "$a" = "-v" ] || [ "$a" = "--verbose" ] && { [ "$VERBOSE" = "false" ] && VERBOSE=true; continue; }
+        [ "$a" = "-vv" ] || [ "$a" = "--debug" ] && { DEBUG=true; VERBOSE=true; continue; }
+        [ "$a" = "-y" ] || [ "$a" = "--yes" ] && { YES_MODE=true; continue; }
     done
 
-    # Strip -v from args
     local args=()
     local cmd=""
     for a in "$@"; do
-        [ "$a" = "-v" ] || [ "$a" = "--verbose" ] && continue
+        case "$a" in -v|-vv|--verbose|--debug|-y|--yes) continue;; esac
         [ -z "$cmd" ] && { cmd="$a"; continue; }
         args+=("$a")
     done
@@ -744,6 +1075,7 @@ main() {
         clean)     cmd_clean "${args[@]}";;
         doctor)    cmd_doctor "${args[@]}";;
         quick)     cmd_quick "${args[@]}";;
+        adderall)  cmd_adderall "${args[@]}";;
         profile)   cmd_profile "${args[@]}";;
         device)    cmd_device "${args[@]}";;
         history)   cmd_history "${args[@]}";;

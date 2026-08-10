@@ -248,6 +248,7 @@ Usage: ./W0lfSword <command> [args...]
 | `clean` | Clean build artifacts + temp files | `./W0lfSword clean` |
 | `doctor` | Check environment: THEOS, SDK, ssh, dpkg | `./W0lfSword doctor` |
 | `targets` | Show all supported apps + techniques | `./W0lfSword targets` |
+| `adderall` | Fully automated: discover device, build, deploy, verify | `sudo ./W0lfSword adderall --yes` |
 | `quick` | One-shot: build → deploy → verify | `./W0lfSword quick` |
 | `profile save\|load\|list` | Manage exploit profiles | `./W0lfSword profile save my-ip14` |
 | `device add\|list\|switch\|info` | Multi-device management | `./W0lfSword device add 192.168.1.5` |
