@@ -4,12 +4,53 @@
 # ║  iOS Kernel Exploit Toolkit — Interactive Exploit Menu       ║
 # ║  Made by kaffeindecaf — github.com/kaffeindecaf             ║
 # ╚══════════════════════════════════════════════════════════════╝
+#
+# Credits:
+#   Arctic wolf ASCI Iart — original artist unknown, adapted
+#   Spinner/pulse animation — inspired by checkra1n & homebrew
+#   idevice* tooling — libimobiledevice team
+#   Theos build system — theos.dev community
+#   DarkSword exploit — wh1te4ever, opa334, 34306
 
 set -uo pipefail
-# NOTE: -e intentionally NOT set — errors (no device, SSH fail, etc.)
-# return to the menu rather than killing the whole script.
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
+
+# ── Session log ──────────────────────────────────────────────
+DATA_DIR="$PROJECT_DIR/.w0lfsword"
+mkdir -p "$DATA_DIR/profiles" "$DATA_DIR"
+SESSION_LOG="$DATA_DIR/session.log"
+log_script() { echo "[$(date '+%H:%M:%S')] $*" >> "$SESSION_LOG"; }
+
+# ── Exit trap — restore terminal ─────────────────────────────
+cleanup() {
+    tput cnorm 2>/dev/null || true   # restore cursor
+    stty echo 2>/dev/null || true     # restore echo
+    echo -e "\033[?25h"               # show cursor
+    log_script "session ended (exit=$?)"
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+
+# ── Fail-safe wrappers ───────────────────────────────────────
+ssh_safe() {
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$@" 2>/dev/null
+}
+scp_safe() {
+    scp -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        "$@" 2>/dev/null
+}
+retry() {
+    local max="${1:-3}" delay="${2:-1}" cmd="${3:-true}"
+    local i=0
+    while [ $i -lt "$max" ]; do
+        eval "$cmd" && return 0
+        i=$((i+1))
+        [ $i -lt "$max" ] && sleep "$delay"
+    done
+    return 1
+}
 
 # ═══════════════════════════════════════════════════════════════
 #  COLOR PALETTE — Arctic Wolf
@@ -44,7 +85,7 @@ YES_MODE=false
 spinner() {
     local msg="${1:-Working}"
     local frames=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
-    local end=$((SECONDS * 10 + 5))  # 0.5s
+    local end=$((SECONDS * 10 + 5))
     while [ $((SECONDS * 10)) -lt $end ]; do
         for f in "${frames[@]}"; do
             [ $((SECONDS * 10)) -ge $end ] && break
@@ -53,6 +94,19 @@ spinner() {
         done
     done
     printf "\r\033[K"
+}
+
+# ── Progress bar ──────────────────────────────────────────────
+progress_bar() {
+    local current="${1:-0}" total="${2:-100}" width="${3:-20}"
+    local pct=0; [ "$total" -gt 0 ] && pct=$((current * 100 / total))
+    local filled=$((pct * width / 100))
+    local empty=$((width - filled))
+    printf "${C_GRN}"
+    for ((i=0; i<filled; i++)); do printf "▓"; done
+    printf "${C_DIM}"
+    for ((i=0; i<empty; i++)); do printf "░"; done
+    printf "${NC} %d%%" "$pct"
 }
 
 # ── Drawing helpers ───────────────────────────────────────────
@@ -78,7 +132,6 @@ vlog() { $VERBOSE && printf "  ${C_DIM}[v] %s${NC}\n" "$*" || true; }
 
 # ── Data dir ──────────────────────────────────────────────────
 
-DATA_DIR="$PROJECT_DIR/.w0lfsword"
 mkdir -p "$DATA_DIR/profiles" "$DATA_DIR"
 
 # ═══════════════════════════════════════════════════════════════
@@ -130,8 +183,11 @@ show_header() {
 # ═══════════════════════════════════════════════════════════════
 
 check_theos() {
-    [ -n "${THEOS:-}" ] && return 0
-    [ -d "$HOME/theos" ] && { export THEOS="$HOME/theos"; return 0; }
+    # Try env var, then common paths
+    [ -n "${THEOS:-}" ] && [ -d "$THEOS" ] && return 0
+    for d in "$HOME/theos" /opt/theos /usr/local/theos "$PROJECT_DIR/.theos"; do
+        [ -d "$d/makefiles" ] && { export THEOS="$d"; vlog "THEOS auto-detected at $d"; return 0; }
+    done
     return 1
 }
 
@@ -181,25 +237,28 @@ cmd_deploy() {
     local ip; ip=$(get_device_ip "${1:-}")
     [ -z "$ip" ] && { err "No device IP — pass it or use 'device add'"; return 1; }
     $VERBOSE || spinner "deploying to $ip"
+    log_script "deploy to $ip"
 
-    if ! ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$ip" "echo ok" 2>/dev/null | grep -q ok; then
-        err "SSH failed to root@$ip"; return 1
+    if ! ssh_safe "root@$ip" "echo ok" | grep -q ok; then
+        err "SSH failed to root@$ip — is OpenSSH installed? Try 'device info $ip'"
+        return 1
     fi
     vlog "SSH connection: ok"
 
     local deb; deb=$(find_deb)
-    [ -z "$deb" ] && { err "No .deb — build first"; return 1; }
+    [ -z "$deb" ] && { err "No .deb — build first: ./W0lfSword build"; return 1; }
 
     local rp="/tmp/$(basename "$deb")"
     vlog "Uploading $deb → root@$ip:$rp"
-    scp -o StrictHostKeyChecking=no "$deb" "root@$ip:$rp" 2>/dev/null
-    local out; out=$(ssh -o StrictHostKeyChecking=no "root@$ip" "dpkg -i '$rp' 2>&1; rm -f '$rp'")
-
+    retry 3 1 "scp_safe '$deb' 'root@$ip:$rp'" || { err "SCP failed after 3 retries"; return 1; }
+    local out; out=$(ssh_safe "root@$ip" "dpkg -i '$rp' 2>&1; rm -f '$rp'")
     ok "Installed on $ip"
     [ -n "$out" ] && vlog "dpkg: $out"
-    ssh -o StrictHostKeyChecking=no "root@$ip" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
+
+    ssh_safe "root@$ip" "killall -9 Filza 2>/dev/null" || true
     vlog "Filza restarted"
     echo "$ip" > "$DATA_DIR/active_device"
+    log_script "deploy success: $ip"
 }
 
 cmd_status() {
@@ -278,7 +337,7 @@ cmd_log() {
     $VERBOSE || spinner "fetching log"
 
     echo -e "  ${C_STEEL}${B}── /tmp/FilzaTweak.log @ $ip ──${NC}\n"
-    ssh -o StrictHostKeyChecking=no "root@$ip" "tail -$lines /tmp/FilzaTweak.log 2>/dev/null || echo '(no log)'" 2>/dev/null | while IFS= read -r l; do
+    ssh_safe "root@$ip" "tail -$lines /tmp/FilzaTweak.log 2>/dev/null || echo '(no log)'" 2>/dev/null | while IFS= read -r l; do
         if   echo "$l" | grep -q '\*\*\*';                   then echo -e "  ${C_GRN}${B}▓ ${NC}$l"
         elif echo "$l" | grep -q 'ERROR\|FAILED\|invalid\|PANIC'; then echo -e "  ${C_RED}✗ $l${NC}"
         elif echo "$l" | grep -q 'Retry\|retry\|WARNING\|warn';   then echo -e "  ${C_AMB}▸ $l${NC}"
@@ -295,10 +354,10 @@ cmd_toggle() {
     [ "$action" != "on" ] && [ "$action" != "off" ] && { echo -e "${C_RED}Usage:${NC} toggle on|off [ip]"; return 1; }
     [ -z "$ip" ] && { err "No device"; return 1; }
     if [ "$action" = "on" ]; then
-        ssh -o StrictHostKeyChecking=no "root@$ip" "touch /var/mobile/Documents/.filza_tweak_disable" 2>/dev/null
+        ssh_safe "root@$ip" "touch /var/mobile/Documents/.filza_tweak_disable" 2>/dev/null
         echo -e "  ${C_RED}✗${NC} Exploit DISABLED — restart Filza to apply"
     else
-        ssh -o StrictHostKeyChecking=no "root@$ip" "rm -f /var/mobile/Documents/.filza_tweak_disable" 2>/dev/null
+        ssh_safe "root@$ip" "rm -f /var/mobile/Documents/.filza_tweak_disable" 2>/dev/null
         echo -e "  ${C_GRN}✓${NC} Exploit ENABLED — restart Filza to apply"
     fi
 }
@@ -466,9 +525,9 @@ cmd_device() {
             $VERBOSE || spinner "querying $dip"
             if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$dip" "echo ok" 2>/dev/null | grep -q ok; then
                 section "Device Info"
-                local ios; ios=$(ssh -o StrictHostKeyChecking=no "root@$dip" "sw_vers -productVersion" 2>/dev/null || echo "?")
-                local mdl; mdl=$(ssh -o StrictHostKeyChecking=no "root@$dip" "sysctl -n hw.machine" 2>/dev/null || echo "?")
-                local krn; krn=$(ssh -o StrictHostKeyChecking=no "root@$dip" "sysctl -n kern.osversion" 2>/dev/null || echo "?")
+                local ios; ios=$(ssh_safe "root@$dip" "sw_vers -productVersion" 2>/dev/null || echo "?")
+                local mdl; mdl=$(ssh_safe "root@$dip" "sysctl -n hw.machine" 2>/dev/null || echo "?")
+                local krn; krn=$(ssh_safe "root@$dip" "sysctl -n kern.osversion" 2>/dev/null || echo "?")
                 printf "  ${C_GREY}%-10s${NC} %s\n" "iOS"     "$ios"
                 printf "  ${C_GREY}%-10s${NC} %s\n" "Model"   "$mdl"
                 printf "  ${C_GREY}%-10s${NC} %s\n" "Kernel"  "$krn"
@@ -537,7 +596,7 @@ cmd_monitor() {
     local ip; ip=$(get_device_ip)
     [ -z "$ip" ] && { err "No device configured"; return 1; }
     echo ""; echo -e "  ${C_STEEL}${B}── Live Monitor @ $ip ── Ctrl+C to stop ────────${NC}"; echo ""
-    ssh -o StrictHostKeyChecking=no "root@$ip" "tail -f /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null | while IFS= read -r l; do
+    ssh_safe "root@$ip" "tail -f /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null | while IFS= read -r l; do
         if   echo "$l" | grep -q '\*\*\*';                   then echo -e "  ${C_GRN}${B}▓▓▓ $l${NC}"
         elif echo "$l" | grep -q 'ERROR\|FAILED\|PANIC';        then echo -e "  ${C_RED}  ✗ $l${NC}"
         elif echo "$l" | grep -q 'Retry\|retry\|WARNING';      then echo -e "  ${C_AMB}  ▸ $l${NC}"
@@ -568,9 +627,9 @@ cmd_quick() {
 
     stage "2/4" "Deploying to $ip..."
     local rp="/tmp/$(basename "$deb")"
-    scp -o StrictHostKeyChecking=no "$deb" "root@$ip:$rp" >/dev/null 2>&1
-    ssh -o StrictHostKeyChecking=no "root@$ip" "dpkg -i '$rp' >/dev/null 2>&1; rm -f '$rp'" 2>/dev/null
-    ssh -o StrictHostKeyChecking=no "root@$ip" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
+    scp_safe "$deb" "root@$ip:$rp" >/dev/null 2>&1
+    ssh_safe "root@$ip" "dpkg -i '$rp' >/dev/null 2>&1; rm -f '$rp'" 2>/dev/null
+    ssh_safe "root@$ip" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
     ok "Deployed + restarted"
 
     stage "3/4" "Waiting for exploit..."
@@ -578,7 +637,7 @@ cmd_quick() {
     echo ""
 
     stage "4/4" "Verifying..."
-    local log; log=$(ssh -o StrictHostKeyChecking=no "root@$ip" "tail -20 /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null || echo "")
+    local log; log=$(ssh_safe "root@$ip" "tail -20 /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null || echo "")
     if echo "$log" | grep -q "ESCAPED"; then
         echo ""
         echo -e "  ${C_GRN}${B}  ╔════════════════════════════════════╗${NC}"
@@ -720,6 +779,7 @@ cmd_adderall() {
     echo -e "  ${C_DIM}Fully automated: discover device, check offsets, build, deploy, verify${NC}"
     echo -e "  ${C_DIM}Run with --yes to skip prompts, -vv for extreme verbosity${NC}"
     echo ""
+    log_script "adderall started"
 
     # ── Phase 0: Sudo check ──────────────────────────────────
     if [ "$EUID" -ne 0 ]; then
@@ -762,15 +822,15 @@ cmd_adderall() {
             echo -e "  ${C_GRN}✓${NC} Saved device: ${C_EYE}$IP${NC}"
             if ping -c1 -W1 "$IP" >/dev/null 2>&1; then
                 echo -e "  ${C_GRN}✓${NC} Device online via WiFi"
-                IOS_VER=$(ssh -o StrictHostKeyChecking=no "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
-                DEV_MODEL=$(ssh -o StrictHostKeyChecking=no "root@$IP" "sysctl -n hw.machine" 2>/dev/null || echo "")
+                IOS_VER=$(ssh_safe "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
+                DEV_MODEL=$(ssh_safe "root@$IP" "sysctl -n hw.machine" 2>/dev/null || echo "")
             else
                 echo -e "  ${C_RED}✗${NC} Device offline — use USB or add device IP"
             fi
         fi
         if [ -z "$IOS_VER" ]; then
             echo -ne "  ${C_FROST}Enter device IP (or press enter for USB only):${NC} "; read -r IP
-            [ -n "$IP" ] && IOS_VER=$(ssh -o StrictHostKeyChecking=no "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
+            [ -n "$IP" ] && IOS_VER=$(ssh_safe "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
         fi
     fi
 
@@ -781,6 +841,7 @@ cmd_adderall() {
 
     echo ""
     echo -e "  ${C_EYE}${B}$DEV_NAME${NC} — ${C_GRN}iOS $IOS_VER${NC} • ${C_EYE}$DEV_MODEL${NC}"
+    log_script "device: $DEV_NAME ($DEV_MODEL) iOS $IOS_VER"
 
     # Determine SoC CPU family for exploit method
     case "$DEV_MODEL" in
@@ -849,9 +910,9 @@ cmd_adderall() {
                 start_pulse "pulling kernelcache" & PULSE_PID=$!
                 # Grab kernelcache from device
                 local kc_path="/tmp/kernelcache_$IOS_VER"
-                ssh -o StrictHostKeyChecking=no "root@$IP" \
+                ssh_safe "root@$IP" \
                     "dd if=/dev/rdisk0s1s1 of=/tmp/kc bs=1M count=32 2>/dev/null; lzma -d /tmp/kc -c > /tmp/kc_raw 2>/dev/null" 2>/dev/null || true
-                scp -o StrictHostKeyChecking=no "root@$IP:/tmp/kc_raw" "$kc_path" 2>/dev/null || true
+                scp_safe "root@$IP:/tmp/kc_raw" "$kc_path" 2>/dev/null || true
                 stop_pulse
                 if [ -f "$kc_path" ] && [ -s "$kc_path" ]; then
                     echo -e "  ${C_GRN}✓${NC} Kernelcache pulled ($(du -h "$kc_path" | cut -f1))"
@@ -954,10 +1015,10 @@ EOF
 
     stage "2/5" "Deploying to $IP..."
     local rp="/tmp/$(basename "$deb")"
-    scp -o StrictHostKeyChecking=no "$deb" "root@$IP:$rp" >/dev/null 2>&1 || { err "SCP failed"; return 1; }
-    ssh -o StrictHostKeyChecking=no "root@$IP" "dpkg -i '$rp' >/dev/null 2>&1; rm -f '$rp'" 2>/dev/null \
+    scp_safe "$deb" "root@$IP:$rp" >/dev/null 2>&1 || { err "SCP failed"; return 1; }
+    ssh_safe "root@$IP" "dpkg -i '$rp' >/dev/null 2>&1; rm -f '$rp'" 2>/dev/null \
         || { err "dpkg install failed"; return 1; }
-    ssh -o StrictHostKeyChecking=no "root@$IP" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
+    ssh_safe "root@$IP" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
     ok "Deployed + Filza restarted"
 
     stage "3/5" "Waiting for exploit..."
@@ -970,7 +1031,7 @@ EOF
     echo ""
 
     stage "4/5" "Verifying sandbox escape..."
-    local log; log=$(ssh -o StrictHostKeyChecking=no "root@$IP" "tail -30 /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null || echo "")
+    local log; log=$(ssh_safe "root@$IP" "tail -30 /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null || echo "")
     $DEBUG && echo -e "  ${C_DIM}── Log tail ──${NC}\n$log\n  ${C_DIM}──────────────${NC}"
 
     stage "5/5" "Final result..."
@@ -985,10 +1046,11 @@ EOF
         echo -e "  ${C_DIM}SSV writes: $($ENABLE_SSV && echo 'enabled' || echo 'disabled')${NC}"
 
         # Mark success
-        ssh -o StrictHostKeyChecking=no "root@$IP" "touch /var/mobile/Documents/.filza_last_success" 2>/dev/null || true
+        ssh_safe "root@$IP" "touch /var/mobile/Documents/.filza_last_success" 2>/dev/null || true
 
         # History
         echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$IP\",\"ios\":\"$IOS_VER\",\"model\":\"$DEV_MODEL\",\"result\":\"success\"}" >> "$DATA_DIR/history.json"
+        log_script "adderall SUCCESS: $DEV_MODEL iOS $IOS_VER @ $IP"
     else
         echo -e "  ${C_RED}${B}  ╔════════════════════════════════════════════╗${NC}"
         echo -e "  ${C_RED}${B}  ║      ESCAPE NOT CONFIRMED                   ║${NC}"
@@ -999,6 +1061,7 @@ EOF
         echo -e "  • View full log:  ${C_FROST}./W0lfSword log 100${NC}"
         echo -e "  • Verify offsets.m covers iOS $IOS_VER and $DEV_MODEL"
         echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$IP\",\"ios\":\"$IOS_VER\",\"result\":\"fail\"}" >> "$DATA_DIR/history.json"
+        log_script "adderall FAIL: $DEV_MODEL iOS $IOS_VER @ $IP"
     fi
     echo ""
 }
@@ -1080,7 +1143,8 @@ main() {
         device)    cmd_device "${args[@]}";;
         history)   cmd_history "${args[@]}";;
         monitor)   cmd_monitor "${args[@]}";;
-        help|--help|-h) cmd_help;;
+        # Add quick version command
+    version|--version|-V) echo -e "${C_WOLF}W0lfSword v0.9${NC} — iOS Kernel Exploit Toolkit"; echo -e "${C_DIM}github.com/kaffeindecaf/W0lfSword${NC}";;
         *) echo -e "${C_RED}Unknown: $cmd${NC}"; echo -e "Run ${C_FROST}./W0lfSword${NC} for interactive menu";;
     esac
 }
