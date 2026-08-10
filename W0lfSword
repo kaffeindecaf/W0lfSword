@@ -778,6 +778,10 @@ run_menu() {
             b|B|build)    cmd_build || true;;
             d|D|deploy)   cmd_deploy || true;;
             a|A|adderall) cmd_adderall || true;;
+            update|up)   cmd_update || true;;
+            setup|install) cmd_setup || true;;
+            reboot)       cmd_reboot || true;;
+            export)       cmd_export || true;;
             s|S|status)   cmd_status || true;;
             l|L|log)      cmd_log 50 || true;;
             m|M|monitor)  cmd_monitor || true;;
@@ -1230,6 +1234,145 @@ cmd_crashlog() {
 }
 
 # ═══════════════════════════════════════════════════════════════
+#  NEW UTILITY COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+cmd_update() {
+    section "W0lfSword Update"
+    echo ""
+    
+    echo -e "  ${C_DIM}Pulling latest from git...${NC}"
+    if ! git pull origin main 2>&1 | tail -3; then
+        err "Git pull failed — check your connection or stash changes"
+        return 1
+    fi
+    ok "Repository updated"
+    echo ""
+    
+    if confirm "Rebuild and redeploy?"; then
+        cmd_build || { err "Build failed — stopping"; return 1; }
+        local ip; ip=$(get_device_ip)
+        if [ -n "$ip" ]; then
+            cmd_deploy "$ip"
+        else
+            warn "No device configured — skipping deploy. Run: ./W0lfSword deploy <ip>"
+        fi
+    fi
+    log_script "update completed"
+}
+
+cmd_setup() {
+    show_header
+    echo ""
+    section "W0lfSword Setup — Install Dependencies"
+    echo ""
+    
+    if [ "$EUID" -ne 0 ]; then
+        err "Run with sudo: sudo ./W0lfSword setup"
+        return 1
+    fi
+    
+    local pkg_manager=""
+    if command -v apt &>/dev/null; then pkg_manager="apt"
+    elif command -v brew &>/dev/null; then pkg_manager="brew"
+    elif command -v pacman &>/dev/null; then pkg_manager="pacman"
+    else err "No supported package manager (apt/brew/pacman)"; return 1; fi
+    
+    echo -e "  ${C_DIM}Detected: ${C_EYE}${pkg_manager}${NC}"
+    echo ""
+    
+    local to_install=""
+    command -v clang &>/dev/null || to_install="$to_install clang"
+    command -v dpkg-deb &>/dev/null || to_install="$to_install dpkg"
+    command -v ssh &>/dev/null || to_install="$to_install openssh-client"
+    command -v git &>/dev/null || to_install="$to_install git"
+    command -v python3 &>/dev/null || to_install="$to_install python3"
+    
+    # idevice tools (Linux only via apt)
+    if [ "$pkg_manager" = "apt" ]; then
+        command -v idevice_id &>/dev/null || to_install="$to_install libimobiledevice-utils"
+    fi
+    
+    if [ -n "$to_install" ]; then
+        echo -e "  ${C_AMB}Missing:${C_RED}${to_install}${NC}"
+        echo ""
+        if confirm "Install now?"; then
+            case "$pkg_manager" in
+                apt)    apt update -qq && apt install -y $to_install;;
+                brew)   brew install $to_install;;
+                pacman) pacman -Sy --noconfirm $to_install;;
+            esac
+            ok "Packages installed"
+        fi
+    else
+        ok "All system packages present"
+    fi
+    
+    # THEOS
+    if check_theos; then
+        ok "THEOS found at ${THEOS}"
+    else
+        echo -e "  ${C_AMB}⚠ THEOS not found${NC}"
+        if confirm "Install THEOS to ~/theos?"; then
+            bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" 2>/dev/null
+            export THEOS="$HOME/theos"
+            ok "THEOS installed"
+        fi
+    fi
+    
+    echo ""
+    echo -e "  ${C_GRN}${B}Setup complete. Run './W0lfSword doctor' to verify.${NC}"
+    log_script "setup completed ($pkg_manager)"
+}
+
+cmd_reboot() {
+    local ip; ip=$(get_device_ip "${1:-}")
+    [ -z "$ip" ] && { err "No device IP"; return 1; }
+    
+    if ! confirm "Reboot device at $ip? This will disconnect it."; then
+        echo -e "  ${C_DIM}Cancelled${NC}"; return 0
+    fi
+    
+    echo -e "  ${C_DIM}Sending reboot...${NC}"
+    ssh_safe "root@$ip" "reboot" 2>/dev/null || true
+    ok "Reboot signal sent — device will disconnect momentarily"
+    log_script "reboot $ip"
+}
+
+cmd_export() {
+    local outfile="${1:-w0lfsword_export_$(date +%Y%m%d_%H%M%S).zip}"
+    local tmpdir; tmpdir=$(mktemp -d)
+    
+    echo -e "  ${C_DIM}Collecting debug data...${NC}"
+    
+    # Copy key files
+    mkdir -p "$tmpdir/logs" "$tmpdir/offsets" "$tmpdir/profile"
+    cp "$DATA_DIR/session.log" "$tmpdir/logs/" 2>/dev/null || true
+    cp "$DATA_DIR/last_crash.log" "$tmpdir/logs/" 2>/dev/null || true
+    cp kexploit/offsets.m "$tmpdir/offsets/" 2>/dev/null || true
+    cp kexploit/offsets.h "$tmpdir/offsets/" 2>/dev/null || true
+    cp -r "$DATA_DIR/profiles" "$tmpdir/profile/" 2>/dev/null || true
+    
+    # Git info
+    {
+        echo "=== W0lfSword Export ==="
+        echo "Date: $(date -Iseconds)"
+        echo "Branch: $(git branch --show-current 2>/dev/null || echo ?)"
+        echo "Commit: $(git rev-parse HEAD 2>/dev/null || echo ?)"
+        echo "Last log:"
+        git log --oneline -5 2>/dev/null || true
+    } > "$tmpdir/info.txt"
+    
+    # Zip it
+    local cwd; cwd=$(pwd)
+    cd "$tmpdir" && zip -qr "$cwd/$outfile" . 2>/dev/null
+    cd "$cwd" && rm -rf "$tmpdir"
+    
+    ok "Export saved: ${C_EYE}${outfile}${NC} ($(du -h "$outfile" | cut -f1))"
+    log_script "exported to $outfile"
+}
+
+# ═══════════════════════════════════════════════════════════════
 #  HELP
 # ═══════════════════════════════════════════════════════════════
 
@@ -1258,8 +1401,15 @@ cmd_help() {
     echo ""
     section "Exploit Workflow"
     printf "  ${C_EYE}%-14s${NC} %s\n" "adderall"     "Auto-discover → build → deploy → verify"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "safe on|off"  "Enable/disable safe mode (skip kernel writes)"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "quick"        "One-shot exploit chain (needs configured device)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "quick"        "One-shot exploit chain"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "update"       "Git pull + rebuild + redeploy"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "setup"        "Auto-install THEOS + deps (needs sudo)"
+    echo ""
+    section "Device & Debug"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "safe on|off"  "Enable/disable safe mode"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "reboot [ip]"  "SSH reboot device"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "crashlog"     "View last crash log"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "export [file]" "Zip logs + offsets for bug reports"
     printf "  ${C_EYE}%-14s${NC} %s\n" "profile ..."  "Save/load exploit configs"
     printf "  ${C_EYE}%-14s${NC} %s\n" "device ..."   "Multi-device manager"
     echo ""
@@ -1305,6 +1455,10 @@ main() {
         adderall)  cmd_adderall "${args[@]}";;
         safe)      cmd_safe "${args[@]}";;
         crashlog)  cmd_crashlog "${args[@]}";;
+        update)    cmd_update "${args[@]}";;
+        setup)     cmd_setup "${args[@]}";;
+        reboot)    cmd_reboot "${args[@]}";;
+        export)    cmd_export "${args[@]}";;
         profile)   cmd_profile "${args[@]}";;
         device)    cmd_device "${args[@]}";;
         history)   cmd_history "${args[@]}";;
