@@ -282,7 +282,7 @@
 
 ## C2 — Apple Bug Bounty: Specific Targets
 
-- [ ] `C2.1` ⚪ — TCC bypass via kernel-level .db modification (up to $100,000)  
+- [x] `C2.1` ⚪ — TCC bypass via kernel-level .db modification (up to $100,000)  
   _Prompt:_ "Research Apple Security Bounty categories for TCC bypass. With kernel R/W + filesystem access, we can modify TCC.db directly. Create an automated PoC that: 1) escapes sandbox, 2) modifies TCC.db to add a camera/mic permission entry, 3) demonstrates the permission is active without any user prompt. Document the full chain. Submit to Apple if novel (they may consider this 'requires kernel access' and thus out of scope — check)."
 
 - [ ] `C2.2` ⚪ — Secure Enclave / SEP attack surface (up to $250,000)  
@@ -363,10 +363,10 @@
 
 ## D3 — Documentation
 
-- [ ] `D3.1` 🟢 — Architecture decision records  
+- [x] `D3.1` 🟢 — Architecture decision records  
   _Prompt:_ "Create docs/adr/ directory. Write one ADR for each major decision: why ICMPv6 socket technique was chosen, why vnode redirection for SSV instead of remount, why offset tables are hardcoded instead of always using XPF, why pthread_mutex over dispatch_semaphore for SSV."
 
-- [ ] `D3.2` 🟢 — API documentation for kernel primitives  
+- [x] `D3.2` 🟢 — API documentation for kernel primitives  
   _Prompt:_ "Document every function in krw.h, kutils.h, vnode.h, sandbox.h with: what it does, kernel side effects, calling context requirements (must hold mutex? PAC stripped? safe to call from main thread?), return value semantics."
 
 - [x] `D3.3` 🟢 — Threat model document  
@@ -572,7 +572,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `H2.2` 🟡 — Create offset resolution guide  
   _Prompt:_ "Document how to find new kernel struct offsets: (1) get kernelcache from device, (2) decompress with XPF decompress.c, (3) run jtool2 --analyze, (4) use IDA/Ghidra to find struct access patterns, (5) verify against KDK struct dump. Include example walkthrough for one offset."
 
-- [ ] `H2.3` 🟡 — Create a 'how to add a new device/iOS version' checklist  
+- [x] `H2.3` 🟡 — Create a 'how to add a new device/iOS version' checklist  
   _Prompt:_ "Step-by-step: 1) get kernelcache, 2) run offsets_init locally with print debugging, 3) find which offsets changed, 4) add new block in offsets.m, 5) test on device, 6) commit with device name + iOS version in commit message."
 
 ---
@@ -705,11 +705,11 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | B3 — Power User Features | 7 | 0 | 7 |
 | B4 — Developer Features | 4 | 0 | 4 |
 | C1 — Kernel Vuln Hunting | 7 | 1 | 6 |
-| C2 — Bug Bounty Targets | 8 | 0 | 8 |
+| C2 — Bug Bounty Targets | 8 | 1 | 7 |
 | C3 — Attack Chains | 4 | 0 | 4 |
 | D1 — Refactoring | 5 | 4 | 1 |
 | D2 — Testing | 4 | 1 | 3 |
-| D3 — Documentation | 3 | 1 | 2 |
+| D3 — Documentation | 3 | 3 | 0 |
 | E1 — Version/Device Expansion | 5 | 0 | 5 |
 | F1 — PUAF Fallback | 4 | 0 | 4 |
 | F2 — Cross-Process Injection | 3 | 0 | 3 |
@@ -719,7 +719,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | G2 — System Apps | 3 | 0 | 3 |
 | G3 — Terminal / Shell | 2 | 0 | 2 |
 | H1 — Writeups | 3 | 3 | 0 |
-| H2 — Knowledge Base | 3 | 2 | 1 |
+| H2 — Knowledge Base | 3 | 3 | 0 |
 | I1 — Reference Repos | — | — | — |
 | I2 — Key CVEs | — | — | — |
 | J1 — Interactive Menu | 3 | 3 | 0 |
@@ -730,7 +730,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J6 — Original Commands | 2 | 1 | 1 |
 | J7 — Polish | 3 | 1 | 2 |
 | J8 — Beta UX (new) | 6 | 0 | 6 |
-| **TOTAL** | **149** | **49** | **100** |
+| **TOTAL** | **149** | **53** | **96** |
 
 ---
 
