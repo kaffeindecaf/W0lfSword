@@ -1,3 +1,0 @@
-#!/bin/bash
-# W0lfSword-Beta → delegates to W0lfSword (merged).
-exec "$(dirname "$0")/W0lfSword" "$@"
