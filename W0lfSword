@@ -200,8 +200,49 @@ get_device_ip() {
     cat "$PROJECT_DIR/.device_ip" 2>/dev/null || echo ""
 }
 
+# ── Multi-device scanner ──────────────────────────────────────
+scan_devices() {
+    # Returns count of found devices, sets global arrays
+    DEV_USB=(); DEV_WIFI=(); DEV_COUNT=0
+
+    # USB devices via libimobiledevice
+    if command -v idevice_id &>/dev/null; then
+        local uuids; uuids=$(idevice_id -l 2>/dev/null || echo "")
+        if [ -n "$uuids" ]; then
+            while IFS= read -r uuid; do
+                [ -z "$uuid" ] && continue
+                local name; name=$(ideviceinfo -u "$uuid" -k DeviceName 2>/dev/null || echo "iPhone")
+                local ios; ios=$(ideviceinfo -u "$uuid" -k ProductVersion 2>/dev/null || echo "?")
+                local model; model=$(ideviceinfo -u "$uuid" -k HardwareModel 2>/dev/null || echo "?")
+                DEV_USB+=("$uuid|$name|$ios|$model")
+                ((DEV_COUNT++))
+            done <<< "$uuids"
+        fi
+    fi
+
+    # WiFi devices from saved list
+    local active_active; active_active=$(get_device_ip)
+    if [ -f "$DATA_DIR/devices.list" ] && [ -s "$DATA_DIR/devices.list" ]; then
+        sort -u "$DATA_DIR/devices.list" | while read -r dip dname; do
+            [ -z "$dip" ] && continue
+            # Skip if already listed as USB
+            local is_usb=false
+            for u in "${DEV_USB[@]}"; do
+                [[ "$u" == *"$dip"* ]] && is_usb=true && break
+            done
+            $is_usb && continue
+
+            local mark=" "; [ "$dip" = "$active_active" ] && mark="*"
+            local st="${C_DIM}offline${NC}"
+            ping -c1 -W1 "$dip" >/dev/null 2>&1 && st="${C_GRN}online${NC}"
+            DEV_WIFI+=("$mark|$dip|$dname|$st")
+            ((DEV_COUNT++))
+        done
+    fi
+}
+
 # ═══════════════════════════════════════════════════════════════
-#  ORIGINAL W0LFSWORD COMMANDS
+#  ORIGINAL COMMANDS
 # ═══════════════════════════════════════════════════════════════
 
 cmd_build() {
@@ -671,15 +712,29 @@ draw_menu() {
         FIRST_DRAW=false
     fi
     show_header
+    echo ""
 
-    # Show device status inline
-    local ip; ip=$(get_device_ip)
-    if [ -n "$ip" ]; then
-        local st="${C_DIM}checking...${NC}"
-        ping -c1 -W1 "$ip" >/dev/null 2>&1 && st="${C_GRN}$ip online${NC}" || st="${C_AMB}$ip offline${NC}"
-        echo -e "  ${C_GREY}device:${NC}  $st"
+    # Scan and display all devices
+    scan_devices
+    if [ "$DEV_COUNT" -gt 0 ]; then
+        echo -e "  ${C_STEEL}${B}── devices (${DEV_COUNT}) ──${NC}"
+        for u in "${DEV_USB[@]}"; do
+            IFS='|' read -r uuid name ios model <<< "$u"
+            echo -e "  ${C_GRN}⬤ USB${NC}  ${C_EYE}${name}${NC}  ${C_DIM}iOS ${ios}  ${model}${NC}"
+        done
+        for w in "${DEV_WIFI[@]}"; do
+            IFS='|' read -r mark ip dname st <<< "$w"
+            local icon="${C_AMB}⬤ WiFi${NC}"; [[ "$st" == *"online"* ]] && icon="${C_GRN}⬤ WiFi${NC}"
+            echo -e "  $icon  ${C_EYE}${dname}${NC}  ${C_DIM}${ip}${NC}  $st"
+        done
     else
-        echo -e "  ${C_GREY}device:${NC}  ${C_DIM}none configured — use [d] to add${NC}"
+        local ip; ip=$(get_device_ip)
+        if [ -n "$ip" ]; then
+            local st; ping -c1 -W1 "$ip" >/dev/null 2>&1 && st="${C_GRN}online${NC}" || st="${C_AMB}offline${NC}"
+            echo -e "  ${C_GREY}device:${NC}  ${C_EYE}${ip}${NC}  $st"
+        else
+            echo -e "  ${C_GREY}device:${NC}  ${C_DIM}none — connect USB or use 'device add <ip>'${NC}"
+        fi
     fi
     echo ""
 
