@@ -558,10 +558,10 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `H1.1` ⚪ — Write dark-sword-technique.md  
   _Prompt:_ "Follow kfd's writeup format: (1) abstract, (2) vulnerability description, (3) primitive achieved, (4) exploitation steps with code snippets, (5) Apple's fix. Include the ICMPv6 socket spray technique and the IOSurface physical OOB race window."
 
-- [ ] `H1.2` ⚪ — Write sandbox-extension-patching.md  
+- [x] `H1.2` ⚪ — Write sandbox-extension-patching.md  
   _Prompt:_ "Document: (1) how the kernel stores sandbox extensions (struct layout), (2) how we walk from proc to ext_set, (3) what each field patch does, (4) the borrow_sandbox_ext fallback, (5) how Apple could prevent this (integrity check on sandbox data)."
 
-- [ ] `H1.3` ⚪ — Write ssv-bypass-via-vnode.md  
+- [x] `H1.3` ⚪ — Write ssv-bypass-via-vnode.md  
   _Prompt:_ "Document the SSV architecture (APFS snapshots, MNT_RDONLY flag, seal verification). Explain how vnode data pointer swap bypasses all protections. Discuss why this is possible even with SSV enforcement."
 
 ## H2 — Knowledge Base
@@ -569,7 +569,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `H2.1` 🟡 — Create iOS kernel exploitation glossary  
   _Prompt:_ "Write docs/glossary.md defining: PUAF, PPL, KTRR, SPTM, MTE, PAC, SMR, AP, SEP, KASLR, DART, SMMU, IOMMU, AMFI, TCC, SIP, SSV, APFS fsnode. Each entry should be 2-3 sentences with a 'why it matters' note."
 
-- [ ] `H2.2` 🟡 — Create offset resolution guide  
+- [x] `H2.2` 🟡 — Create offset resolution guide  
   _Prompt:_ "Document how to find new kernel struct offsets: (1) get kernelcache from device, (2) decompress with XPF decompress.c, (3) run jtool2 --analyze, (4) use IDA/Ghidra to find struct access patterns, (5) verify against KDK struct dump. Include example walkthrough for one offset."
 
 - [ ] `H2.3` 🟡 — Create a 'how to add a new device/iOS version' checklist  
@@ -708,7 +708,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | C2 — Bug Bounty Targets | 8 | 0 | 8 |
 | C3 — Attack Chains | 4 | 0 | 4 |
 | D1 — Refactoring | 5 | 4 | 1 |
-| D2 — Testing | 4 | 0 | 4 |
+| D2 — Testing | 4 | 1 | 3 |
 | D3 — Documentation | 3 | 1 | 2 |
 | E1 — Version/Device Expansion | 5 | 0 | 5 |
 | F1 — PUAF Fallback | 4 | 0 | 4 |
@@ -718,8 +718,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | G1 — File Managers | 2 | 0 | 2 |
 | G2 — System Apps | 3 | 0 | 3 |
 | G3 — Terminal / Shell | 2 | 0 | 2 |
-| H1 — Writeups | 3 | 1 | 2 |
-| H2 — Knowledge Base | 3 | 1 | 2 |
+| H1 — Writeups | 3 | 3 | 0 |
+| H2 — Knowledge Base | 3 | 2 | 1 |
 | I1 — Reference Repos | — | — | — |
 | I2 — Key CVEs | — | — | — |
 | J1 — Interactive Menu | 3 | 3 | 0 |
@@ -730,7 +730,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J6 — Original Commands | 2 | 1 | 1 |
 | J7 — Polish | 3 | 1 | 2 |
 | J8 — Beta UX (new) | 6 | 0 | 6 |
-| **TOTAL** | **149** | **45** | **104** |
+| **TOTAL** | **149** | **49** | **100** |
 
 ---
 
