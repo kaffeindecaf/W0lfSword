@@ -32,6 +32,10 @@ bool ssv_write(const char *path, const void *data, size_t len) {
     close(fd);
 
     TweakLog("Calling patch_sandbox_ext()...");
+    if (!exploit_is_done()) {
+        TweakLog("[SSV] Exploit not done — cannot call patch_sandbox_ext");
+        return false;
+    }
     int sandboxRet = patch_sandbox_ext();
     TweakLog("patch_sandbox_ext returned %d", sandboxRet);
 

@@ -841,11 +841,11 @@ static BOOL hook_moveItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, N
 
 static IMP orig_createFileAtPath = NULL;
 static BOOL hook_createFileAtPath(id self, SEL _cmd, NSString *path, NSData *contents, NSDictionary *attributes) {
+    if (ssvProtectedPath(path)) ensureSSVActive();
     TweakLog("[SSV] createFileAtPath: %s", [path UTF8String]);
     BOOL result = ((BOOL(*)(id,SEL,id,id,id))orig_createFileAtPath)(self, _cmd, path, contents, attributes);
     TweakLog("[SSV] createFileAtPath result=%d", result);
     if (result) {
-        if (ssvProtectedPath(path)) ensureSSVActive();
         applyParentOwnershipAndPerms(path);
     }
     if (!result && ui_debug_bypass_get() && ssvProtectedPath(path) && !sealedSystemPath(path)) {
@@ -860,13 +860,13 @@ static BOOL hook_createFileAtPath(id self, SEL _cmd, NSString *path, NSData *con
 
 static IMP orig_writeToFile = NULL;
 static BOOL hook_writeToFile(id self, SEL _cmd, NSString *path, unsigned long long options, NSError **error) {
+    if (ssvProtectedPath(path)) ensureSSVActive();
     TweakLog("[SSV] writeToFile: %s", [path UTF8String]);
     NSError *localError = nil;
     NSError **errRef = error ? error : &localError;
     BOOL result = ((BOOL(*)(id,SEL,id,unsigned long long,id*))orig_writeToFile)(self, _cmd, path, options, errRef);
     TweakLog("[SSV] writeToFile result=%d", result);
     if (result) {
-        if (ssvProtectedPath(path)) ensureSSVActive();
         applyParentOwnershipAndPerms(path);
     }
     if (!result && ssvProtectedPath(path)) {

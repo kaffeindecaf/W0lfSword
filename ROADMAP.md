@@ -81,7 +81,44 @@
   _Prompt:_ "Create a test matrix: Filza 4.0.0 × iOS 17.0, 17.7, 18.0, 18.7, 26.0. For each combo, test: launch, browse /System, create a file, delete a file, zip Documents, unzip to /var/tmp. Mark pass/fail."
 
 - [ ] `A2.4` 🟠 — FilzaPadlockBypass NZ* hooks are dead code — replace with TG* equivalents  
-  _IPA analysis 2026-08-10: The NZ* classes (NZFileBrowserController, NZDirectoryController, NZFileItem, NZFileManager, NZTextEditor, NZFileViewer) do NOT exist in Filza 4.0.0 or 4.0.2. The actual Filza uses TG* prefixes (TGFileBrowserController, TGDirectoryController, etc.). Our `%hook NZFileBrowserController` hooks silently install on non-existent classes — they never fire. Need to reverse-engineer the actual TG* class hierarchy and point hooks at the right targets. Affects all 17 padlock bypass hooks.
+  _IPA analysis 2026-08-10: The NZ* classes (NZFileBrowserController, NZDirectoryController, NZFileItem, NZFileManager, NZTextEditor, NZFileViewer) do NOT exist in Filza 4.0.0 or 4.0.2. The actual Filza uses TG* prefixes. Need to reverse-engineer the actual TG* class hierarchy. Affects all 17 padlock bypass hooks._
+
+- [ ] `A2.5` 🟠 — PadlockBypass removeItemAtPath kreads before exploit_is_done guard → kernel panic
+- [ ] `A2.6` 🟡 — Tweak.m zip hooks: unconditional (NSString*) cast on id → crash if non-NSString
+- [ ] `A2.7` 🟡 — Tweak.m unzip: char filename[512] may be unterminated → add null guard
+- [ ] `A2.8` 🟡 — FilzaPadlockBypass: 11 sites pass [nil UTF8String] to TweakLog %s → SIGSEGV
+- [ ] `A2.9` 🟡 — hook_createFileAtPath/writeToFile call ensureSSVActive AFTER %orig — too late
+- [ ] `A2.10` 🟢 — Zip hooks block main thread on large archives — no background dispatch
+
+- [ ] `A2.11` 🟡 — TweakInit: stale /var/mobile/.sbx_check falsely skips exploit (H2,H3)
+
+---
+
+## A5 — SSV & Sandbox Escape Stability (audit 2026-08-10)
+
+- [ ] `A5.1` 🔴 — sandbox_escape.m:114 — non-null-terminated string written to kernel memory  
+  _KRW_LEN=32, "com.apple.app-sandbox.read-write" is 33 chars with null. memcpy omits null → kernel class name match fails → set_rw_class dead code. Adjacent zero-bytes required to avoid panic._
+
+- [ ] `A5.2` 🔴 — SSV/SSVUtils.m:35 — patch_sandbox_ext() called with zero exploit guard  
+  _ssv_write calls patch_sandbox_ext before checking exploit_is_done() → kernel R/W on uninitialized primitive → panic._
+
+- [ ] `A5.3` 🟠 — TweakExploit.m attemptCount race: static int without synchronization  
+  _Multiple dispatch_after blocks fire in parallel, all increment same static int. 2 blocks see attemptCount==2 → both proceed as attempt 3 → parallel sandbox_escape corrupts kernel memory._
+
+- [ ] `A5.4` 🟠 — TweakExploit.m diagnostics: NSFileManager ops lack @try/@catch → SIGABRT  
+  _dispatch_once block calls createDirectory/removeItem without exception handler. Exception in block = process kill._
+
+- [ ] `A5.5` 🟡 — utils/tweak_log.h: localtime() not thread-safe + can return NULL → crash  
+  _Switch to localtime_r with stack-allocated struct tm._
+
+- [ ] `A5.6` 🟡 — utils/tweak_log.h: no NULL check on format param → vfprintf(NULL) SIGSEGV
+
+- [ ] `A5.7` 🟡 — sandbox_escape.m: ucred scan does ptr_in_kernel() but not mapping-aware  
+  _ptr_in_kernel checks range+alignment only — unmapped kernel VA causes data abort on read._
+
+- [ ] `A5.8` 🟢 — SSV/SSVUtils.m: fd leak on rename fallback failure → ulimit exhaustion
+- [ ] `A5.9` 🟢 — sandbox_escape.m: uint64_t* cast on uint8_t[32] may be unaligned → arm64 fault
+- [ ] `A5.10` 🟢 — permission_utils.m: fsnode sanity check only rejects >0777, doesn't check UID/GID
 
 ---
 
@@ -93,17 +130,52 @@
 - [ ] `A3.2` 🔴 — A18 device pe_v2: handle mach_vm_allocate failure for 2GB  
   _Prompt:_ "In kexploit_opa334.m pe_v2(), the 2GB allocation may fail on memory-constrained devices (iPhone with many apps in background). Add a retry with smaller sizes (1GB, 512MB, 256MB) before giving up. Log each attempt."
 
-- [ ] `A3.3` 🟠 — Socket spray failure: handle `socket(AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6)` returning -1  
-  _Prompt:_ "In spray_socket(), if socket() returns -1, the function returns -1 but the caller only checks for MACH_PORT_NULL. Also the returned value is cast to fileport_t. Add proper error propagation up to pe_v1/pe_v2 so the outer loop can retry."
+- [x] `A3.3` 🟠 — Socket spray failure: handle `socket(AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6)` returning -1  
+  _Fixed 2026-08-10: spray_socket returns MACH_PORT_NULL on failure, both callers check for it._
 
-- [ ] `A3.4` 🟠 — `physical_oob_write_mo` async corruption detection  
-  _Prompt:_ "physical_oob_write_mo() does 20 iterations without verifying the write succeeded (unlike the read counterpart which checks the marker). Add a read-back verification: after each write loop, call physical_oob_read_mo and compare the first 8 bytes with what was intended. If they don't match, log and retry."
+- [x] `A3.4` 🟠 — `physical_oob_write_mo` async corruption detection  
+  _Fixed 2026-08-10: function returns kern_return_t, read-back verification added._
 
 - [ ] `A3.5` 🟡 — Wired page leak in pe_v2 error path  
   _Prompt:_ "In pe_v2(), if the exploit succeeds, the cleanup loop `for (NSNumber *addr in wiredAddrs)` deallocates remaining wired pages. But if mach_vm_allocate fails mid-loop or the function returns early due to a failure, wiredAddrs may contain pages that were mlock'd but never freed. Add a cleanup block on all return paths."
 
 - [x] `A3.6` 🟡 — `highestSuccessIdx` grows unbounded across exploit attempts → reset per call  
   _Prompt:_ "highestSuccessIdx is a global that tracks the best try index for the OOB read race. It grows across multiple exploit attempts. On iOS 26 with potentially different kernel memory layout, this could cause infinite retry (tryIdx goes up to highestSuccessIdx+100 which is now a huge number). Reset to 100 on each new exploit attempt."
+
+- [ ] `A3.7` 🔴 — Thread.m:48 AST_GUARD never cleared due to operator precedence (C1 audit)  
+  _`ast &= ~AST_GUARD | 0x80000000` parsed as `ast &= (~AST_GUARD) | 0x80000000` → no-op. Fix: `ast = (ast & ~AST_GUARD) | 0x80000000`._
+
+- [ ] `A3.8` 🔴 — sandbox.m:229 heap buffer overflow in kernel: 34B write into 2B allocation (C3)  
+  _root_path writes 2 bytes ("/"), then writes 34-byte class name at path_buf+2 — corrupts adjacent kernel heap._
+
+- [ ] `A3.9` 🔴 — vnode.m: returned -1 sentinel wraps 64-bit addr → reads from 0xDF (C4,C5)  
+  _get_vnode_for_path_by_chdir returns 0xFFFF... on failure. +0xe0 wraps to 0xDF → unmapped read → panic._
+
+- [ ] `A3.10` 🔴 — kexploit_opa334.m:316 checks !surface instead of mach_make_memory_entry_64 status (C2)  
+  _surface was already validated at 304. If entry fails, memoryObject=0, mach_vm_map maps garbage._
+
+- [ ] `A3.11` 🔴 — kexploit_opa334.m:567 infinite while(true) on write verify failure (C6)  
+  _If physical write never lands, spins forever with no timeout/retry counter._
+
+- [ ] `A3.12` 🟠 — kexploit_opa334.m:461, RemoteCall.m:273 — while(1){} hangs on invalid address  
+  _Use FAILURE(0) or return error instead of permanent hang._
+
+- [ ] `A3.13` 🟠 — kexploit_opa334.m:95-101 — volatile without _Atomic for cross-thread sync race  
+  _goSync, raceSync, targetObject etc. use volatile not _Atomic. ARM weak memory → stale reads → race lost._
+
+- [ ] `A3.14` 🟠 — RemoteCall.m:242 — unhandled exception leaves target thread suspended (H7)  
+  _No reply sent on timeout → thread stuck with pending EXC_GUARD forever._
+
+- [ ] `A3.15` 🟠 — vnode.m:22 — static vp_name[256] buffer race across threads (M1)  
+  _vnode_get_v_name returns pointer to file-scope static. Concurrent callers see corrupted names._
+
+- [ ] `A3.16` 🟡 — RemoteCall.m:368 — SHMEM cache full with no eviction after 100 pages (M2)
+- [ ] `A3.17` 🟡 — sandbox.m:172 — unvalidated class_name kernel pointer in kreadbuf (M3)
+- [ ] `A3.18` 🟡 — offsets.m — 0xdeaddead sentinel could alias valid offset (M4)
+- [ ] `A3.19` 🟡 — kutils.m:17 — gSelfProc/gSelfTask cached without atomic reads/writes (M5)
+- [ ] `A3.20` 🟢 — kexploit_opa334.m:175 — calloc result unchecked for NULL (L4)
+- [ ] `A3.21` 🟢 — RemoteCall.m:549 — pthread_create_suspended_np failure unchecked (L5)
+- [ ] `A3.22` 🟢 — VM.m:186 — memoryObject mach port leaked on entry validation failure (L6)
 
 ---
 
@@ -623,8 +695,9 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | Section | Total Items | Completed | Remaining |
 |---------|------------|-----------|-----------|
 | A1 — Thread Safety | 14 | 10 | 4 |
-| A2 — Filza Compatibility | 4 | 2 | 2 |
-| A3 — Kernel Exploit Robustness | 6 | 1 | 5 |
+| A2 — Filza Compatibility | 11 | 2 | 9 |
+| A3 — Kernel Exploit Robustness | 22 | 3 | 19 |
+| A5 — SSV & Sandbox Stability (new) | 10 | 0 | 10 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
 | B2 — Runtime Control | 3 | 1 | 2 |
 | B3 — Power User Features | 7 | 0 | 7 |
@@ -655,7 +728,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J6 — Original Commands | 2 | 1 | 1 |
 | J7 — Polish | 3 | 1 | 2 |
 | J8 — Beta UX (new) | 6 | 0 | 6 |
-| **TOTAL** | **119** | **31** | **88** |
+| **TOTAL** | **149** | **33** | **116** |
 
 ---
 

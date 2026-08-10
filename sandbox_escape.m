@@ -112,6 +112,7 @@ static void set_rw_class(uint64_t hdr) {
     uint8_t b1[KRW_LEN], b2[KRW_LEN];
     memset(b1, 0, KRW_LEN); memset(b2, 0, KRW_LEN);
     memcpy(b1, rw, KRW_LEN);
+    b1[KRW_LEN - 1] = '\0';
     early_kwrite32bytes(da + 32, b1);
     early_kwrite32bytes(da + 64, b2);
 
