@@ -214,7 +214,7 @@ W0lfSword/
 
 ### Exploit Pipeline
 
-![Exploit Pipeline](W0lfSwordChain.png)
+![Exploit Pipeline](W0lfSwordChain.png?v=2)
 
 ```
 TweakInit() → installHooks() → scheduleExploitOnce() [1s delay]
