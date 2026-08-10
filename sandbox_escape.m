@@ -83,10 +83,10 @@ static void patch_ext(uint64_t ext) {
         buf[0] = '/'; buf[1] = 0;
         early_kwrite32bytes(da, buf);
     }
-    uint8_t chunk[KRW_LEN];
+    uint64_t __attribute__((aligned(8))) chunk[KRW_LEN / 8];
     early_kread(ext + OFF_EXT_DATA, chunk, KRW_LEN);
-    *(uint64_t*)(chunk + 0x08) = 1;
-    *(uint64_t*)(chunk + 0x10) = 0xFFFFFFFFFFFFFFFFULL;
+    chunk[1] = 1;
+    chunk[2] = 0xFFFFFFFFFFFFFFFFULL;
     early_kwrite32bytes(ext + OFF_EXT_DATA, chunk);
 }
 

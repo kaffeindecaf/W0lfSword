@@ -91,6 +91,12 @@ static int apply_permissions_kernel(const char *path, uid_t uid, gid_t gid, mode
         return -1;
     }
 
+    // Sanity: validate uid/gid are within reasonable bounds (0-65535)
+    if (uid > 65535 || gid > 65535) {
+        TweakLog("APFS fsnode sanity fail: uid=%u gid=%u out of range — aborting", uid, gid);
+        return -1;
+    }
+
     kwrite32(v_data + off_apfs_fsnode_uid, uid);
     kwrite32(v_data + off_apfs_fsnode_gid, gid);
     kwrite16(v_data + off_apfs_fsnode_mode, mode & 0777);

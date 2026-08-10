@@ -1004,6 +1004,25 @@ static void installHooks(void) {
 #pragma mark - Entry Point
 
 __attribute__((constructor)) void TweakInit(void) {
+    // Crash recovery: if we've crashed 3+ times without success, auto-disable
+    const char *successFlag = "/var/mobile/Documents/.filza_last_success";
+    const char *crashCountFile = "/var/mobile/Documents/.filza_crash_count";
+    if (access(successFlag, F_OK) != 0 && !tweak_is_disabled()) {
+        int crashCount = 0;
+        FILE *cf = fopen(crashCountFile, "r");
+        if (cf) { fscanf(cf, "%d", &crashCount); fclose(cf); }
+        crashCount++;
+        cf = fopen(crashCountFile, "w");
+        if (cf) { fprintf(cf, "%d", crashCount); fclose(cf); }
+        TweakLog("[Tweak] Crash counter: %d/3 (no success flag found)", crashCount);
+        if (crashCount >= 3) {
+            FILE *df = fopen(TWEAK_DISABLE_FLAG, "w");
+            if (df) fclose(df);
+            TweakLog("[Tweak] 3 crashes detected — exploit DISABLED for safety. Delete %s to re-enable.", TWEAK_DISABLE_FLAG);
+            return;
+        }
+    }
+
     if (tweak_is_disabled()) {
         TweakLog("[Tweak] Disabled by flag file — unloading");
         return;

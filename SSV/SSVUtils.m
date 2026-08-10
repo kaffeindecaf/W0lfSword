@@ -66,11 +66,11 @@ bool ssv_write(const char *path, const void *data, size_t len) {
                 while ((n = read(fd_in, buf, sizeof(buf))) > 0) {
                     write(fd_out, buf, n);
                 }
-                close(fd_in);
-                close(fd_out);
                 ret = 0;
                 apply_parent_permissions(path);
             }
+            if (fd_in >= 0) close(fd_in);
+            if (fd_out >= 0) close(fd_out);
         }
     }
 
