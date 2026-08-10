@@ -157,36 +157,6 @@ W0lfSword/
 
 ![W0lfSword Architecture](W0lfSwordArchitecture.png)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Filza App (com.tigisoftware.Filza)            │
-│                                                                 │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │               FilzaApplySandboxExt.dylib                   │  │
-│  │          (MobileSubstrate — injected at load time)         │  │
-│  │                                                            │  │
-│  │  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐    │  │
-│  │  │  Tweak.m    │  │ PadlockBypass│  │  SSVUtils      │    │  │
-│  │  │ (orchestrator)│  │ (.xm hooks) │  │ (vnode redirect)│   │  │
-│  │  └──────┬──────┘  └──────────────┘  └───────┬────────┘    │  │
-│  │         │                                    │             │  │
-│  │  ┌──────▼──────────────────────────────────▼─────────┐     │  │
-│  │  │                kexploit/                           │     │  │
-│  │  │  ┌───────────┐  ┌───────┐  ┌─────────────────┐    │     │  │
-│  │  │  │ DarkSword │→ │ krw   │→ │ sandbox ext patch│   │     │  │
-│  │  │  │ ICMPv6+IO │  │(kread │  │ borrow_sandbox  │    │     │  │
-│  │  │  │  surface  │  │ kwrite)│  │ (4-daemon fallback)│  │     │  │
-│  │  │  └───────────┘  └───────┘  └─────────────────┘    │     │  │
-│  │  │  ┌────────────────────────────────────────┐       │     │  │
-│  │  │  │  XPF + ChOma (dynamic offset resolution)│      │     │  │
-│  │  │  │  kernelcache → decompress → parse      │       │     │  │
-│  │  │  │  → pattern match → struct offsets      │       │     │  │
-│  │  │  └────────────────────────────────────────┘       │     │  │
-│  │  └──────────────────────────────────────────────────┘     │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
 ### Exploit Pipeline
 
 ![Exploit Pipeline](W0lfSwordChain.png)
