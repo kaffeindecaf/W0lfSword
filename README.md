@@ -134,8 +134,7 @@ W0lfSword/
 │   └── sandbox_research.h          # Kernel sandbox_label, extension_set, extension structs
 │
 ├── scripts & docs
-│   ├── W0lfSword                     # Project CLI — 12 commands (build, deploy, audit, status, log...)
-│   ├── W0lfSword-Beta                # Interactive exploit menu — superset of W0lfSword
+│   ├── W0lfSword                     # Project CLI — interactive menu, build, deploy, diagnostics
 │   ├── build_and_extract.sh          # Build + auto-extract .dylib
 │   ├── Makefile                      # Theos build system (iphone:clang:latest:15.0, arm64)
 │   ├── control                      # Debian package metadata (v0.7.6)
@@ -206,102 +205,53 @@ cd W0lfSword
 Usage: ./W0lfSword <command> [args...]
 ```
 
-| Command          | Description                                                   | Example                          |
-| ---------------- | ------------------------------------------------------------- | -------------------------------- |
-| `build`          | Compile tweak + create .deb                                   | `./W0lfSword build`              |
-| `extract`        | Extract .dylib from built .deb                                | `./W0lfSword extract`            |
-| `deploy <ip>`    | scp .deb → dpkg -i → killall Filza on device                  | `./W0lfSword deploy 192.168.1.5` |
-| `status`         | Project health: git, build, ROADMAP progress                  | `./W0lfSword status`             |
-| `audit`          | Static analysis: brace balance, printf count, offset coverage | `./W0lfSword audit`              |
-| `log [n]`        | Fetch last n lines of `/tmp/FilzaTweak.log` from device       | `./W0lfSword log 100`            |
-| `toggle on\|off` | Enable/disable tweak on device via flag file                  | `./W0lfSword toggle off`         |
-| `offsets [ver]`  | Show offset table coverage per iOS version                    | `./W0lfSword offsets 26.0`       |
-| `clean`          | Clean build artifacts + temp files                            | `./W0lfSword clean`              |
-| `doctor`         | Check environment: THEOS, SDK, ssh, dpkg, clang, device       | `./W0lfSword doctor`             |
-| `targets`        | Show all supported apps + exploit techniques                  | `./W0lfSword targets`            |
-| `help`           | Show this reference                                           | `./W0lfSword help`               |
+| Command | Description | Example |
+|---------|-------------|---------|
+| `build` | Compile tweak + create .deb | `./W0lfSword build` |
+| `extract` | Extract .dylib from built .deb | `./W0lfSword extract` |
+| `deploy <ip>` | scp .deb → dpkg -i → killall Filza | `./W0lfSword deploy 192.168.1.5` |
+| `status` | Project health: git, build, roadmap progress | `./W0lfSword status` |
+| `audit` | Static analysis: braces, printf count, offsets | `./W0lfSword audit` |
+| `log [n]` | Fetch last n lines of device log | `./W0lfSword log 100` |
+| `toggle on\|off` | Enable/disable tweak on device | `./W0lfSword toggle off` |
+| `offsets [ver]` | Show offset table coverage per iOS version | `./W0lfSword offsets 26.0` |
+| `clean` | Clean build artifacts + temp files | `./W0lfSword clean` |
+| `doctor` | Check environment: THEOS, SDK, ssh, dpkg | `./W0lfSword doctor` |
+| `targets` | Show all supported apps + techniques | `./W0lfSword targets` |
+| `quick` | One-shot: build → deploy → verify | `./W0lfSword quick` |
+| `profile save\|load\|list` | Manage exploit profiles | `./W0lfSword profile save my-ip14` |
+| `device add\|list\|switch\|info` | Multi-device management | `./W0lfSword device add 192.168.1.5` |
+| `history [stats]` | Exploit attempt log + stats dashboard | `./W0lfSword history stats` |
+| `monitor` | Real-time log tail with color coding | `./W0lfSword monitor` |
+| `help` | Show all commands | `./W0lfSword help` |
 
 **Device IP configuration:** Run `./W0lfSword deploy <ip>` once to save the IP. Subsequent `log`, `toggle`, and `deploy` commands will use the saved IP automatically. The IP is stored in `.device_ip` (gitignored).
 
 **Color-coded log output:** The `log` command color-codes lines by severity — green for success/SANDBOX ESCAPED, red for errors/failures, yellow for warnings/retries, cyan for structural logs, dim for detail.
 
-### `W0lfSword-Beta` — Interactive Exploit Menu
-
-W0lfSword-Beta is a **superset** of W0lfSword. It includes every original command unchanged, plus an interactive exploit menu when run with no arguments.
+**Interactive menu (run with no args):**
 
 ```
+  ┌──────────────────────────────────────────────────────────┐
+  │              W0lfSword  iOS Kernel Exploit Toolkit        │
+  └──────────────────────────────────────────────────────────┘
+  device:  192.168.1.5 online
 
-                         .d$$b
-                       .' TO$;\
-                      /  : TP._;
-                     / _.;  :Tb|
-                    /   /   ;j$j
-                _.-"       d$$$$
-              .' ..       d$$$$;
-             /  /P'      d$$$$P. |\
-            /   "      .d$$$P' |\^"l
-          .'           `T$P^"""""  :
-      ._.'      _.'                ;
-   `-.-".-'-' ._.       _.-"    .-"
- `.-" _____  ._              .-"
--.(g$$$$$$$b.              .'
-  ""^^T$$$P^)            .(:
-    _/  -"  /.'         /:/;
- ._.'-'`-'  ")/         /;/;
-`-.-"..--""   " /         /  ;
-.-" ..--""        -'          :
-..--""--.-"         (\      .-(\
-  ..--""              `-\(\/;`
-    _.                      :
-                            ;`-
-                           :\
-                           ;
-
-  W0lfSword-Beta  iOS Exploit Menu
-  DarkSword Engine — Made by kaffeindecaf
-```
-
-```bash
-./W0lfSword-Beta                 # Interactive menu (no args)
-./W0lfSword-Beta quick           # One-shot: build → deploy → verify
-./W0lfSword-Beta profile save    # Save current exploit config
-./W0lfSword-Beta device add      # Add/manage test devices
-./W0lfSword-Beta monitor         # Real-time log viewer
-./W0lfSword-Beta history stats   # Exploit success rate dashboard
-./W0lfSword-Beta build           # All original W0lfSword commands work too
-```
-
-**Interactive Menu:**
-
-```
   [1] Quick Exploit      Build → Deploy → Verify
-  [2] Deploy Only        Install on device
-  [3] Device Manager     Add/switch devices
-  [4] Live Monitor       Real-time log viewer
-  [5] Profiles           Save/load configs
-  [6] History            Exploit stats
-  [7] Diagnostics        Doctor, audit, status
+  [2] Deploy Only        Install package on device
+  [3] Device Manager     Add / switch / info
+  [4] Live Monitor       Real-time log tailing
+  [5] Profiles           Save / load configs
+  [6] History            Exploit statistics
+  [7] Diagnostics        Doctor · Audit · Status
   [8] Targets            Supported apps
-  [q] Quit
+
+  quick:  b=build  d=deploy  s=status  l=log  m=monitor  c=clean
 ```
 
-**New Beta-only commands:**
+**Quick shortcuts** from the menu: type `b` to build, `d` to deploy, `s` for status, `l` for log, `m` for monitor, `c` to clean.
 
-| Command               | Description                                                                        |
-| --------------------- | ---------------------------------------------------------------------------------- |
-| `quick`               | One-command exploit chain: builds, deploys, waits for exploit, verifies log output |
-| `profile save <name>` | Save current device/target/retry settings as a named profile                       |
-| `profile load <name>` | Load a saved profile                                                               |
-| `profile list`        | Show all profiles with colored status                                              |
-| `device add <ip>`     | Add a test device to the manager                                                   |
-| `device list`         | Show all devices with ping status                                                  |
-| `device switch <ip>`  | Switch active device                                                               |
-| `device info [ip]`    | Show iOS version, model, kernel version of device                                  |
-| `monitor`             | Real-time `tail -f` of device log with color coding                                |
-| `history`             | Show exploit attempt log with timestamps                                           |
-| `history stats`       | Dashboard: total attempts, success rate %, ASCII bar chart                         |
-
-Data stored in `.w0lfsword/` directory (profiles, devices, history — gitignored).
+**Data stored** in `.w0lfsword/` directory (profiles, devices, history — gitignored). Device IP auto-saved on first deploy.
 
 ### `build_and_extract.sh`
 
