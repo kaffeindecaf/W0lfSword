@@ -12,16 +12,63 @@
 > Powered by the **DarkSword** exploit engine — ICMPv6 + IOSurface → kernel R/W  
 > Made by **[kaffeindecaf](https://github.com/kaffeindecaf)**
 
+<pre>
+                         .d$$b
+                       .' TO$;\
+                      /  : TP._;
+                     / _.;  :Tb|
+                    /   /   ;j$j
+                _.-"       d$$$$
+              .' ..       d$$$$;
+             /  /P'      d$$$$P. |\
+            /   "      .d$$$P' |\^"l
+          .'           `T$P^"""""  :
+      ._.'      _.'                ;
+   `-.-".-'-' ._.       _.-"    .-"
+ `.-" _____  ._              .-"
+-.(g$$$$$$$b.              .'
+  ""^^T$$$P^)            .(:
+    _/  -"  /.'         /:/;
+ ._.'-'`-'  ")/         /;/;
+`-.-"..--""   " /         /  ;
+.-" ..--""        -'          :
+..--""--.-"         (\      .-(\
+  ..--""              `-\(\/;`
+    _.                      :
+                            ;`-
+                           :\
+                           ;
+</pre>
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/kaffeindecaf/W0lfSword.git
+cd W0lfSword
+
+./W0lfSword                # Interactive menu (no args)
+./W0lfSword doctor         # Check build environment
+./W0lfSword build          # Compile the tweak
+./W0lfSword deploy 192.168.1.5  # Install on device
+./W0lfSword log            # Fetch device logs
+./W0lfSword status         # Project health overview
+```
+
+> **Run `./W0lfSword` with no arguments** for the interactive menu — wolf art, spinner,  
+> quick shortcuts (`b`=build, `d`=deploy, `s`=status), and full-color output.
+
 ---
 
 ## Table of Contents
 
+- [Quick Start](#quick-start)
 - [Credits](#credits)
 - [Features](#features)
 - [Supported Devices](#supported-devices--ios-versions)
 - [Project Layout](#project-layout)
 - [Architecture](#architecture)
-- [Quick Start](#quick-start)
 - [CLI & Scripts](#cli--scripts)
 - [Build Guide](#build-guide)
 - [Installation](#installation)
@@ -175,23 +222,6 @@ TweakInit() → installHooks() → scheduleExploitOnce() [1s delay]
 ```
 
 ---
-
-## Quick Start
-
-```bash
-git clone https://github.com/kaffeindecaf/W0lfSword.git
-cd W0lfSword
-
-./W0lfSword doctor          # Check build environment
-./W0lfSword build           # Compile the tweak
-./W0lfSword deploy 192.168.1.5  # Install on device
-./W0lfSword log             # Watch live logs
-./W0lfSword status          # Project health overview
-./W0lfSword audit           # Run static analysis
-```
-
----
-
 ## CLI & Scripts
 
 ### `W0lfSword` — Project CLI
