@@ -5,7 +5,9 @@
 # ║  Made by kaffeindecaf — github.com/kaffeindecaf             ║
 # ╚══════════════════════════════════════════════════════════════╝
 
-set -euo pipefail
+set -uo pipefail
+# NOTE: -e intentionally NOT set — errors (no device, SSH fail, etc.)
+# return to the menu rather than killing the whole script.
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
@@ -600,6 +602,10 @@ cmd_quick() {
 
 draw_menu() {
     clear
+    if $FIRST_DRAW; then
+        show_wolf
+        FIRST_DRAW=false
+    fi
     show_header
     echo ""
     echo -e "  ${C_EYE}${B}[ 1 ]${NC}  Quick Exploit      ${C_DIM}Build → Deploy → Verify${NC}"
@@ -618,30 +624,31 @@ draw_menu() {
 }
 
 run_menu() {
+    FIRST_DRAW=true
     while true; do
         draw_menu
         read -r choice
         spinner "loading"
         echo ""
         case "$choice" in
-            1) cmd_quick;;
-            2) cmd_deploy;;
+            1) cmd_quick || true;;
+            2) cmd_deploy || true;;
             3) echo -e "  ${C_FROST}Device commands:${NC} list | add <ip> | switch <ip> | info [ip]"
-               echo -ne "  ${C_FROST}device ▸${NC} "; read -r dcmd
-               echo ""; cmd_device $dcmd;;
-            4) cmd_monitor;;
+               echo -ne "  ${C_FROST}device ▸${NC} "; read -r dcmd || true
+               echo ""; cmd_device $dcmd || true;;
+            4) cmd_monitor || true;;
             5) echo -e "  ${C_FROST}Profile commands:${NC} list | save <name> | load <name>"
-               echo -ne "  ${C_FROST}profile ▸${NC} "; read -r pcmd
-               echo ""; cmd_profile $pcmd;;
-            6) cmd_history stats; echo ""; cmd_history show;;
-            7) cmd_doctor; echo ""; cmd_audit; echo ""; cmd_status;;
-            8) cmd_targets;;
+               echo -ne "  ${C_FROST}profile ▸${NC} "; read -r pcmd || true
+               echo ""; cmd_profile $pcmd || true;;
+            6) { cmd_history stats; echo ""; cmd_history show; } || true;;
+            7) { cmd_doctor; echo ""; cmd_audit; echo ""; cmd_status; } || true;;
+            8) cmd_targets || true;;
             q|Q|quit|exit)
                 echo ""; echo -e "  ${C_WOLF}~ howl later ~${NC}"; echo ""; exit 0;;
             *)
                 echo -e "  ${C_RED}Unknown — try 1-8 or q${NC}";;
         esac
-        echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r; echo ""
+        echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
 }
 
