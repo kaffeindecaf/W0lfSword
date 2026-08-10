@@ -1,5 +1,8 @@
 # W0lfSword — iOS Kernel Exploit Toolkit
 
+> **This project was developed with AI assistance** — audit, refactoring, documentation, and tooling.  
+> Human-authored components: the DarkSword exploit engine, XPF offset finder, and sandbox extension structures.
+
 > **WARNING: EXTREMELY EXPERIMENTAL — NO REAL DEVICE TESTING HAS BEEN PERFORMED.**  
 > This code has never been run on a physical iOS device. Kernel panics, data loss,  
 > and permanent filesystem corruption are expected. Use only on a dedicated test device  
