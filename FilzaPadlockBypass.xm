@@ -95,8 +95,8 @@ BOOL filza_canCreatePath(NSString *path) {
 }
 
 - (void)askDeleteItems:(id)items {
-    if (g_hooks_disabled) { %orig; return; }
-    [self deleteSelectedItems];
+    if (g_hooks_disabled) return %orig;
+    ((void(*)(id,SEL))objc_msgSend)(self, NSSelectorFromString(@"deleteSelectedItems"));
 }
 
 %end
@@ -111,8 +111,8 @@ BOOL filza_canCreatePath(NSString *path) {
 }
 
 - (void)askDeleteItems:(id)items {
-    if (g_hooks_disabled) { %orig; return; }
-    [self deleteSelectedItems];
+    if (g_hooks_disabled) return %orig;
+    ((void(*)(id,SEL))objc_msgSend)(self, NSSelectorFromString(@"deleteSelectedItems"));
 }
 
 %end

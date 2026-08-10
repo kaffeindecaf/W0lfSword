@@ -542,6 +542,10 @@ static BOOL sealedSystemPath(NSString *path) {
            pathMatchesProtectedRoot(path, @"/dev");
 }
 
+static uint64_t now_ms(void) {
+    return (uint64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+}
+
 static void ensureSSVActive(void) {
     if (ssv_is_active()) return;
     if (!exploit_is_done()) {
@@ -671,10 +675,6 @@ static void applyParentOwnershipAndPerms(NSString *path) {
         TweakLog("[SSV] inherit attrs fallback ssv_chown_root for protected root-owned path: %s", [path UTF8String]);
         ssv_chown_root([path UTF8String]);
     }
-}
-
-static uint64_t now_ms(void) {
-    return (uint64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
 }
 
 static IMP orig_isWritableFileAtPath = NULL;

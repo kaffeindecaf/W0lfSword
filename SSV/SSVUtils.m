@@ -14,6 +14,7 @@
 #import "kexploit/vnode_research.h"
 #import "utils/permission_utils.h"
 #import "utils/tweak_log.h"
+#import "utils/state.h"
 
 __attribute__((constructor))
 static void SSVUtils_init(void) {
