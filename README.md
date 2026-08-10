@@ -187,7 +187,7 @@ W0lfSword/
 
 ### Exploit Pipeline
 
-> See [`W0lfSwordChain.drawio`](W0lfSwordChain.drawio) for a visual diagram of this pipeline.
+![Exploit Pipeline](W0lfSwordChain.png)
 
 ```
 TweakInit() → installHooks() → scheduleExploitOnce() [1s delay]
