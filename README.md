@@ -48,16 +48,22 @@
 git clone https://github.com/kaffeindecaf/W0lfSword.git
 cd W0lfSword
 
-./W0lfSword                # Interactive menu (no args)
-./W0lfSword doctor         # Check build environment
-./W0lfSword build          # Compile the tweak
-./W0lfSword deploy 192.168.1.5  # Install on device
-./W0lfSword log            # Fetch device logs
-./W0lfSword status         # Project health overview
+# Recommended: fully automated deployment
+sudo ./W0lfSword adderall          # USB or WiFi, auto-discover, build, deploy, verify
+sudo ./W0lfSword adderall --yes    # Skip all prompts, full auto
+
+# Manual:
+./W0lfSword                        # Interactive menu (no args)
+./W0lfSword doctor                 # Check build environment
+./W0lfSword build                  # Compile the tweak
+./W0lfSword deploy 192.168.1.5     # Install on device
+./W0lfSword log                    # Fetch device logs
+./W0lfSword status                 # Project health overview
 ```
 
-> **Run `./W0lfSword` with no arguments** for the interactive menu — wolf art, spinner,  
-> quick shortcuts (`b`=build, `d`=deploy, `s`=status), and full-color output.
+> **`adderall` is the recommended way to use W0lfSword.** It auto-discovers your device  
+> via USB or WiFi, checks iOS version/offsets, builds, deploys, and verifies the exploit —  
+> all in one command. Add `--yes` to skip prompts or `-vv` for extreme verbosity.
 
 ---
 
