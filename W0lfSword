@@ -718,6 +718,14 @@ draw_menu() {
     if $FIRST_DRAW; then
         show_wolf
         FIRST_DRAW=false
+        # First-run tip: guide new users
+        if [ ! -f "$DATA_DIR/.has_run" ]; then
+            touch "$DATA_DIR/.has_run"
+            echo -e "  ${C_GRN}${B}Welcome to W0lfSword!${NC}"
+            echo -e "  ${C_DIM}Quick start: type 'a' for auto-mode, 'b' to build, 'h' for help${NC}"
+            echo -e "  ${C_DIM}First time? Run: ${C_FROST}doctor${NC} then ${C_FROST}adderall --safe${NC}"
+            echo ""
+        fi
     fi
     show_header
     echo ""
