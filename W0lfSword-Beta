@@ -56,7 +56,7 @@ ICON_INFO="${CLR_ICE}ℹ${NC}"
 show_wolf() {
     echo -e "${CLR_WOLF}"
     cat << 'WOLF'
-                             __
+                             
                          .d$$b
                        .' TO$;\
                       /  : TP._;

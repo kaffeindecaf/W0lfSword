@@ -7,6 +7,8 @@ TODAY.md
 for_myself.txt
 REPO_SETUP.md
 BUILD.md
+WOLF_ASCII_ART.txt
+temporatyArchitecture
 # Build artifacts
 .theos/
 packages/

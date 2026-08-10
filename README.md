@@ -1,80 +1,52 @@
 # W0lfSword — iOS Kernel Exploit Toolkit
 
-```
-                             __
-                         .d$$b
-                       .' TO$;\
-                      /  : TP._;
-                     / _.;  :Tb|
-                    /   /   ;j$j
-                _.-"       d$$$$
-              .' ..       d$$$$;
-             /  /P'      d$$$$P. |\
-            /   "      .d$$$P' |\^"l
-          .'           `T$P^"""""  :
-      ._.'      _.'                ;
-   `-.-".-'-' ._.       _.-"    .-"
- `.-" _____  ._              .-"
--.(g$$$$$$$b.              .'
-  ""^^T$$$P^)            .(:
-    _/  -"  /.'         /:/;
- ._.'-'`-'  ")/         /;/;
-`-.-"..--""   " /         /  ;
-.-" ..--""        -'          :
-..--""--.-"         (\      .-(\
-  ..--""              `-\(\/;`
-    _.                      :
-                            ;`-
-                           :\
-                           ;
-```
+> **WARNING: EXTREMELY EXPERIMENTAL — NO REAL DEVICE TESTING HAS BEEN PERFORMED.**  
+> This code has never been run on a physical iOS device. Kernel panics, data loss,  
+> and permanent filesystem corruption are expected. Use only on a dedicated test device  
+> you are willing to restore via DFU. **Do NOT install on a daily-driver device.**
 
-> **Made by [kaffeindecaf](https://github.com/kaffeindecaf)**  
 > Kernel-level sandbox escape + Signed System Volume bypass for iOS 17.0–26.0.1  
-> Powered by the **DarkSword** exploit engine — ICMPv6 + IOSurface → kernel R/W
+> Powered by the **DarkSword** exploit engine — ICMPv6 + IOSurface → kernel R/W  
+> Made by **[kaffeindecaf](https://github.com/kaffeindecaf)**
 
 ---
 
 ## Table of Contents
 
-- [Credits & Attribution](#credits--attribution)
+- [Credits](#credits)
 - [Features](#features)
 - [Supported Devices](#supported-devices--ios-versions)
 - [Project Layout](#project-layout)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
-- [Scripts](#scripts)
-  - [W0lfSword (Project CLI)](#filza-toolsh-project-cli)
-  - [build_and_extract.sh](#build_and_extractsh)
+- [CLI & Scripts](#cli--scripts)
 - [Build Guide](#build-guide)
 - [Installation](#installation)
 - [Diagnostics](#diagnostics)
 - [Troubleshooting](#troubleshooting)
-- [Documentation Files](#documentation-files)
+- [Documentation](#documentation)
 - [Known Issues](#known-issues)
 - [Contributing](#contributing)
 - [License](#license)
 
 ---
 
-## Credits & Attribution
+## Credits
 
-This project builds on the work of many people in the jailbreak community.  
-All original research, exploitation techniques, and core infrastructure were developed by:
+This project builds on the work of many people in the jailbreak community:
 
-| Person | Contribution |
-|--------|-------------|
-| **[Huy Nguyen](https://github.com/34306/)** | **Original repository author** — created the initial FilzaJailedDS project |
-| **[wh1te4ever](https://github.com/wh1te4ever/)** | DarkSword kernel exploit (ICMPv6 + IOSurface) & XPF offset resolution engine |
-| **[opa334](https://github.com/opa334/)** | XPF patchfinder, kernel read/write primitives, sandbox extension structures |
-| **[Duy Tran](https://github.com/khanhduytran0/)** | Sandbox hook token technique |
-| **[CrazyMind90](https://github.com/crazymind90/)** | Sandbox token acquisition via kernel R/W only |
-| **[XEmaz](https://x.com/XEmaz_)** | SVV bypass integration, root chown, padlock bypass, license bypass, zip hooks |
-| **[kaffeindecaf](https://github.com/kaffeindecaf)** | iOS 26.0.1 optimization, retry logic, thread safety, logging consolidation, tooling |
+| Person                                              | Contribution                                                   |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| **[Huy Nguyen](https://github.com/34306/)**         | Original FilzaJailedDS project                                 |
+| **[wh1te4ever](https://github.com/wh1te4ever/)**    | DarkSword exploit (ICMPv6 + IOSurface) & XPF offset engine     |
+| **[opa334](https://github.com/opa334/)**            | XPF patchfinder, krw primitives, sandbox structures            |
+| **[Duy Tran](https://github.com/khanhduytran0/)**   | Sandbox hook token technique                                   |
+| **[CrazyMind90](https://github.com/crazymind90/)**  | Sandbox token acquisition via kernel R/W                       |
+| **[XEmaz](https://x.com/XEmaz_)**                   | SSV bypass, root chown, padlock/license bypass, zip hooks      |
+| **[kaffeindecaf](https://github.com/kaffeindecaf)** | iOS 26.0.1 stability, retry logic, threading, logging, tooling |
 
-> **This repository:** [`XEmaz/W0lfSword`](https://github.com/XEmaz/W0lfSword)  
-> **Original source:** [`34306/FilzaJailedDS`](https://github.com/34306/FilzaJailedDS)  
-> **Informed by:** [`felix-pb/kfd`](https://github.com/felix-pb/kfd) (PUAF primitives), [`opa334/TrollStore`](https://github.com/opa334/TrollStore) (CoreTrust bypass), [`opa334/opainject`](https://github.com/opa334/opainject) (ROP injection)
+> **This repo:** [`kaffeindecaf/W0lfSword`](https://github.com/kaffeindecaf/W0lfSword) — fork of [`34306/FilzaJailedDS`](https://github.com/34306/FilzaJailedDS)  
+> **Informed by:** [`felix-pb/kfd`](https://github.com/felix-pb/kfd) (PUAF), [`opa334/TrollStore`](https://github.com/opa334/TrollStore) (CoreTrust), [`opa334/opainject`](https://github.com/opa334/opainject) (ROP injection)
 
 ---
 
@@ -82,18 +54,18 @@ All original research, exploitation techniques, and core infrastructure were dev
 
 | Feature | Description |
 |---------|-------------|
-| **Kernel Exploit** | DarkSword (ICMPv6 socket spray + IOSurface physical OOB) — kernel read/write |
-| **Retry Loop** | Exploit retries up to 5 times with exponential backoff (README said "2-3 attempts needed") |
+| **Kernel Exploit** | DarkSword (ICMPv6 socket spray + IOSurface OOB) — kernel R/W |
+| **Retry Loop** | Up to 5 attempts with exponential backoff |
 | **Sandbox Escape** | Walks `proc → ucred → label → sandbox → ext_set`, patches extensions to `"/"` |
 | **SSV Bypass** | Vnode data pointer swap — writes to `/System/`, `/usr/`, `/bin/`, `/sbin/` |
-| **Root Ownership** | Automatically `chown root:wheel` on files created in sealed paths |
-| **Root Helper Bypass** | All `TGRootFileManager` XPC calls intercepted — no helper needed |
-| **Zip/Unzip** | Uses Filza's own minizip symbols via dlsym (13 function pointers validated) |
-| **License Bypass** | Suppresses "binary was modified" and activation nag alerts |
-| **Padlock Bypass** | Hooks `NZFileBrowserController`, `NZFileItem` — always allows edit/delete |
+| **Root Ownership** | Auto `chown root:wheel` on files created in sealed paths |
+| **Root Helper Bypass** | Intercepts `TGRootFileManager` XPC calls — no helper needed |
+| **Zip/Unzip** | Uses Filza's minizip via dlsym (13 function pointers validated) |
+| **License Bypass** | Suppresses "binary modified" and activation nag alerts |
+| **Padlock Bypass** | Hooks `NZFileBrowserController`, `NZFileItem` — always allow edit/delete |
 | **Apps Manager Fix** | Filesystem scanner populates app list when LSApplicationWorkspace returns empty |
 | **Thread Safety** | `_Atomic bool` with `memory_order_acquire/release` for cross-thread flags |
-| **Consolidated Logging** | Single `/tmp/FilzaTweak.log` with 4MB rotation + trylock fallback to stderr |
+| **Consolidated Logging** | Single `/tmp/FilzaTweak.log` with 4MB rotation + trylock fallback |
 | **Runtime Toggle** | `touch /var/mobile/Documents/.filza_tweak_disable` to disable without uninstalling |
 | **Offset Verification** | Thread kstackptr validated against VM bounds before any kernel writes |
 
@@ -102,10 +74,10 @@ All original research, exploitation techniques, and core infrastructure were dev
 ## Supported Devices & iOS Versions
 
 | iOS Version | A12-A14 | A15 (SE3, 13) | A16 (14 Pro) | A17 (15 Pro) | A18 (16) | M1-M4 |
-|-------------|---------|---------------|--------------|--------------|----------|-------|
-| 17.0–17.7 | ✓ | ✓ | ✓ | ✓ | — | ✓ |
-| 18.0–18.7.7 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 26.0–26.0.1 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| ----------- | ------- | ------------- | ------------ | ------------ | -------- | ----- |
+| 17.0–17.7   | ✓       | ✓             | ✓            | ✓            | —        | ✓     |
+| 18.0–18.7.7 | ✓       | ✓             | ✓            | ✓            | ✓        | ✓     |
+| 26.0–26.0.1 | ✓       | ✓             | ✓            | ✓            | ✓        | ✓     |
 
 **Not supported:** iPhone 17 series (A19), iPad M5 — Apple added MTE (Memory Tagging Extension) which blocks kernel R/W.
 
@@ -170,7 +142,7 @@ W0lfSword/
 │   ├── AUDIT_REPORT.md              # 20 findings + 11 fixes applied + PR guide
 │   ├── BUG_BOUNTY.md                # 14 security findings with Apple bounty ranges
 │   ├── DEBUG_TRACKING.md            # Every log statement mapped by file:line + strip guide
-│   ├── ROADMAP.md                   # 98-item checklist for features, bugs, research
+│   ├── ROADMAP.md                   # 115-item checklist for features, bugs, research
 │   └── BUILD.md                     # Theos explanation + build instructions + troubleshooting
 │
 ├── .theos/                          # Theos build artifacts (auto-generated)
@@ -215,6 +187,8 @@ W0lfSword/
 
 ### Exploit Pipeline
 
+> See [`W0lfSwordChain.drawio`](W0lfSwordChain.drawio) for a visual diagram of this pipeline.
+
 ```
 TweakInit() → installHooks() → scheduleExploitOnce() [1s delay]
 → runExploit() [5 retries, exponential backoff]
@@ -231,58 +205,46 @@ TweakInit() → installHooks() → scheduleExploitOnce() [1s delay]
 ## Quick Start
 
 ```bash
-# 1. Clone
-git clone https://github.com/XEmaz/W0lfSword.git
-cd FilzaJailedDS-SSV-Bypass
+git clone https://github.com/kaffeindecaf/W0lfSword.git
+cd W0lfSword
 
-# 2. Check your environment
-./W0lfSword doctor
-
-# 3. Build
-./W0lfSword build
-
-# 4. Install on device (set IP once, saved for future)
-./W0lfSword deploy 192.168.1.5
-
-# 5. Watch the logs
-./W0lfSword log
-
-# 6. Check project status
-./W0lfSword status
-
-# 7. Run static analysis before committing
-./W0lfSword audit
+./W0lfSword doctor          # Check build environment
+./W0lfSword build           # Compile the tweak
+./W0lfSword deploy 192.168.1.5  # Install on device
+./W0lfSword log             # Watch live logs
+./W0lfSword status          # Project health overview
+./W0lfSword audit           # Run static analysis
 ```
 
 ---
 
-## Scripts
+## CLI & Scripts
 
 ### `W0lfSword` — Project CLI
 
 ```
-╔══════════════════════════════════════════════════╗
-║  FilzaJailedDS-SSV-Bypass                        ║
-║  Made by kaffeindecaf                             ║
-╚══════════════════════════════════════════════════╝
+╔══════════════════════════════╗
+║  W0lfSword                   ║
+║  iOS Kernel Exploit Toolkit  ║
+╚══════════════════════════════╝
 
 Usage: ./W0lfSword <command> [args...]
 ```
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `build` | Compile tweak + create .deb | `./W0lfSword build` |
-| `extract` | Extract .dylib from built .deb | `./W0lfSword extract` |
-| `deploy <ip>` | scp .deb → dpkg -i → killall Filza on device | `./W0lfSword deploy 192.168.1.5` |
-| `status` | Project health: git, build, ROADMAP progress | `./W0lfSword status` |
-| `audit` | Static analysis: brace balance, printf count, offset coverage | `./W0lfSword audit` |
-| `log [n]` | Fetch last n lines of `/tmp/FilzaTweak.log` from device | `./W0lfSword log 100` |
-| `toggle on\|off` | Enable/disable tweak on device via flag file | `./W0lfSword toggle off` |
-| `offsets [ver]` | Show offset table coverage per iOS version | `./W0lfSword offsets 26.0` |
-| `clean` | Clean build artifacts + temp files | `./W0lfSword clean` |
-| `doctor` | Check environment: THEOS, SDK, ssh, dpkg, clang, device | `./W0lfSword doctor` |
-| `targets` | Show all supported apps + exploit techniques | `./W0lfSword targets` |
-| `help` | Show this reference | `./W0lfSword help` |
+| Command          | Description                                                   | Example                          |
+| ---------------- | ------------------------------------------------------------- | -------------------------------- |
+| `build`          | Compile tweak + create .deb                                   | `./W0lfSword build`              |
+| `extract`        | Extract .dylib from built .deb                                | `./W0lfSword extract`            |
+| `deploy <ip>`    | scp .deb → dpkg -i → killall Filza on device                  | `./W0lfSword deploy 192.168.1.5` |
+| `status`         | Project health: git, build, ROADMAP progress                  | `./W0lfSword status`             |
+| `audit`          | Static analysis: brace balance, printf count, offset coverage | `./W0lfSword audit`              |
+| `log [n]`        | Fetch last n lines of `/tmp/FilzaTweak.log` from device       | `./W0lfSword log 100`            |
+| `toggle on\|off` | Enable/disable tweak on device via flag file                  | `./W0lfSword toggle off`         |
+| `offsets [ver]`  | Show offset table coverage per iOS version                    | `./W0lfSword offsets 26.0`       |
+| `clean`          | Clean build artifacts + temp files                            | `./W0lfSword clean`              |
+| `doctor`         | Check environment: THEOS, SDK, ssh, dpkg, clang, device       | `./W0lfSword doctor`             |
+| `targets`        | Show all supported apps + exploit techniques                  | `./W0lfSword targets`            |
+| `help`           | Show this reference                                           | `./W0lfSword help`               |
 
 **Device IP configuration:** Run `./W0lfSword deploy <ip>` once to save the IP. Subsequent `log`, `toggle`, and `deploy` commands will use the saved IP automatically. The IP is stored in `.device_ip` (gitignored).
 
@@ -293,7 +255,7 @@ Usage: ./W0lfSword <command> [args...]
 W0lfSword-Beta is a **superset** of W0lfSword. It includes every original command unchanged, plus an interactive exploit menu when run with no arguments.
 
 ```
-                             __
+
                          .d$$b
                        .' TO$;\
                       /  : TP._;
@@ -335,6 +297,7 @@ W0lfSword-Beta is a **superset** of W0lfSword. It includes every original comman
 ```
 
 **Interactive Menu:**
+
 ```
   [1] Quick Exploit      Build → Deploy → Verify
   [2] Deploy Only        Install on device
@@ -349,19 +312,19 @@ W0lfSword-Beta is a **superset** of W0lfSword. It includes every original comman
 
 **New Beta-only commands:**
 
-| Command | Description |
-|---------|-------------|
-| `quick` | One-command exploit chain: builds, deploys, waits for exploit, verifies log output |
-| `profile save <name>` | Save current device/target/retry settings as a named profile |
-| `profile load <name>` | Load a saved profile |
-| `profile list` | Show all profiles with colored status |
-| `device add <ip>` | Add a test device to the manager |
-| `device list` | Show all devices with ping status |
-| `device switch <ip>` | Switch active device |
-| `device info [ip]` | Show iOS version, model, kernel version of device |
-| `monitor` | Real-time `tail -f` of device log with color coding |
-| `history` | Show exploit attempt log with timestamps |
-| `history stats` | Dashboard: total attempts, success rate %, ASCII bar chart |
+| Command               | Description                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| `quick`               | One-command exploit chain: builds, deploys, waits for exploit, verifies log output |
+| `profile save <name>` | Save current device/target/retry settings as a named profile                       |
+| `profile load <name>` | Load a saved profile                                                               |
+| `profile list`        | Show all profiles with colored status                                              |
+| `device add <ip>`     | Add a test device to the manager                                                   |
+| `device list`         | Show all devices with ping status                                                  |
+| `device switch <ip>`  | Switch active device                                                               |
+| `device info [ip]`    | Show iOS version, model, kernel version of device                                  |
+| `monitor`             | Real-time `tail -f` of device log with color coding                                |
+| `history`             | Show exploit attempt log with timestamps                                           |
+| `history stats`       | Dashboard: total attempts, success rate %, ASCII bar chart                         |
 
 Data stored in `.w0lfsword/` directory (profiles, devices, history — gitignored).
 
@@ -390,6 +353,7 @@ Compiles the tweak via Theos, unpacks the resulting `.deb`, copies `FilzaApplySa
 ### Prerequisites
 
 **macOS:**
+
 ```bash
 xcode-select --install
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
@@ -398,6 +362,7 @@ brew install dpkg
 ```
 
 **Linux:**
+
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
 echo 'export THEOS=~/theos' >> ~/.bashrc && source ~/.bashrc
@@ -457,6 +422,7 @@ All logs go to a single file inside Filza's sandbox:
 ```
 
 Fetch it from your computer:
+
 ```bash
 ./W0lfSword log        # Last 50 lines
 ./W0lfSword log 200    # Last 200 lines
@@ -495,49 +461,49 @@ touch /var/mobile/Documents/ui_debug_bypass_off.flag
 
 ### Build Issues
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `theos/makefiles/common.mk: No such file` | THEOS not set | `export THEOS=~/theos` |
-| `iPhoneOS.sdk not found` | Missing SDK | Download from [theos/sdks](https://github.com/theos/sdks), place in `$THEOS/sdks/` |
-| `dpkg-deb: command not found` | dpkg missing | `brew install dpkg` (macOS) / `apt install dpkg` (Linux) |
-| `Undefined symbols for architecture arm64` | Missing framework/library | Check Makefile `_FRAMEWORKS` / `_LIBRARIES` |
-| `clang: error: no such file: 'XPF/src/xpf.c'` | XPF submodule not initialized | `git submodule update --init` |
-| Warning spam during build | Normal — the Makefile suppresses most warnings | Intended: `-Wno-unused-function` etc. in CFLAGS |
+| Symptom                                       | Cause                                          | Fix                                                                                |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `theos/makefiles/common.mk: No such file`     | THEOS not set                                  | `export THEOS=~/theos`                                                             |
+| `iPhoneOS.sdk not found`                      | Missing SDK                                    | Download from [theos/sdks](https://github.com/theos/sdks), place in `$THEOS/sdks/` |
+| `dpkg-deb: command not found`                 | dpkg missing                                   | `brew install dpkg` (macOS) / `apt install dpkg` (Linux)                           |
+| `Undefined symbols for architecture arm64`    | Missing framework/library                      | Check Makefile `_FRAMEWORKS` / `_LIBRARIES`                                        |
+| `clang: error: no such file: 'XPF/src/xpf.c'` | XPF submodule not initialized                  | `git submodule update --init`                                                      |
+| Warning spam during build                     | Normal — the Makefile suppresses most warnings | Intended: `-Wno-unused-function` etc. in CFLAGS                                    |
 
 ### Runtime Issues
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| Filza crashes on launch | Exploit panicked kernel on previous run | Wait for reboot, try again (retry loop handles this) |
-| "Sandbox not yet escaped" repeats 5 times | Wrong offsets for this iOS build | Run `./W0lfSword offsets` to check coverage; add new offsets block |
-| Files in /System show as writable but writes fail | SSV activation failed | Check log for `ensureSSVActive set active=1` — if missing, kernel patch failed |
-| `check_sandbox_var_rw FAILED` | Extension patching didn't take effect | Retry loop handles this; check if `borrow_sandbox_ext` was tried as fallback |
-| `g_ui_debug_bypass` simulated writes | UI debug is ON | Run `touch /var/mobile/Documents/ui_debug_bypass_off.flag` and restart Filza |
-| Tweak does nothing | Disabled by flag file | Run `./W0lfSword toggle off` or `ssh rm /var/mobile/Documents/.filza_tweak_disable` |
-| `thread kstackptr outside valid range` | Wrong offsets for this SoC/iOS combo | Add per-SoC offset overrides in offsets.m for your device |
-| Filza 4.0.2 crashes | Known incompatibility | Use Filza 4.0.0 |
+| Symptom                                           | Cause                                   | Fix                                                                                 |
+| ------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------- |
+| Filza crashes on launch                           | Exploit panicked kernel on previous run | Wait for reboot, try again (retry loop handles this)                                |
+| "Sandbox not yet escaped" repeats 5 times         | Wrong offsets for this iOS build        | Run `./W0lfSword offsets` to check coverage; add new offsets block                  |
+| Files in /System show as writable but writes fail | SSV activation failed                   | Check log for `ensureSSVActive set active=1` — if missing, kernel patch failed      |
+| `check_sandbox_var_rw FAILED`                     | Extension patching didn't take effect   | Retry loop handles this; check if `borrow_sandbox_ext` was tried as fallback        |
+| `g_ui_debug_bypass` simulated writes              | UI debug is ON                          | Run `touch /var/mobile/Documents/ui_debug_bypass_off.flag` and restart Filza        |
+| Tweak does nothing                                | Disabled by flag file                   | Run `./W0lfSword toggle off` or `ssh rm /var/mobile/Documents/.filza_tweak_disable` |
+| `thread kstackptr outside valid range`            | Wrong offsets for this SoC/iOS combo    | Add per-SoC offset overrides in offsets.m for your device                           |
+| Filza 4.0.2 crashes                               | Known incompatibility                   | Use Filza 4.0.0                                                                     |
 
 ### Device Issues
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `ssh: connect to host ... port 22: Connection refused` | OpenSSH not installed on device | Install OpenSSH via Sileo/Cydia |
-| `Permission denied (publickey)` | SSH key mismatch | `ssh -o StrictHostKeyChecking=no root@<ip>` |
-| Device not discoverable | Different network | Check device Wi-Fi IP in Settings → Wi-Fi → (i) icon |
-| `dpkg: error processing package` | Already installed or version conflict | `ssh root@<ip> "dpkg --force-depends -i /tmp/...deb"` |
+| Symptom                                                | Cause                                 | Fix                                                   |
+| ------------------------------------------------------ | ------------------------------------- | ----------------------------------------------------- |
+| `ssh: connect to host ... port 22: Connection refused` | OpenSSH not installed on device       | Install OpenSSH via Sileo/Cydia                       |
+| `Permission denied (publickey)`                        | SSH key mismatch                      | `ssh -o StrictHostKeyChecking=no root@<ip>`           |
+| Device not discoverable                                | Different network                     | Check device Wi-Fi IP in Settings → Wi-Fi → (i) icon  |
+| `dpkg: error processing package`                       | Already installed or version conflict | `ssh root@<ip> "dpkg --force-depends -i /tmp/...deb"` |
 
 ---
 
-## Documentation Files
+## Documentation
 
 | File | Purpose |
 |------|---------|
-| `CONTEXT.md` | **Start here when resuming a session** — full project architecture, decisions, constants, reference repos |
-| `ROADMAP.md` | 98-item checklist: bugs, features, exploits, bug bounty, testing, documentation |
-| `BUG_BOUNTY.md` | 14 security findings with Apple bounty ranges ($25K-$250K), attack chains, crash scenarios |
-| `AUDIT_REPORT.md` | 20 findings ranked CRITICAL→LOW, 13 fixes applied, GitHub PR guide |
-| `DEBUG_TRACKING.md` | Every log statement mapped by file:line, 3-layer strip guide, audit trail map |
-| `BUILD.md` | Theos explanation, prerequisites, build commands, .deb structure, troubleshooting |
+| `CONTEXT.md` | Full project knowledge base — start here when resuming a session |
+| `ROADMAP.md` | 115-item checklist: bugs, features, exploits, bug bounty, testing |
+| `BUG_BOUNTY.md` | 14 security findings with Apple bounty ranges ($25K–$250K) |
+| `AUDIT_REPORT.md` | 20 findings ranked CRITICAL→LOW, 13 fixes applied, PR guide |
+| `DEBUG_TRACKING.md` | Every log statement mapped by file:line, 3-layer strip guide |
+| `BUILD.md` | Theos explanation, prerequisites, build commands, troubleshooting |
 
 ---
 
@@ -564,6 +530,7 @@ Found a bug? Open an issue. Want to add support for a new iOS version or device?
 See `ROADMAP.md` for the full task list. See `AUDIT_REPORT.md` for remaining medium/low items.
 
 Before committing, run:
+
 ```bash
 ./W0lfSword audit    # Check braces, printf count, offset coverage
 ./W0lfSword status   # Verify nothing in dirty state
@@ -574,6 +541,7 @@ Before committing, run:
 ## License
 
 This project incorporates code from multiple open-source projects:
+
 - DarkSword kernel exploit (wh1te4ever)
 - XPF offset engine / sandbox structures (opa334)
 - ChOma Mach-O parser

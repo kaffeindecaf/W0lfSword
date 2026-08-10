@@ -19,7 +19,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
 echo "╔════════════════════════════════════════╗"
-echo "║  FilzaJailedDS-SSV-Bypass Build Tool  ║"
+echo "║  W0lfSword Build Tool  ║"
 echo "╚════════════════════════════════════════╝"
 echo ""
 

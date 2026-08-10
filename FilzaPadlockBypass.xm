@@ -14,6 +14,42 @@
 #import "kexploit/offsets.h"
 #import <substrate.h>
 
+static BOOL g_hooks_disabled = NO;
+
+#pragma mark - Class existence verification
+
+static void verify_padlock_classes(void) {
+    static const char *classNames[] = {
+        "NZFileBrowserController",
+        "NZDirectoryController",
+        "NZFileItem",
+        "NZFileManager",
+        "NZTextEditor",
+        "NZFileViewer",
+        NULL
+    };
+
+    int found = 0, missing = 0;
+    for (int i = 0; classNames[i]; i++) {
+        Class cls = NSClassFromString([NSString stringWithUTF8String:classNames[i]]);
+        if (cls) {
+            found++;
+        } else {
+            TweakLog("[Padlock] WARNING: class '%s' not found — hooks targeting it are dead code",
+                     classNames[i]);
+            missing++;
+        }
+    }
+
+    if (found == 0) {
+        TweakLog("[Padlock] ALL target classes missing — disabling padlock hooks (likely wrong Filza version)");
+        g_hooks_disabled = YES;
+    } else {
+        TweakLog("[Padlock] Class check: %d found, %d missing (hooks %s)",
+                 found, missing, missing > 0 ? "partially active" : "fully active");
+    }
+}
+
 #pragma mark - Helper Functions
 
 BOOL filza_canEditPath(NSString *path) {
@@ -41,6 +77,7 @@ BOOL filza_canCreatePath(NSString *path) {
 %hook NZFileBrowserController
 
 - (BOOL)canEditItemAtURL:(NSURL *)url {
+    if (g_hooks_disabled) return %orig;
     %log;
     NSString *path = [url path];
     TweakLog("NZFileBrowserController::canEditItemAtURL: %s - BYPASSING", [path UTF8String]);
@@ -48,24 +85,28 @@ BOOL filza_canCreatePath(NSString *path) {
 }
 
 - (BOOL)isLocked {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileBrowserController::isLocked - BYPASSING (returning NO)");
-    return NO;  // Hide the padlock
+    return NO;
 }
 
 - (BOOL)readOnlyMode {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileBrowserController::readOnlyMode - BYPASSING (returning NO)");
-    return NO;  // Disable read-only mode
+    return NO;
 }
 
 - (BOOL)canCreateFiles {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileBrowserController::canCreateFiles - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canDeleteItems {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileBrowserController::canDeleteItems - BYPASSING (returning YES)");
     return YES;
@@ -78,18 +119,21 @@ BOOL filza_canCreatePath(NSString *path) {
 %hook NZDirectoryController
 
 - (BOOL)canCreateFiles {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZDirectoryController::canCreateFiles - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canDeleteItems {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZDirectoryController::canDeleteItems - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)isLocked {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZDirectoryController::isLocked - BYPASSING (returning NO)");
     return NO;
@@ -102,24 +146,28 @@ BOOL filza_canCreatePath(NSString *path) {
 %hook NZFileItem
 
 - (BOOL)isLocked {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileItem::isLocked - BYPASSING (returning NO)");
     return NO;
 }
 
 - (BOOL)canWrite {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileItem::canWrite - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canDelete {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileItem::canDelete - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canEdit {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileItem::canEdit - BYPASSING (returning YES)");
     return YES;
@@ -132,6 +180,7 @@ BOOL filza_canCreatePath(NSString *path) {
 %hook NZFileManager
 
 - (BOOL)createFileAtPath:(NSString *)path contents:(NSData *)data attributes:(NSDictionary *)attr {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileManager::createFileAtPath: %s - applying permissions after", [path UTF8String]);
     
@@ -145,6 +194,7 @@ BOOL filza_canCreatePath(NSString *path) {
 }
 
 - (BOOL)copyItemAtPath:(NSString *)src toPath:(NSString *)dst error:(NSError **)err {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileManager::copyItemAtPath: %s -> %s - applying permissions after", [src UTF8String], [dst UTF8String]);
     
@@ -158,6 +208,7 @@ BOOL filza_canCreatePath(NSString *path) {
 }
 
 - (BOOL)moveItemAtPath:(NSString *)src toPath:(NSString *)dst error:(NSError **)err {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileManager::moveItemAtPath: %s -> %s - applying permissions after", [src UTF8String], [dst UTF8String]);
     
@@ -171,6 +222,7 @@ BOOL filza_canCreatePath(NSString *path) {
 }
 
 - (BOOL)removeItemAtPath:(NSString *)path error:(NSError **)err {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileManager::removeItemAtPath: %s - allowing deletion", [path UTF8String]);
     
@@ -193,6 +245,7 @@ BOOL filza_canCreatePath(NSString *path) {
 }
 
 - (BOOL)replaceItemAtPath:(NSString *)path withItemAtPath:(NSString *)withItem error:(NSError **)err {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileManager::replaceItemAtPath: %s - applying permissions after", [path UTF8String]);
     
@@ -212,6 +265,7 @@ BOOL filza_canCreatePath(NSString *path) {
 %hook NZTextEditor
 
 - (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZTextEditor::writeToFile: %s - applying permissions after", [path UTF8String]);
     
@@ -231,12 +285,14 @@ BOOL filza_canCreatePath(NSString *path) {
 %hook NZFileViewer
 
 - (BOOL)canEdit {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileViewer::canEdit - BYPASSING (returning YES)");
     return YES;
 }
 
 - (BOOL)canSave {
+    if (g_hooks_disabled) return %orig;
     %log;
     TweakLog("NZFileViewer::canSave - BYPASSING (returning YES)");
     return YES;
@@ -247,5 +303,6 @@ BOOL filza_canCreatePath(NSString *path) {
 #pragma mark - Initialization
 
 void initFilzaPadlockBypass(void) {
-    TweakLog("initFilzaPadlockBypass called - hooks are active");
+    verify_padlock_classes();
+    TweakLog("initFilzaPadlockBypass called - hooks are active (disabled=%d)", g_hooks_disabled);
 }
