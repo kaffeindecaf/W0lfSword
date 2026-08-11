@@ -125,6 +125,7 @@ static void set_rw_class(uint64_t hdr) {
 #pragma mark - Main entry
 
 int sandbox_escape(uint64_t self_proc) {
+    if (!exploit_is_done()) { TweakLog("[SBX] Exploit not done, cannot escape sandbox"); return -1; }
     if (!self_proc) { TweakLog("[SBX] self_proc is NULL"); return -1; }
 
     uint64_t proc_ro_raw = early_kread64(self_proc + OFF_PROC_PROC_RO);
