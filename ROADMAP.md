@@ -25,8 +25,8 @@
 - [x] `A1.1` 🔴 — Make `g_exploitDone`, `g_patching_in_progress` atomic (`_Atomic bool` or `os_atomic`)  
   _Prompt:_ "Change g_exploitDone and g_patching_in_progress in Tweak.m to use _Atomic bool or os_atomic_store/os_atomic_load. These are read from multiple dispatch queues and the main thread without any memory barrier."
 
-- [ ] `A1.2` 🔴 — Audit all `proc_self()`, `kread64`, `kwrite64` call sites for missing PAC strip  
-  _Prompt:_ "Audit every call to kread64/kwrite64 in kexploit/ and sandbox_escape.m. List every site that reads a kernel pointer but doesn't call xpaci() or kread_ptr() afterward. This causes bogus pointer derefs on arm64e devices."
+- [x] `A1.2` 🔴 — Audit all `proc_self()`, `kread64`, `kwrite64` call sites for missing PAC strip  
+  _Done 2026-08-13: audited kutils.m, vnode.m, sandbox.m, file.m, kexploit_opa334.m, krw.m, permission_utils.m, vnode_research.m, SSVUtils.m, Tweak.m, TweakExploit.m, FilzaPadlockBypass.xm. kread64/kread32/kreadbuf do NOT strip PAC — only kread_ptr/xpaci do. Fixed 9 sites: file.m to_fileproc; sandbox.m self/victim ext_set (borrow path); permission_utils.m v_data ×2; vnode_research.m v_data; kexploit_opa334.m KASLR chain (controlSocketPcb, pcbinfo_pointer, ipi_zone, zv_name) + rwSocketPcb base uses ×3. vnode.m v_data swap/comparison sites verified CORRECT (write-back of signed values). Full Theos build passes._
 
 - [x] `A1.3` 🟠 — `borrow_sandbox_ext()` null-pointer safety + multi-daemon (cfprefsd, securityd, notifyd, lsd)
   _Prompt:_ "In sandbox.m, borrow_sandbox_ext() calls proc_find_by_name('cfprefsd') without checking if the result is NULL. Add a guard that returns -1 if proc_find_by_name fails. Then extend it to try 'securityd', 'notifyd', 'cfprefsd' in a loop."
@@ -99,8 +99,8 @@
 - [x] `A5.1` 🔴 — sandbox_escape.m:114 — non-null-terminated string written to kernel memory  
   _Fixed 2026-08-13: prior state was KRW_LEN=0x21 (33) — which itself violated the early_kread primitive limit (EARLY_KRW_LENGTH=32 → FAILURE on every patch_ext/set_rw_class call). Now: KRW_LEN = EARLY_KRW_LENGTH (32), the 32 name chars are written at da+32 and the NUL terminator is supplied by the zeroed buffer written at da+64. Added `_Static_assert` that the class name is exactly 32 chars, memset hardening on all buffers, and aligned uint64 hb buffer. Verified: full Theos build passes._
 
-- [ ] `A5.2` 🔴 — SSV/SSVUtils.m:35 — patch_sandbox_ext() called with zero exploit guard  
-  _ssv_write calls patch_sandbox_ext before checking exploit_is_done() → kernel R/W on uninitialized primitive → panic._
+- [x] `A5.2` 🔴 — SSV/SSVUtils.m:35 — patch_sandbox_ext() called with zero exploit guard  
+  _Fixed 2026-08-13 (hardening; base guard existed but was incomplete): exploit_is_done() moved to the TOP of ssv_write (before temp-file work, no leaked tmp), patch_sandbox_ext() return value now checked (abort + cleanup before kernel vnode writes on failure), and the truly ungated paths got guards: ssv_chown_root, ssv_dump_fsnode, apply_permissions_kernel (permission_utils.m), research_vnode_apfs_fsnode (vnode_research.m). No more kernel-memory access without a live exploit._
 
 - [ ] `A5.3` 🟠 — TweakExploit.m attemptCount race: static int without synchronization  
   _Multiple dispatch_after blocks fire in parallel, all increment same static int. 2 blocks see attemptCount==2 → both proceed as attempt 3 → parallel sandbox_escape corrupts kernel memory._
@@ -923,10 +923,10 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 | Section | Total Items | Completed | Remaining |
 |---------|------------|-----------|-----------|
-| A1 — Thread Safety | 14 | 12 | 2 |
+| A1 — Thread Safety | 14 | 13 | 1 |
 | A2 — Filza Compatibility | 11 | 2 | 9 |
 | A3 — Kernel Exploit Robustness | 22 | 3 | 19 |
-| A5 — SSV & Sandbox Stability | 10 | 3 | 7 |
+| A5 — SSV & Sandbox Stability | 10 | 4 | 6 |
 | A6 — Production Readiness (new) | 20 | 7 | 13 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
 | B2 — Runtime Control | 3 | 1 | 2 |
@@ -963,7 +963,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | K3 — Tweak Menu | 9 | 0 | 9 |
 | K4 — iOS 26.1 Sandbox Escape Research | 10 | 0 | 10 |
 | K5 — Exploit Chains | 9 | 2 | 7 |
-| **TOTAL** | **217** | **75** | **142** |
+| **TOTAL** | **217** | **77** | **140** |
 
 ---
 

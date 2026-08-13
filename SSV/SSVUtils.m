@@ -25,6 +25,13 @@ bool ssv_write(const char *path, const void *data, size_t len) {
     TweakLog("ssv_write called with path: %s", path);
     if (!data || len == 0) return false;
 
+    // Kernel operations below need a live exploit. Check FIRST, before any
+    // work, so we never touch kernel memory with a cold krw primitive.
+    if (!exploit_is_done()) {
+        TweakLog("[SSV] Exploit not done — refusing ssv_write");
+        return false;
+    }
+
     char tmp[PATH_MAX];
     snprintf(tmp, sizeof(tmp), "/tmp/ssv_%d", getpid());
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -33,12 +40,15 @@ bool ssv_write(const char *path, const void *data, size_t len) {
     close(fd);
 
     TweakLog("Calling patch_sandbox_ext()...");
-    if (!exploit_is_done()) {
-        TweakLog("[SSV] Exploit not done — cannot call patch_sandbox_ext");
-        return false;
-    }
     int sandboxRet = patch_sandbox_ext();
     TweakLog("patch_sandbox_ext returned %d", sandboxRet);
+    if (sandboxRet != 0) {
+        // SSV write path is not active — the vnode swap below would corrupt
+        // the wrong file. Abort before any kernel write.
+        TweakLog("[SSV] patch_sandbox_ext failed (%d) — aborting before kernel vnode writes", sandboxRet);
+        unlink(tmp);
+        return false;
+    }
 
     bool isSSV = is_ssv_protected_path(path);
     TweakLog("Path %s is SSV-protected: %s", path, isSSV ? "YES" : "NO");
@@ -82,9 +92,17 @@ bool ssv_write(const char *path, const void *data, size_t len) {
 
 bool ssv_chown_root(const char *path) {
     TweakLog("ssv_chown_root called for: %s", path);
+    if (!exploit_is_done()) {
+        TweakLog("[SSV] Exploit not done — refusing ssv_chown_root (kernel fsnode write)");
+        return false;
+    }
     return force_chown_root_wheel(path);
 }
 
 void ssv_dump_fsnode(const char *path) {
+    if (!exploit_is_done()) {
+        TweakLog("[SSV] Exploit not done — refusing ssv_dump_fsnode (kernel vnode read)");
+        return;
+    }
     research_vnode_apfs_fsnode(path);
 }

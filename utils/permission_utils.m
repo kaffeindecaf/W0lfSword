@@ -4,6 +4,7 @@
 #import "../kexploit/offsets.h"
 #import "../kexploit/xpaci.h"
 #import "tweak_log.h"
+#import "state.h"
 #import <Foundation/Foundation.h>
 #import <sys/stat.h>
 #import <unistd.h>
@@ -53,7 +54,7 @@ bool get_parent_dir_info(const char *path, uid_t *uid, gid_t *gid, mode_t *mode)
         return false;
     }
     
-    uint64_t v_data = kread64(vnode + off_vnode_v_data);
+    uint64_t v_data = xpaci(kread64(vnode + off_vnode_v_data));
     if (!v_data) {
         TweakLog("Cannot get v_data for parent dir %s", parentDir);
         free(pathCopy);
@@ -72,13 +73,18 @@ bool get_parent_dir_info(const char *path, uid_t *uid, gid_t *gid, mode_t *mode)
 static int apply_permissions_kernel(const char *path, uid_t uid, gid_t gid, mode_t mode) {
     TweakLog("apply_permissions_kernel: %s uid=%d gid=%d mode=%o", path, uid, gid, mode);
     
+    if (!exploit_is_done()) {
+        TweakLog("apply_permissions_kernel: exploit not done — refusing kernel fsnode write for %s", path);
+        return -1;
+    }
+    
     uint64_t vnode = get_vnode_for_path_by_open(path);
     if (vnode == -1) {
         TweakLog("Cannot get vnode for %s", path);
         return -1;
     }
     
-    uint64_t v_data = kread64(vnode + off_vnode_v_data);
+    uint64_t v_data = xpaci(kread64(vnode + off_vnode_v_data));
     if (!v_data) {
         TweakLog("Cannot get v_data for %s", path);
         return -1;
