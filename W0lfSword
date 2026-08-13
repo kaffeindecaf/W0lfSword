@@ -140,6 +140,13 @@ info() { printf "  ${C_ICE}ℹ${NC} %s\n" "$1"; }
 stage() { printf "  ${C_EYE}[%s]${NC} %s\n" "$1" "$2"; }
 hint() { printf "  ${C_DIM}  → %s${NC}\n" "$1"; }
 
+# ── Menu layout helpers ───────────────────────────────────────
+menu_group() { echo -e "  ${C_STEEL}${B}── $1 ──────────────────────────────────────────────${NC}"; }
+menu_opt() {
+    local n="$1" name="$2" desc="$3" tag="${4:-}"
+    printf "  ${C_EYE}${B}%2s.${NC} ${C_SNOW}%-18s${NC} ${C_DIM}%s${NC} %s\n" "$n" "$name" "$desc" "$tag"
+}
+
 # ── Plain-English disclaimers for beginners ───────────────────
 disclaimer() {
     printf "  ${C_AMB}${B}── In plain English ──${NC}\n"
@@ -852,22 +859,30 @@ draw_menu() {
     fi
     echo ""
 
-    echo -e "  ${C_EYE}${B}[ 1 ]${NC}  Quick Exploit       ${C_DIM}Build → Deploy → Verify${NC}"
-    echo -e "  ${C_EYE}${B}[ 2 ]${NC}  Deploy Only         ${C_DIM}Install package on device${NC}"
-    echo -e "  ${C_EYE}${B}[ 3 ]${NC}  Device Manager      ${C_DIM}Add / switch / info${NC}"
-    echo -e "  ${C_EYE}${B}[ 4 ]${NC}  Live Monitor        ${C_DIM}Real-time log tailing${NC}"
-    echo -e "  ${C_EYE}${B}[ 5 ]${NC}  Profiles            ${C_DIM}Save / load configs${NC}"
-    echo -e "  ${C_EYE}${B}[ 6 ]${NC}  History             ${C_DIM}Exploit statistics${NC}"
-    echo -e "  ${C_EYE}${B}[ 7 ]${NC}  Diagnostics         ${C_DIM}Doctor · Audit · Status${NC}"
-    echo -e "  ${C_EYE}${B}[ 8 ]${NC}  Targets             ${C_DIM}Supported apps${NC}"
-    echo -e "  ${C_EYE}${B}[ 9 ]${NC}  usbliter8-arctic    ${C_DIM}CFW builder · PWN DFU · restore (A12/A13)${NC}  ${C_AMB}[root]${NC}"
+    menu_group "exploit"
+    menu_opt 1 "Quick Exploit"    "build → install → verify, one button"
+    menu_opt 2 "Deploy Only"      "install the tweak on the phone"
+    menu_opt 3 "Live Monitor"     "watch the phone's log in real time"
     echo ""
-    echo -e "  ${C_GREY}── commands ──────────────────────────────────────────────────────${NC}"
-    echo -e "  ${C_FROST}b${NC}=build  ${C_FROST}d${NC}=deploy  ${C_FROST}a${NC}=adderall ${C_AMB}[root]${NC}  ${C_FROST}sf${NC}=safe  ${C_FROST}s${NC}=status  ${C_FROST}l${NC}=log"
-    echo -e "  ${C_FROST}m${NC}=monitor  ${C_FROST}c${NC}=clean  ${C_FROST}ul8${NC}=usbliter8 ${C_AMB}[root]${NC}  ${C_FROST}setup${NC}=install ${C_AMB}[root]${NC}"
-    echo -e "  ${C_FROST}doctor${NC}=check-env  ${C_FROST}audit${NC}=analyze  ${C_FROST}x${NC}=explain ${C_DIM}(plain-English help)${NC}"
-    echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo, all other commands work fine without${NC}"
-    echo -e "  ${C_EYE}${B}[ q ]${NC}  Quit               ${C_DIM}╱  howl later${NC}"
+
+    menu_group "phone & data"
+    menu_opt 4 "Device Manager"   "add / switch / device info"
+    menu_opt 5 "Profiles"         "save / load deploy settings"
+    menu_opt 6 "History"          "exploit success stats"
+    echo ""
+
+    menu_group "diagnostics & power"
+    menu_opt 7 "Diagnostics"      "doctor · audit · status"
+    menu_opt 8 "Targets"          "supported apps & planned exploits"
+    menu_opt 9 "usbliter8-arctic" "CFW builder · PWN DFU · A12/A13 restore" "${C_AMB}[root]${NC}"
+    echo ""
+
+    echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
+    printf "  %s build  %s deploy  %s adderall  %s safe  %s status  %s log\n" \
+        "${C_FROST}b${NC}" "${C_FROST}d${NC}" "${C_FROST}a${NC}" "${C_FROST}sf${NC}" "${C_FROST}s${NC}" "${C_FROST}l${NC}"
+    printf "  %s monitor  %s clean  %s explain  %s doctor  %s quit\n" \
+        "${C_FROST}m${NC}" "${C_FROST}c${NC}" "${C_FROST}x${NC}" "${C_FROST}doctor${NC}" "${C_FROST}q${NC}"
+    echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · everything else works without${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
 }
@@ -942,10 +957,10 @@ run_menu() {
         case "$choice" in
             1) cmd_quick || true;;
             2) cmd_deploy || true;;
-            3) echo -e "  ${C_FROST}Device commands:${NC} list | add <ip> | switch <ip> | info [ip]"
+            3) cmd_monitor || true;;
+            4) echo -e "  ${C_FROST}Device commands:${NC} list | add <ip> | switch <ip> | info [ip]"
                echo -ne "  ${C_FROST}device ▸${NC} "; read -r dcmd || true
                echo ""; cmd_device $dcmd || true;;
-            4) cmd_monitor || true;;
             5) echo -e "  ${C_FROST}Profile commands:${NC} list | save <name> | load <name>"
                echo -ne "  ${C_FROST}profile ▸${NC} "; read -r pcmd || true
                echo ""; cmd_profile $pcmd || true;;
