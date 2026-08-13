@@ -839,6 +839,32 @@ EOF
     fi
 }
 
+# ── usbliter8-arctic launcher ─────────────────────────────────
+find_ul8() {
+    for p in "$PROJECT_DIR/usbliter8-arctic/main.py" "$PROJECT_DIR/scripts/usbliter8_arctic/main.py"; do
+        [ -f "$p" ] && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+run_usbliter8() {
+    local ul8; ul8=$(find_ul8)
+    if [ -z "$ul8" ]; then
+        err "usbliter8-arctic toolkit not found"
+        hint "Get it: git clone https://github.com/kaffeindecaf/usbliter8-arctic.git"
+        hint "A12/A13 tethered jailbreak — needs an RP2350 board (not RP2040) + Linux."
+        return 1
+    fi
+    disclaimer <<EOF
+In plain English: usbliter8-arctic is a TETHERED jailbreak toolkit for
+A12/A13 devices (iPhone XS — iPhone 11 era). It uses an RP2350 board to
+exploit SecureROM, enters PWN DFU, and boots custom firmware. The device
+won't boot on its own afterwards — the board must be reapplied every cold
+boot. Flashing CFW erases all data. Guided setup: run option 1 in the TUI.
+EOF
+    python3 "$ul8" "$@"
+}
+
 # ═══════════════════════════════════════════════════════════════
 #  INTERACTIVE MENU
 # ═══════════════════════════════════════════════════════════════
@@ -901,7 +927,7 @@ draw_menu() {
     menu_group "diagnostics & power"
     menu_opt 7 "Diagnostics"      "doctor · audit · status"
     menu_opt 8 "Targets"          "supported apps & planned exploits"
-    menu_opt 9 "usbliter8-arctic" "CFW builder · PWN DFU · A12/A13 restore" "${C_AMB}[root]${NC}"
+    menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
     echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
@@ -1001,7 +1027,7 @@ run_menu() {
                     echo -e "  ${C_AMB}⚠ usbliter8 needs root for USB/DFU access${NC}"
                     echo -e "  ${C_DIM}Exit and re-run with: ${C_FROST}sudo ./W0lfSword${NC}"
                 else
-                    python3 scripts/usbliter8_arctic/main.py "$@" || true
+                    run_usbliter8 "$@" || true
                 fi
                 ;;
             # Quick shortcuts
@@ -1619,7 +1645,7 @@ EOF
         echo ""
         echo -e "  ${C_AMB}Syncing usbliter8-arctic tools...${NC}"
         mkdir -p "$ul8_tools_dir"
-        for src_dir in referenceforAI/projects/usbliter8-fun/tools referenceforAI/projects/usbliter8-fun2/tools; do
+        for src_dir in "$PROJECT_DIR/usbliter8-arctic/tools" referenceforAI/projects/usbliter8-fun/tools referenceforAI/projects/usbliter8-fun2/tools; do
             [ -d "$src_dir" ] && cp "$src_dir"/* "$ul8_tools_dir/" 2>/dev/null && chmod +x "$ul8_tools_dir"/* 2>/dev/null
         done
         ok "usbliter8-arctic tools synced"
@@ -1804,6 +1830,16 @@ offsets — which iOS versions this exploit supports.
   safely — see docs/OFFSET_RESOLUTION_GUIDE.md for adding it.
 EOF
             ;;
+        usbliter8|ul8)
+            cat <<'EOF'
+usbliter8 (ul8) — A12/A13 tethered jailbreak toolkit.
+  Launches the usbliter8-arctic TUI: guided hardware setup, offset profile
+  management, CFW builder, PWN DFU checks, health check, and post-boot
+  setup (SSH/VNC/Sileo). Needs an RP2350 board + Linux + root.
+  TETHERED: the board must re-exploit the device on every cold boot.
+  Flashing CFW ERASES all data — back up first.
+EOF
+            ;;
         tweaks)
             cat <<'EOF'
 tweaks — the tweak catalog.
@@ -1905,7 +1941,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "export [file]" "Zip logs + offsets for bug reports"
     printf "  ${C_EYE}%-14s${NC} %s\n" "profile ..."   "Save/load exploit configs"
     printf "  ${C_EYE}%-14s${NC} %s\n" "device ..."   "Multi-device manager"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "usbliter8 (ul8)" "CFW builder · PWN DFU · A12/A13 restore${C_AMB} [root]${NC}"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "usbliter8 (ul8)" "A12/A13 tethered jailbreak TUI (RP2350)${C_AMB} [root]${NC}"
     echo ""
     echo -e "  ${C_DIM}Flags: -v verbose  -vv debug  -y/--yes skip prompts${NC}"
     echo -e "  ${C_DIM}Tip: from menu, type 'b' to build, 'a' for adderall.${NC}"
@@ -1975,7 +2011,7 @@ main() {
                 echo -e "  ${C_DIM}Re-run with: ${C_FROST}sudo ./W0lfSword ul8${NC}"
                 exit 1
             fi
-            shift; python3 scripts/usbliter8_arctic/main.py "$@" ;;
+            shift; run_usbliter8 "$@" ;;
         *) echo -e "${C_RED}Unknown: $cmd${NC}"; echo -e "Run ${C_FROST}./W0lfSword${NC} for interactive menu";;
     esac
 }

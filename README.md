@@ -176,7 +176,7 @@ directly. Shortcuts: `b`=build, `d`=deploy, `a`=adderall, `s`=status, `l`=log.
 | `reboot [ip]` | Reboot the phone over SSH | `./W0lfSword reboot` |
 | `crashlog` | View the last crash-monitor log | `./W0lfSword crashlog` |
 | `setup` | Install build tools on your computer `[needs sudo]` | `sudo ./W0lfSword setup` |
-| `usbliter8` | CFW builder · PWN DFU · A12/A13 restore `[needs sudo]` | `sudo ./W0lfSword ul8` |
+| `usbliter8` | A12/A13 tethered jailbreak TUI — guided setup, offset profiles, CFW builder, health check `[needs sudo]` | `sudo ./W0lfSword ul8` |
 | `clean` / `update` / `audit` / `export` | Housekeeping & diagnostics | `./W0lfSword update` |
 | `help` | Full list with requirements | `./W0lfSword help` |
 
