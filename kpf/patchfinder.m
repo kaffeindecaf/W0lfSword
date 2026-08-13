@@ -10,6 +10,7 @@
 #import <xpf.h>
 
 #import "patchfinder.h"
+#import "../kexploit/klog.h"
 #import "../kexploit/krw.h"
 #import "../kexploit/vnode.h"
 #import "../kexploit/kutils.h"
@@ -42,11 +43,19 @@ int grab_kernelcache(void)
     int kc_copydst_fd = open(kc_copydst_path.UTF8String, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     
     uint64_t kc_copysrc_vnode = get_vnode_by_fd(kc_copysrc_fd);
+    if (kc_copysrc_vnode == (uint64_t)-1) {
+        printf("Failed to get kc_copysrc vnode (fd=%d)\n", kc_copysrc_fd);
+        return -1;
+    }
     uint64_t kc_copysrc_v_data = kread64(kc_copysrc_vnode + off_vnode_v_data);
     
     NSString *kc_folder_path = [NSString stringWithFormat:@"/private/preboot/%s%@", get_bootManifestHash(), @"/System/Library/Caches/com.apple.kernelcaches"];
     get_vnode_for_path_by_open(kc_path.UTF8String); // it will fail, but need to call make searchable kernelcache from vnode_get_child_vnode?
     uint64_t kc_folder_vnode = get_vnode_for_path_by_chdir(kc_folder_path.UTF8String);
+    if (kc_folder_vnode == (uint64_t)-1) {
+        printf("Failed to get kernelcache folder vnode\n");
+        return -1;
+    }
     uint64_t kc_vnode = vnode_get_child_vnode(kc_folder_vnode, "kernelcache", kread64(kc_copysrc_vnode + off_vnode_v_data));
     if(kc_vnode == -1) {
         printf("Failed to find kernelcache vnode by searching child vnode\n");
@@ -88,8 +97,8 @@ int init_xpf(void) {
         printf("Starting XPF with %s (%s)\n", kernelcache_path.fileSystemRepresentation, gXPF.kernelVersionString);
         clock_t t = clock();
 
-        printf("Kernel base: 0x%llx\n", gXPF.kernelBase);
-        printf("Kernel entry: 0x%llx\n", gXPF.kernelEntry);
+        KPRINTF("Kernel base: 0x%llx\n", gXPF.kernelBase);
+        KPRINTF("Kernel entry: 0x%llx\n", gXPF.kernelEntry);
         //xpf_print_all_items();
 
         char *sets[] = {

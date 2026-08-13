@@ -129,7 +129,8 @@
 - [x] `A6.1` 🔴 — Replace `exit()` in `FAILURE()` macro with error return path  
   _FAILURE(0) calls exit() — kills Filza on any exploit failure. 34 call sites. Use longjmp or return._
 
-- [ ] `A6.2` 🔴 — 40+ `printf()` sites leak kernel addresses (ASLR slide, PCB addrs)  
+- [x] `A6.2` 🔴 — 40+ `printf()` sites leak kernel addresses (ASLR slide, PCB addrs)  
+  _Fixed 2026-08-13: added kexploit/klog.h with KPRINTF() — prints only in DEBUG builds, compiled out in release. Converted all 74 address-leaking printf sites (kexploit_opa334.m 20, vnode_research.m 36, RemoteCall.m 11, MigFilterBypassThread.m 4, PAC.m 1, patchfinder.m 2), including the PRINT_VAR macro. Verified: debug + release (FINALPACKAGE=1) builds both pass._
   _kexploit_opa334.m, RemoteCall.m, krw.m all print kernel addresses to stdout. Wrap in #ifdef DEBUG._
 
 - [x] `A6.3` 🔴 — sandbox_escape.m: KRW_LEN=0x20 truncates class name "read-writ\0" missing 'e'  
@@ -187,20 +188,20 @@
 - [x] `A3.6` 🟡 — `highestSuccessIdx` grows unbounded across exploit attempts → reset per call  
   _Prompt:_ "highestSuccessIdx is a global that tracks the best try index for the OOB read race. It grows across multiple exploit attempts. On iOS 26 with potentially different kernel memory layout, this could cause infinite retry (tryIdx goes up to highestSuccessIdx+100 which is now a huge number). Reset to 100 on each new exploit attempt."
 
-- [ ] `A3.7` 🔴 — Thread.m:48 AST_GUARD never cleared due to operator precedence (C1 audit)  
-  _`ast &= ~AST_GUARD | 0x80000000` parsed as `ast &= (~AST_GUARD) | 0x80000000` → no-op. Fix: `ast = (ast & ~AST_GUARD) | 0x80000000`._
+- [x] `A3.7` 🔴 — Thread.m:48 AST_GUARD never cleared due to operator precedence (C1 audit)  
+  _Verified fixed 2026-08-13: current code is `ast = (ast & ~AST_GUARD) | 0x80000000` — parenthesized correctly (fix landed in 9840344). Mask semantics confirmed: clears 0x1000, sets 0x80000000._
 
-- [ ] `A3.8` 🔴 — sandbox.m:229 heap buffer overflow in kernel: 34B write into 2B allocation (C3)  
-  _root_path writes 2 bytes ("/"), then writes 34-byte class name at path_buf+2 — corrupts adjacent kernel heap._
+- [x] `A3.8` 🔴 — sandbox.m:229 heap buffer overflow in kernel: 34B write into 2B allocation (C3)  
+  _Fixed 2026-08-13: rewrites now check `ext.path_len` (kernel allocation size) against the 35-byte path+class payload. If too small, only the 3-byte "/" path is written and the class-node rewrite is skipped — the overflow is impossible. Class rename is best-effort by design._
 
-- [ ] `A3.9` 🔴 — vnode.m: returned -1 sentinel wraps 64-bit addr → reads from 0xDF (C4,C5)  
-  _get_vnode_for_path_by_chdir returns 0xFFFF... on failure. +0xe0 wraps to 0xDF → unmapped read → panic._
+- [x] `A3.9` 🔴 — vnode.m: returned -1 sentinel wraps 64-bit addr → reads from 0xDF (C4,C5)  
+  _Fixed 2026-08-13: kpf/patchfinder.m now checks `== (uint64_t)-1` on both vnode lookups (kc_copysrc_vnode, kc_folder_vnode) before any `+off_vnode_v_data` deref. Defense in depth: get_vnode_by_fd() rejects fd < 0. Other callers (file.m, permission_utils.m, vnode_research.m) verified to already check the sentinel._
 
-- [ ] `A3.10` 🔴 — kexploit_opa334.m:316 checks !surface instead of mach_make_memory_entry_64 status (C2)  
-  _surface was already validated at 304. If entry fails, memoryObject=0, mach_vm_map maps garbage._
+- [x] `A3.10` 🔴 — kexploit_opa334.m:316 checks !surface instead of mach_make_memory_entry_64 status (C2)  
+  _Fixed 2026-08-13: removed the dead `!surface` re-check (surface is guaranteed non-NULL by then); replaced with a real `memoryObject == MACH_PORT_NULL` guard after the kr != KERN_SUCCESS check._
 
-- [ ] `A3.11` 🔴 — kexploit_opa334.m:567 infinite while(true) on write verify failure (C6)  
-  _If physical write never lands, spins forever with no timeout/retry counter._
+- [x] `A3.11` 🔴 — kexploit_opa334.m:567 infinite while(true) on write verify failure (C6)  
+  _Fixed 2026-08-13: the `while (raceSync == 1)` spin in physical_oob_write_mo is now bounded (10M iterations); on timeout it FAILUREs with "raceSync timed out" instead of hanging forever._
 
 - [ ] `A3.12` 🟠 — kexploit_opa334.m:461, RemoteCall.m:273 — while(1){} hangs on invalid address  
   _Use FAILURE(0) or return error instead of permanent hang._
@@ -925,9 +926,9 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 |---------|------------|-----------|-----------|
 | A1 — Thread Safety | 14 | 13 | 1 |
 | A2 — Filza Compatibility | 11 | 2 | 9 |
-| A3 — Kernel Exploit Robustness | 22 | 3 | 19 |
+| A3 — Kernel Exploit Robustness | 22 | 8 | 14 |
 | A5 — SSV & Sandbox Stability | 10 | 4 | 6 |
-| A6 — Production Readiness (new) | 20 | 7 | 13 |
+| A6 — Production Readiness (new) | 20 | 8 | 12 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
 | B2 — Runtime Control | 3 | 1 | 2 |
 | B3 — Power User Features | 7 | 0 | 7 |
@@ -963,7 +964,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | K3 — Tweak Menu | 9 | 0 | 9 |
 | K4 — iOS 26.1 Sandbox Escape Research | 10 | 0 | 10 |
 | K5 — Exploit Chains | 9 | 2 | 7 |
-| **TOTAL** | **217** | **77** | **140** |
+| **TOTAL** | **217** | **83** | **134** |
 
 ---
 
