@@ -21,8 +21,8 @@ SUDO_NEEDED_COMMANDS="adderall setup usbliter8"
 SUDO_UNSAFE_COMMANDS="build deploy monitor log status targets doctor offsets"  # work fine without
 if [ "$EUID" -ne 0 ]; then
     echo -e "\033[1;33m  ⚠  Not running as root\033[0m"
-    echo -e "\033[2m  Commands needing:\033[0m  \033[1;38;5;39madderall, setup, usbliter8\033[0m"
-    echo -e "\033[2m  Commands safe without:\033[0m  \033[38;5;153mbuild, deploy, log, monitor, status, doctor...\033[0m"
+    echo -e "\033[2m  Commands needing:\033[0m  \033[1;38;5;39m${SUDO_NEEDED_COMMANDS}\033[0m"
+    echo -e "\033[2m  Commands safe without:\033[0m  \033[38;5;153m${SUDO_UNSAFE_COMMANDS}...\033[0m"
     echo -e "\033[2m  Re-run with:\033[0m  \033[1;38;5;39msudo ./W0lfSword\033[0m"
     echo ""
 fi
@@ -942,7 +942,6 @@ draw_menu() {
 # ── First-run guided wizard (K2.4) ────────────────────────────
 first_run_wizard() {
     [ -f "$DATA_DIR/.has_run" ] && return 0
-    touch "$DATA_DIR/.has_run"
     echo ""
     echo -e "  ${C_GRN}${B}Welcome to W0lfSword!${NC}"
     echo ""
@@ -996,6 +995,7 @@ EOF
     echo -e "  ${C_DIM}  If that works, run the real thing with ${C_FROST}a${NC} (adderall).${NC}"
     echo -e "  ${C_DIM}  Tip: type ${C_FROST}explain adderall${NC} any time for plain-English details.${NC}"
     echo ""
+    touch "$DATA_DIR/.has_run"
 }
 
 run_menu() {
@@ -1050,7 +1050,7 @@ run_menu() {
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown — try 1-8, b/d/s/l/m/c, or q${NC}";;
+                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -1255,13 +1255,32 @@ EOF
     echo ""
     section "Phase 3 — Offset Coverage (on this computer)"
     echo ""
-    local ver_major; ver_major=$(echo "$IOS_VER" | cut -d. -f1)
-    local ver_block; ver_block=$(grep -c "@\"$IOS_VER" kexploit/offsets.m 2>/dev/null || echo 0)
 
-    if [ "$ver_block" -gt 0 ]; then
-        echo -e "  ${C_GRN}✓${NC} iOS $IOS_VER has ${C_EYE}$ver_block${NC} explicit offset blocks"
+    # offsets.m uses >= thresholds (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO).
+    # Find the highest threshold that is <= the device version.
+    local highest_th=""
+    while IFS= read -r th; do
+        [ -z "$th" ] && continue
+        if [ "$(printf '%s\n%s\n' "$th" "$IOS_VER" | sort -V | head -1)" = "$th" ]; then
+            highest_th="$th"
+        fi
+    done < <(grep -o 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"[0-9.]*")' kexploit/offsets.m \
+             | sed 's/.*(@"\([0-9.]*\)").*/\1/' | sort -uV)
+
+    if [ -n "$highest_th" ]; then
+        echo -e "  ${C_GRN}✓${NC} iOS $IOS_VER is covered — offsets apply from iOS ${C_EYE}$highest_th${NC} onward"
     else
-        echo -e "  ${C_AMB}⚠${NC} iOS $IOS_VER not explicitly in offsets.m"
+        echo -e "  ${C_AMB}⚠${NC} iOS $IOS_VER is below the lowest offset threshold in offsets.m"
+    fi
+
+    # DarkSword itself is capped: patched in iOS 26.1 (CVE-2025-43520).
+    if [ "$(printf '%s\n26.1\n' "$IOS_VER" | sort -V | head -1)" = "26.1" ]; then
+        echo -e "  ${C_AMB}⚠${NC} DarkSword kernel exploit is capped at iOS 26.0.1 — patched in 26.1"
+        echo -e "  ${C_DIM}On iOS 26.1+ the kernel stage will refuse to run; safe mode and the"
+        echo -e "  ${C_DIM}userspace container access (MCM) still work. See SandboxEscape.md.${NC}"
+    fi
+
+    if [ -z "$highest_th" ]; then
         if confirm "Attempt to auto-pull kernelcache and run XPF?"; then
             echo -e "  ${C_DIM}(kernelcache extraction requires SSH + root on device)${NC}"
             if [ -n "$IP" ]; then
@@ -1283,7 +1302,7 @@ EOF
             fi
         fi
     fi
-    vlog "iOS $IOS_VER — offset blocks: $ver_block"
+    vlog "iOS $IOS_VER — highest offset threshold: ${highest_th:-none}"
 
     # ── Phase 4: Configuration ───────────────────────────────
     echo ""
@@ -1503,17 +1522,25 @@ crash_monitor() {
     local ip="${1:-}" outfile="${2:-$DATA_DIR/last_crash.log}"
     [ -z "$ip" ] && return 1
 
+    # Don't start the monitor unless the device is actually reachable —
+    # otherwise every offline deploy would log a fake "kernel panic".
+    if ! ssh_safe "root@$ip" "echo ok" 2>/dev/null | grep -q ok; then
+        echo -e "  ${C_DIM}Crash monitor skipped — device unreachable${NC}"
+        log_script "crash monitor skipped: $ip unreachable"
+        return 1
+    fi
+
     echo -e "  ${C_DIM}Crash monitor started — saving to ${outfile}${NC}"
     log_script "crash monitor started for $ip"
 
-    # Background: tail the log until device goes offline (kernel panic)
+    # Background: tail the log until the device goes offline
     (
         ssh_safe "root@$ip" "tail -f /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null | while IFS= read -r l; do
             echo "[$(date '+%H:%M:%S')] $l" >> "$outfile"
         done
-        # Device went offline — log it
-        echo "[$(date '+%H:%M:%S')] === DEVICE OFFLINE (possible kernel panic) ===" >> "$outfile"
-        log_script "crash monitor: $ip went offline"
+        # Connection lost — could be a reboot, intentional disconnect, OR a kernel panic
+        echo "[$(date '+%H:%M:%S')] === CONNECTION LOST (reboot, disconnect, or kernel panic — check last lines) ===" >> "$outfile"
+        log_script "crash monitor: $ip connection lost"
     ) &
     CRASH_MONITOR_PID=$!
     echo -e "  ${C_DIM}Monitor PID: $CRASH_MONITOR_PID (auto-cleaned on next run)${NC}"
@@ -1635,6 +1662,7 @@ EOF
             bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" 2>/dev/null
             export THEOS="$HOME/theos"
             ok "THEOS installed"
+            hint "The export only lasts for this session — add 'export THEOS=~/theos' to your shell rc for future runs."
         fi
     fi
     
