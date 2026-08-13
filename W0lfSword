@@ -1871,6 +1871,7 @@ main() {
     local cmd=""
     for a in "$@"; do
         case "$a" in -v|-vv|--verbose|--debug|-y|--yes|-x|--explain) continue;; esac
+        [ "$a" = "--install" ] && a="install"
         [ -z "$cmd" ] && { cmd="$a"; continue; }
         args+=("$a")
     done
