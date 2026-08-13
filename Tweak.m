@@ -16,6 +16,7 @@
 
 #include "kexploit/kexploit_opa334.h"
 #include "kexploit/kutils.h"
+#include "kexploit/container_access.h"
 #include "kexploit/sandbox.h"
 #include "sandbox_escape.h"
 #include "SSV/SSVUtils.h"
@@ -1006,6 +1007,8 @@ __attribute__((constructor)) void TweakInit(void) {
         TweakLog("[Tweak] SAFE MODE — skipping exploit, sandbox escape, and kernel writes");
         TweakLog("[Tweak] Only UI hooks active. Delete /var/mobile/Documents/.filza_safe_mode to enable exploit.");
         installHooks();
+        TweakLog("[Tweak] Safe mode — probing userspace container access (MCM)");
+        userspace_container_probe();
         return;
     }
 

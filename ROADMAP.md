@@ -871,6 +871,16 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
   _Prompt: "Both fixed in 26.2, both alive on 26.1. 43518: Foundation spellcheck API allowed inappropriate file access (logic bug) — check if it grants read/write beyond the sandbox from an app. 43537: backup restore path handling could modify protected system files. Add both to research/xpc_surface_26.1.md as userspace escape candidates."_
 
 - [ ] `K4.10` 🟡 — Port bad_query into W0lfSword as the 26.1+ userspace read-escape module  
+- [x] `K4.11` 🟠 — Port FilzaSlop's MCM userspace container-access bridge (comparison task)  
+  _Done 2026-08-13: analyzed 0xjohnnydev/FilzaSlop v1.0.2 (242★, FilzaJailedDS fork with userspace container escape for iOS 18/26/27b). Ported: kexploit/mcm_bridge.m (dlopen libsystem_containermanager, zero private headers), kexploit/container_access.m (class 2/4/6/7/10/12/13/15 activation, com.apple.lsd LaunchServices store byte-scan app discovery for iOS 26, userspace_container_probe). Wired into safe mode + exploit-exhaustion paths. Clone kept in referenceforAI/projects/FilzaSlop/._
+
+- [ ] `K4.12` 🟡 — MobileHouseArrest identity mode: optional re-sign path for pre-exploit container access  
+  _Prompt: "FilzaSlop's trick: signing as com.apple.mobile.MobileHouseArrest makes ContainerManager trust the caller, so container leases activate WITHOUT any kernel exploit (works iOS 18-27b). Add a build-time switch (Makefile BUNDLE_ID override + docs) so users can produce a W0lfSword-Filza IPA signed with the MHA identity. Log which mode is active via userspace_container_probe()."_
+
+- [ ] `K4.13` 🟡 — Port FilzaSlop's dormant posix_cred root patch (OFF_UCRED_CR_POSIX=0x18, uid/gid groups)  
+  _Prompt: "FilzaSlop's sandbox_escape.m defines OFF_UCRED_CR_POSIX/UID/RUID/SVUID/RGID/GROUPS offsets but never uses them. Implement set_root_credentials() in W0lfSword's sandbox_escape.m: after escape, patch ucred->cr_posix uid/gid/groups to 0 so Filza runs as root:wheel for everything — completes the 'Root Ownership' feature without relying on fsnode chown."_
+
+
   _Prompt: "bad_query's containermanagerd traversal is confirmed working iOS 26.0-26.6.1 + 27.0b4. Port it from referenceforAI/projects/bad_query into kexploit/ (or utils/) as a no-kernel-rw escape stage: obtain extension tokens for /var/mobile/Containers/** and TCC.db, verify reads, log results. Use as the fallback when DarkSword retries are exhausted."_
 
 ## K5 — Exploit Chains (recipes to add)
@@ -962,9 +972,9 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | K1 — Exploit Menu | 11 | 4 | 7 |
 | K2 — Beginner-Friendly Reform | 9 | 8 | 1 |
 | K3 — Tweak Menu | 9 | 1 | 8 |
-| K4 — iOS 26.1 Sandbox Escape Research | 10 | 0 | 10 |
+| K4 — iOS 26.1 Sandbox Escape Research | 13 | 1 | 12 |
 | K5 — Exploit Chains | 9 | 2 | 7 |
-| **TOTAL** | **217** | **85** | **132** |
+| **TOTAL** | **220** | **86** | **134** |
 
 ---
 

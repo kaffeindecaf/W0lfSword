@@ -315,7 +315,7 @@ research docs. Highlights:
 | **Core exploit chains** | `darksword-kexploit`, `DarkSword-RCE` (WebKit→kernel), `excalibur` (GUI + remote ROP), `kfd` (PUAF), `xnu_1day_practice` (14 XNU CVE PoCs with analyses) |
 | **WebKit / zero-click** | Coruna exploit kit (CVE-2024-23222), Glass Cage (CVE-2025-24085/24201/43300 PNG chain) |
 | **ImageIO exploitation** | `CVE-2025-43300-hunters` (DNG 0-click PoC + analyzer), `CVE-2025-43300-PwnToday` (root-cause writeup), `zero-click-exploit-analysis` (CVE-2025-55177 paper + labs), `CVE-2023-41064` (BLASTPASS) |
-| **Sandbox escapes** | `bad_query` (containermanagerd traversal, works iOS 26-27) |
+| **Sandbox escapes** | `bad_query` (containermanagerd traversal, iOS 26-27), `FilzaSlop` (MCM/MobileHouseArrest container access, iOS 18/26/27b — ported into `kexploit/mcm_bridge.m` + `kexploit/container_access.m`) |
 | **Bootchain / jailbreaks** | `usbliter8-fun`, `usbliter8-fun2` (iOS 27) |
 | **Tweak tooling** | `iDevice-Toolkit` (CVE-2025-24203), `Mugunghwa` (theming), `opainject`, `TrollStore` |
 

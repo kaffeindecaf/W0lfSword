@@ -9,7 +9,7 @@ TWEAK_NAME = FilzaApplySandboxExt
 FilzaApplySandboxExt_FILES = Tweak.m sandbox_escape.m TweakExploit.m
 
 # --- kexploit ---
-FilzaApplySandboxExt_FILES += kexploit/kexploit_opa334.m kexploit/krw.m kexploit/kutils.m kexploit/offsets.m kexploit/vnode.m kexploit/file.m kexploit/vnode_research.m kexploit/sandbox.m kexploit/Exception.m kexploit/Thread.m kexploit/VM.m kexploit/MigFilterBypassThread.m kexploit/RemoteCall.m kexploit/PAC.m 
+FilzaApplySandboxExt_FILES += kexploit/kexploit_opa334.m kexploit/krw.m kexploit/kutils.m kexploit/offsets.m kexploit/vnode.m kexploit/file.m kexploit/vnode_research.m kexploit/sandbox.m kexploit/Exception.m kexploit/Thread.m kexploit/VM.m kexploit/MigFilterBypassThread.m kexploit/RemoteCall.m kexploit/PAC.m kexploit/mcm_bridge.m kexploit/container_access.m 
 
 # --- SSV Bypass ---
 FilzaApplySandboxExt_FILES += SSV/SSVUtils.m
