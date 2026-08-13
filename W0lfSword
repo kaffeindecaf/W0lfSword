@@ -577,6 +577,32 @@ cmd_doctor() {
     echo ""
 }
 
+cmd_tweaks() {
+    show_header
+    echo ""
+    section "Tweak Catalog (planned — installer coming, see ROADMAP K3)"
+    echo ""
+    if [ ! -f tweaks/catalog.json ]; then
+        warn "tweaks/catalog.json missing"
+        return 1
+    fi
+    python3 - <<'PYEOF'
+import json
+d = json.load(open('tweaks/catalog.json'))
+for t in d['tweaks']:
+    status = t.get('status','?')
+    mark = {'available': '\033[0;32m●', 'planned': '\033[0;33m◌'}.get(status, '\033[0;31m?')
+    print(f"  {mark}\033[0m  \033[1;38;5;39m{t['name']:<22}\033[0m  "
+          f"\033[2m{t['description']}\033[0m")
+    print(f"       \033[2mios {t['ios_min']}–{t['ios_max']}  ·  exploit: {t['required_exploit']:<10}"
+          f"  ·  target: {t['substrate_target']}  ·  {status}\033[0m")
+PYEOF
+    echo ""
+    echo -e "  ${C_DIM}Legend: ${C_GRN}●${C_DIM} available  ${C_AMB}◌${C_DIM} planned${NC}"
+    echo -e "  ${C_DIM}Installation will pick the right exploit per device automatically (K3.3).${NC}"
+    echo ""
+}
+
 # ═══════════════════════════════════════════════════════════════
 #  BETA — Profiles
 # ═══════════════════════════════════════════════════════════════
@@ -881,8 +907,8 @@ draw_menu() {
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
     printf "  %s build  %s deploy  %s adderall  %s safe  %s status  %s log\n" \
         "${C_FROST}b${NC}" "${C_FROST}d${NC}" "${C_FROST}a${NC}" "${C_FROST}sf${NC}" "${C_FROST}s${NC}" "${C_FROST}l${NC}"
-    printf "  %s monitor  %s clean  %s explain  %s doctor  %s quit\n" \
-        "${C_FROST}m${NC}" "${C_FROST}c${NC}" "${C_FROST}x${NC}" "${C_FROST}doctor${NC}" "${C_FROST}q${NC}"
+    printf "  %s monitor  %s clean  %s explain  %s tweaks  %s quit\n" \
+        "${C_FROST}m${NC}" "${C_FROST}c${NC}" "${C_FROST}x${NC}" "${C_FROST}tw${NC}" "${C_FROST}q${NC}"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · everything else works without${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
@@ -968,6 +994,7 @@ run_menu() {
             6) { cmd_history stats; echo ""; cmd_history show; } || true;;
             7) { cmd_doctor; echo ""; cmd_audit; echo ""; cmd_status; } || true;;
             8) cmd_targets || true;;
+            tweaks|tw)    cmd_tweaks || true;;
             # usbliter8-arctic
             9|ul8|usbliter8)
                 if [ "$EUID" -ne 0 ]; then
@@ -1777,6 +1804,15 @@ offsets — which iOS versions this exploit supports.
   safely — see docs/OFFSET_RESOLUTION_GUIDE.md for adding it.
 EOF
             ;;
+        tweaks)
+            cat <<'EOF'
+tweaks — the tweak catalog.
+  Lists the customization tweaks W0lfSword will install (5-icon dock,
+  custom icons, hide home bar...), each with its iOS/SoC range and the
+  exploit it needs. Installation itself is planned (ROADMAP K3.2/K3.3):
+  the installer will pick the right exploit for your device automatically.
+EOF
+            ;;
         help)
             cat <<'EOF'
 W0lfSword — iOS kernel exploit toolkit, one script.
@@ -1846,6 +1882,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "monitor (m)"  "Real-time log tail"
     printf "  ${C_EYE}%-14s${NC} %s\n" "clean (c)"    "Clean build artifacts"
     printf "  ${C_EYE}%-14s${NC} %s\n" "targets (t)"  "Supported apps"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "tweaks (tw)"  "Tweak catalog (installer planned)"
     echo ""
     section "Analysis & Config"
     printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check"
@@ -1913,6 +1950,7 @@ main() {
         toggle)    cmd_toggle "${args[@]}";;
         offsets)   cmd_offsets "${args[@]}";;
         targets)   cmd_targets "${args[@]}";;
+        tweaks)    cmd_tweaks "${args[@]}";;
         clean)     cmd_clean "${args[@]}";;
         doctor)    cmd_doctor "${args[@]}";;
         quick)     cmd_quick "${args[@]}";;

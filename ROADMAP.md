@@ -814,8 +814,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 > to your device, run it, and install that tweak — like a mini package manager
 > powered by exploits instead of a jailbreak.
 
-- [ ] `K3.1` 🟠 — Add a `tweaks` subcommand listing the available tweak catalog  
-  _Prompt: "Add cmd_tweaks to W0lfSword: reads a tweaks catalog (JSON in tweaks/catalog.json) and prints name, description, iOS range, SoC range, and which exploit it needs. Wire to `./W0lfSword tweaks` and a menu option."_
+- [x] `K3.1` 🟠 — Add a `tweaks` subcommand listing the available tweak catalog  
+  _Done 2026-08-13: tweaks/catalog.json with 6 seed entries (5-icon dock, custom icons, hide home bar, badge colors, passcode theming, hide dock) each with iOS/SoC range, required exploit, substrate target, status. cmd_tweaks renders a colored table; wired to `./W0lfSword tweaks`, menu shortcut `tw`, help, and explain. Installer backend is K3.2._
 
 - [ ] `K3.2` 🟠 — Tweak installer backend: build dylib from template + install via MobileSubstrate  
   _Prompt: "Create tweaks/templates/<name>.xm plus a build script that compiles a SpringBoard-targeting dylib with Theos, packages it, deploys via the existing deploy pipeline, and adds a Substrate plist filtering com.apple.springboard."_
@@ -926,7 +926,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 |---------|------------|-----------|-----------|
 | A1 — Thread Safety | 14 | 13 | 1 |
 | A2 — Filza Compatibility | 11 | 2 | 9 |
-| A3 — Kernel Exploit Robustness | 22 | 8 | 14 |
+| A3 — Kernel Exploit Robustness | 22 | 9 | 13 |
 | A5 — SSV & Sandbox Stability | 10 | 4 | 6 |
 | A6 — Production Readiness (new) | 20 | 8 | 12 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
@@ -961,10 +961,10 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J8 — Beta UX (new) | 6 | 0 | 6 |
 | K1 — Exploit Menu | 11 | 4 | 7 |
 | K2 — Beginner-Friendly Reform | 9 | 8 | 1 |
-| K3 — Tweak Menu | 9 | 0 | 9 |
+| K3 — Tweak Menu | 9 | 1 | 8 |
 | K4 — iOS 26.1 Sandbox Escape Research | 10 | 0 | 10 |
 | K5 — Exploit Chains | 9 | 2 | 7 |
-| **TOTAL** | **217** | **83** | **134** |
+| **TOTAL** | **217** | **85** | **132** |
 
 ---
 

@@ -1,0 +1,70 @@
+{
+  "tweaks": [
+    {
+      "id": "five_icon_dock",
+      "name": "5-Icon Dock",
+      "description": "Five icons per dock row instead of four",
+      "ios_min": "17.0",
+      "ios_max": "26.0",
+      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
+      "required_exploit": "darksword",
+      "substrate_target": "com.apple.springboard",
+      "status": "planned"
+    },
+    {
+      "id": "custom_icons",
+      "name": "Custom Icon Design",
+      "description": "Theme app icons from /var/mobile/Documents/Icons/<bundleid>.png",
+      "ios_min": "17.0",
+      "ios_max": "26.0",
+      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
+      "required_exploit": "darksword",
+      "substrate_target": "com.apple.springboard",
+      "status": "planned"
+    },
+    {
+      "id": "hide_home_bar",
+      "name": "Hide Home Bar",
+      "description": "Remove the home indicator for a cleaner look",
+      "ios_min": "16.0",
+      "ios_max": "26.6",
+      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
+      "required_exploit": "userspace",
+      "substrate_target": "com.apple.springboard",
+      "status": "planned"
+    },
+    {
+      "id": "badge_colors",
+      "name": "Badge Color Changer",
+      "description": "Recolor notification badges (Mugunghwa parity)",
+      "ios_min": "15.0",
+      "ios_max": "18.5",
+      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
+      "required_exploit": "darksword",
+      "substrate_target": "com.apple.springboard",
+      "status": "planned"
+    },
+    {
+      "id": "passcode_theming",
+      "name": "Passcode Theming",
+      "description": "Custom passcode button colors (Mugunghwa parity)",
+      "ios_min": "15.0",
+      "ios_max": "18.5",
+      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
+      "required_exploit": "darksword",
+      "substrate_target": "com.apple.springboard",
+      "status": "planned"
+    },
+    {
+      "id": "hide_dock",
+      "name": "Hide Dock",
+      "description": "Remove the dock background (iDevice-Toolkit parity)",
+      "ios_min": "16.0",
+      "ios_max": "18.3.2",
+      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
+      "required_exploit": "userspace",
+      "substrate_target": "com.apple.springboard",
+      "status": "planned"
+    }
+  ]
+}
