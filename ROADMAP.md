@@ -735,6 +735,190 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 ---
 
+# SECTION K: Exploit Menu & Beginner-Friendly Reform (added 2026-08-13)
+
+> **Goal:** Turn the `./W0lfSword` CLI from a Filza-only tool into a true exploit
+> menu — pick an exploit, pick a target app, guided from first launch to success.
+> At the same time, make every command understandable to someone who has never
+> read the source.
+
+## K1 — Exploit Menu (multi-exploit selection)
+
+- [x] `K1.1` 🟠 — Plain-English disclaimers in every device command (Filza prerequisite, jailbreak requirement, non-persistence)  
+  _Done 2026-08-13: new `disclaimer()` helper + notes in deploy, quick, adderall, safe, toggle, reboot, setup, first-run welcome, help._
+
+- [x] `K1.2` 🟡 — Filza presence check in `adderall` Phase 1  
+  _Done 2026-08-13: SSH check for Filza.app in /var/containers/Bundle/Application and /Applications, friendly warning if missing (USB-only = informational note)._
+
+- [x] `K1.3` 🟢 — `help` shows a "What You Need First" requirements block  
+  _Done 2026-08-13: jailbreak, Filza installed, OpenSSH, build tools — in plain English._
+
+- [x] `K1.4` 🟢 — Adderall success screen lists "what you can do now" in Filza  
+  _Done 2026-08-13: full filesystem access, sealed-volume writes, chown/chmod, hide/unhide, padlock bypass — plus persistence reminder._
+
+- [ ] `K1.5` 🟠 — Add an `exploits` subcommand listing available techniques + support matrix  
+  _Prompt: "Add `cmd_exploits` to W0lfSword: a table of DarkSword pe_v1/pe_v2, kfd PUAF variants (PhysPuppet/Smith/Landa), checkm8, showing iOS range, SoC support, and implemented/planned status. Wire it to `./W0lfSword exploits` and menu option 8 area."_
+
+- [ ] `K1.6` 🟠 — Add kfd/PUAF fallback options as menu choices beside DarkSword  
+  _Prompt: "Extend adderall Phase 4 exploit prompt to accept puaf-physpuppet / puaf-smith / puaf-landa in addition to pe_v1/pe_v2/auto. Store in profile JSON. Backend: port kfd primitives (kopen/kread/kwrite) into kexploit/ as fallback engine — see SECTION F1."_
+
+- [ ] `K1.7` 🟡 — Auto-select best exploit per device in adderall  
+  _Prompt: "Enhance the DEV_MODEL case statement: A12-A17 → pe_v1, A18 → pe_v2, A10-A11 → puaf fallback, unsupported → warn and offer kernelcache-pull + XPF route."_
+
+- [ ] `K1.8` 🟡 — Menu shows compatibility per exploit and greys out unsupported choices  
+  _Prompt: "In the interactive exploit picker, dim options that don't support the connected device's iOS/SoC instead of letting the user pick a guaranteed-to-fail combo."_
+
+- [ ] `K1.9` 🟢 — Expose exploit method in `profile save/load`  
+  _Prompt: "cmd_profile save currently hardcodes retry_count 5 and no exploit_method. Add an optional `profile save <name> --exploit pe_v2 --retries 7` flag set and show the values in `profile list`."_
+
+- [ ] `K1.10` ⚪ — Research: checkm8/palera1n bootchain entry as separate menu branch (A11 and below)  
+  _Prompt: "Evaluate integrating usbliter8-arctic's PWN DFU + bootchain tooling into the exploit menu as a 'Bootchain' section for checkm8-vulnerable devices."_
+
+- [ ] `K1.11` ⚪ — Research: WebKit exploit chain entry for SSH-less deployment  
+  _Prompt: "Investigate a Safari→dylib-injection deployment path (e.g. via opainject ROP injection) so devices without OpenSSH can still receive the tweak. Document feasibility in research/."_
+
+## K2 — Beginner-Friendly Reform
+
+- [x] `K2.1` 🟠 — Add `disclaimer()` helper printing "── In plain English ──" notes in device commands  
+  _Done 2026-08-13: helper + global FILZA_NOTE / JAILBREAK_NOTE / PERSIST_NOTE strings used by deploy, quick, adderall, safe, toggle, reboot, setup._
+
+- [x] `K2.2` 🟡 — First-run welcome shows prerequisites (Filza, jailbreak, non-persistence)  
+  _Done 2026-08-13: draw_menu first-run block now includes the disclaimer box after "Welcome to W0lfSword!"._
+
+- [x] `K2.3` 🟢 — Restructure README for beginners: what-you-can-do → requirements → quick start  
+  _Done 2026-08-13: full README reform — plain-English capability list up top, explicit "what it does NOT do" section, simplified command table._
+
+- [x] `K2.4` 🟡 — Guided first-run wizard instead of raw menu  
+  _Done 2026-08-13: first_run_wizard() runs on first menu launch — 3 steps: (1) checks build tools, offers setup, (2) looks for a phone over USB/saved IP, (3) recommends adderall --safe first. Prerequisite disclaimers shown first._
+
+- [x] `K2.5` 🟡 — Add `--explain` flag printing longer plain-English descriptions  
+  _Done 2026-08-13: explain_text() catalog covers adderall, deploy, build, quick, safe, toggle, setup, doctor, status, monitor, log, reboot, offsets, help. Available as `./W0lfSword explain <cmd>`, `-x <cmd>` flag, and menu shortcut `x`._
+
+- [x] `K2.6` 🟢 — Label each adderall phase with what/where it runs  
+  _Done 2026-08-13: phase headers now say "(on this computer)", "(computer → phone)" etc.; quick/adderall stages tagged with where each step runs (computer vs phone)._
+
+- [x] `K2.7` 🟢 — Translate cryptic errors into actionable advice  
+  _Done 2026-08-13: new hint() helper; actionable follow-up lines added after deploy/quick/adderall/safe/toggle/setup errors (SSH, SCP, build, THEOS, no-device, no-IP paths)._
+
+- [x] `K2.8` 🟢 — `status` gains a plain-English readiness checklist  
+  _Done 2026-08-13: cmd_status "Deploy Readiness" block: build tools ✓/✗, device online?, offsets coverage, SSH to phone works, Filza installed on phone — each with a one-line fix._
+
+- [ ] `K2.9` 🟡 — Guided full installer: `./W0lfSword install` wizard that handles EVERYTHING  
+  _Prompt: "Upgrade cmd_setup into a guided installer. Steps: (1) detect the OS (macOS / Debian / Arch / Fedora) and pick the right package-manager commands, (2) install THEOS + the correct iOS SDK for that platform, (3) install sideloading tooling (libimobiledevice, AltServer/SideStore-style IPA install hints, TrollStore links), (4) optionally download/point to Filza IPA and side-load it, (5) deploy W0lfSword tweak, (6) offer the tweak menu (K3). Show a summary of what WILL be installed before doing anything, and respect --yes. Note: `install` currently aliases cmd_setup (tools only) — this item turns it into the full guided experience."_
+
+## K3 — Tweak Menu (choose a tweak from the CLI and install it)
+
+> **Goal:** Inside the main W0lfSword script, pick a tweak (5-icon dock, custom
+> icons, hide home bar...) and let the script figure out which exploit applies
+> to your device, run it, and install that tweak — like a mini package manager
+> powered by exploits instead of a jailbreak.
+
+- [ ] `K3.1` 🟠 — Add a `tweaks` subcommand listing the available tweak catalog  
+  _Prompt: "Add cmd_tweaks to W0lfSword: reads a tweaks catalog (JSON in tweaks/catalog.json) and prints name, description, iOS range, SoC range, and which exploit it needs. Wire to `./W0lfSword tweaks` and a menu option."_
+
+- [ ] `K3.2` 🟠 — Tweak installer backend: build dylib from template + install via MobileSubstrate  
+  _Prompt: "Create tweaks/templates/<name>.xm plus a build script that compiles a SpringBoard-targeting dylib with Theos, packages it, deploys via the existing deploy pipeline, and adds a Substrate plist filtering com.apple.springboard."_
+
+- [ ] `K3.3` 🟠 — Auto-pick the right exploit for the connected device before installing a tweak  
+  _Prompt: "In the tweak install flow, query the device iOS/SoC, consult the per-tweak 'required exploit' field, then run the exploit selector (K1.7): A12-A17 → DarkSword pe_v1, A18 → pe_v2, A10-A11 → PUAF fallback, else refuse with a clear message."_
+
+- [ ] `K3.4` 🟡 — Tweak catalog format with compatibility + required capabilities  
+  _Prompt: "Design tweaks/catalog.json schema: id, name, description, ios_min, ios_max, socs, required_exploit (darksword/puaf/checkm8/userspace), files_modified, dylib_template, substrate_target (springboard/filza/etc). Include 3 seed entries."_
+
+- [ ] `K3.5` 🟡 — SpringBoard injection path (excalibur technique) as tweak delivery mechanism  
+  _Prompt: "Study referenceforAI/projects/excalibur (Springboard injection TODO list) and kexploit/RemoteCall.m. Implement injecting a dylib into SpringBoard via DarkSword thread hijack, so tweaks can apply without a jailbreak-level substrate."_
+
+- [ ] `K3.6` 🟡 — Implement the 5-icon dock tweak as first catalog entry  
+  _Prompt: "Write tweaks/templates/five_icon_dock.xm hooking SBIconListView/ SBRootFolderView to allow 5 icons per dock row (adjust icon layout constraints). Target iOS 17-26, SpringBoard."_
+
+- [ ] `K3.7` 🟢 — Implement custom icon design tweak as second catalog entry  
+  _Prompt: "Write tweaks/templates/custom_icons.xm: swap app icon rendering (via Assets.car override or SBIconImageView image provider hook) to load themed icons from /var/mobile/Documents/Icons/<bundleid>.png. Document safe revert."_
+
+- [ ] `K3.8` 🟢 — Feature-parity list vs Mugunghwa + iDevice-Toolkit  
+  _Prompt: "From referenceforAI/projects/Mugunghwa (badge colors, home gesture, passcode theming, icon theming) and iDevice-Toolkit (hide dock/home bar/folder backgrounds, custom tweaks), create tweaks/parity.md listing which features W0lfSword's tweak menu should replicate and in what order."_
+
+- [ ] `K3.9` ⚪ — Research CVE-2025-24203 (Ian Beer) as a no-jailbreak tweak install path  
+  _Prompt: "Study referenceforAI/projects/iDevice-Toolkit and the CVE-2025-24203 Project Zero issue. Evaluate porting its primitive into kexploit/ as a 'userspace tweak installer' option for devices where DarkSword is unavailable."_
+
+## K4 — iOS 26.1 Sandbox Escape Research (see referenceforAI/SandboxEscape.md)
+
+- [ ] `K4.1` 🔴 — Verify 26.1 kernel struct offsets (sandbox, MACF label) vs 26.0.1  
+  _Prompt: "Pull the iOS 26.1 kernelcache, run XPF, diff struct sandbox / label offsets against kexploit/offsets.m 26.0 blocks. Add a 26.1 block if anything shifted. Guard against wrong offsets before any kwrite (reuse the A1.14 kstackptr-style validation)."_
+
+- [ ] `K4.2` 🟠 — Build the ImageIO fuzzing harness (SandboxEscape.md Phase 1)  
+  _Prompt: "Using referenceforAI/projects/CVE-2025-43300-hunters (dng_vulnerability_analyzer.py, hex_modifier.py, dng_images corpus), build research/imageio_fuzz.sh that: mutates DNG/HEIF/TIFF headers, pushes samples to the phone, opens them via Filza's viewer, and collects crash logs from /tmp/FilzaTweak.log. Flag any unique panic signature."_
+
+- [ ] `K4.3` 🟠 — Port bad_query's containermanagerd traversal to iOS 26.1  
+  _Prompt: "Study referenceforAI/projects/bad_query. Reproduce the container path traversal on 26.1 hardware (or VMApple), document which mitigations changed since iOS 26.0, and report whether it still grants outside-container writes."_
+
+- [ ] `K4.4` 🟡 — XPC surface audit for file-capable services on 26.1  
+  _Prompt: "class-dump private frameworks from the 26.1 dyld cache (assetsd, photosd, filecoordinationd, UserNotificationsServer). List XPC handlers that perform file reads/writes and are reachable from a sandboxed app. Output to research/xpc_surface_26.1.md."_
+
+- [ ] `K4.5` ⚪ — Chain assembly: ImageIO RCE → sandbox escape (SandboxEscape.md Phase 3)  
+  _Prompt: "If Phase 1 yields a crash primitive in QuickLook/UserNotifications, escalate: enumerate that process's sandbox extensions, use them for file reads, and document the full chain in research/imageio-sandbox-chain.md using the Glass Cage report as the template."_
+
+- [ ] `K4.6` 🟡 — Wire the userspace escape into W0lfSword as a fallback engine  
+  _Prompt: "Add 'userspace' to the EXPLOIT_METHOD enum in adderall and kexploit/. If selected (or kernel exploit fails all retries), run the userspace chain and verify filesystem access before reporting success. Update the exploit menu (K1.5) accordingly."_
+
+- [ ] `K4.7` 🔴 — iOS 26.1: reproduce CVE-2025-46285 (kernel root privesc, integer overflow in 64-bit timestamps)  
+  _Prompt: "iOS 26.2 advisory: 'An app may be able to gain root privileges — integer overflow addressed by adopting 64-bit timestamps' (Alibaba, Kaitao Xie/Xiaolong Bai). This bug is ALIVE on 26.1 (patched in 26.2). Recover the vulnerable syscall/interface by diffing 26.1 vs 26.2 kernelcaches around timestamp handling, write a trigger PoC, then verify privesc. Root from an app = instant sandbox escape + SSV access."_
+
+- [ ] `K4.8` 🔴 — iOS 26.1: exploit CVE-2025-43539 (AppleJPEG memory corruption) as the ImageIO-class entry bug  
+  _Prompt: "iOS 26.2 advisory: 'Processing a file may lead to memory corruption' in AppleJPEG (Michael Reeves, @IntegralPilot), fixed with bounds checks. Alive on 26.1. This is the live ImageIO-class bug we wanted — point the K4.2 fuzzing harness at AppleJPEG (JPEG decode paths) on 26.1, reproduce the crash, then follow SandboxEscape.md Phase 3 to escalate the corruption."_
+
+- [ ] `K4.9` 🟡 — iOS 26.1: study CVE-2025-43518 (spellcheck file-access bypass) + CVE-2025-43537 (Books path handling)  
+  _Prompt: "Both fixed in 26.2, both alive on 26.1. 43518: Foundation spellcheck API allowed inappropriate file access (logic bug) — check if it grants read/write beyond the sandbox from an app. 43537: backup restore path handling could modify protected system files. Add both to research/xpc_surface_26.1.md as userspace escape candidates."_
+
+- [ ] `K4.10` 🟡 — Port bad_query into W0lfSword as the 26.1+ userspace read-escape module  
+  _Prompt: "bad_query's containermanagerd traversal is confirmed working iOS 26.0-26.6.1 + 27.0b4. Port it from referenceforAI/projects/bad_query into kexploit/ (or utils/) as a no-kernel-rw escape stage: obtain extension tokens for /var/mobile/Containers/** and TCC.db, verify reads, log results. Use as the fallback when DarkSword retries are exhausted."_
+
+## K5 — Exploit Chains (recipes to add)
+
+> **Goal:** Catalog every exploit→escape→payload chain we can offer in the
+> exploit menu, with each stage's iOS range, so the CLI can auto-select the
+> longest viable chain for the connected device.
+
+### The chain matrix
+
+| Chain | Stage 1 (code exec) | Stage 2 (sandbox escape) | Stage 3 (payload) | iOS range | Status |
+|-------|---------------------|--------------------------|-------------------|-----------|--------|
+| **A — DarkSword** | DarkSword kernel R/W (CVE-2025-43520 TOCTOU) | ext-set patch (`sandbox_escape.m`) | SSV + Filza hooks | 17.0–26.0.1 | **implemented** |
+| **B — ImageIO userspace** | NEW ImageIO bug → RCE in parser process | that process's looser sandbox / XPC file ops | Filza-capable file access | target 26.1–26.4.1 | research (K4) |
+| **C — WebKit entry** | WebKit RCE (CVE-2024-23222 class) | ImageIO/BlastDoor stage | inject W0lfSword payload | varies | research |
+| **D — Bootchain** | checkm8 (A11 and below) | kernel sandbox hooks NOP'd | full jailbreak | 15.6–27.0b | usbliter8-fun2 |
+| **E — PUAF fallback** | kfd PhysPuppet/Smith/Landa | ext-set patch (same as A) | SSV + hooks | 16.x only | port pending |
+| **F — CoreTrust** | CoreTrust bug → arbitrary entitlements | entitlement-driven app escape | standalone .ipa | needs NEW bug | research |
+| **G — 26.1+ kernel** | unpublished/new kernel OOB R/W | ext-set patch (same as A) | SSV + hooks | 26.1+ | needs bug + offsets |
+
+- [x] `K5.1` 🟠 — Document the chain matrix in ROADMAP + SandboxEscape.md  
+  _Done 2026-08-13: matrix above, cross-referenced with K4 research phases._
+
+- [x] `K5.2` 🟠 — Chain A (DarkSword → ext-patch → SSV) — the working baseline  
+  _Done: implemented end-to-end in kexploit/ + sandbox_escape.m + SSV/, verified 17.0–26.0.1._
+
+- [ ] `K5.3` 🟡 — Chain E: port kfd PUAF primitives as fallback for 16.x devices  
+  _Prompt: "Port kfd's PhysPuppet/Smith/Landa into kexploit/ as an alternate kernel R/W provider. After kopen succeeds, reuse the EXISTING sandbox_escape.m unchanged — the escape stage is identical to Chain A."_
+
+- [ ] `K5.4` 🟠 — Chain B stage 1: find a NEW ImageIO bug valid on 26.1/26.4.1  
+  _Prompt: "CVE-2025-43300 is patched since 18.6.1 — its value now is the attack pattern (metadata/stream inconsistency). Fuzz RawCamera.bundle (DNG/JPEG-Lossless SOF3), CoreSVG, and HEIF decode paths on 26.1/26.4.1 using the K4.2 harness. Log any unique panic signature."_
+
+- [ ] `K5.5` 🟡 — Build the tweak-based ImageIO trigger testbed  
+  _Prompt: "Add an 'imagetrigger' mode to W0lfSword: a small tweak (or Filza hook) that programmatically opens crafted images through the QuickLook/UserNotifications/Files decode paths and records which daemon crashes. This is how we map which parser processes are reachable from a tweak on 26.1."_
+
+- [ ] `K5.6` 🔴 — If any kernel OOB R/W is obtained on 26.1/26.4.1, escape immediately  
+  _Prompt: "When a new kernel primitive lands, FIRST re-verify offsets for 26.1+ (K4.1), THEN run the existing ext-set escape — kernel R/W makes sandbox escape nearly free. Don't spend time on userspace chains once a kernel bug exists."_
+
+- [ ] `K5.7` ⚪ — Chain C: WebKit entry for no-SSH/no-jailbreak deployment  
+  _Prompt: "Study referenceforAI/projects/CVE-2024-23222-Coruna-Exploit-Kit-Deobfuscated (WASM addrof/fakeobj → PAC bypass → sandbox escape). Evaluate using a WebKit RCE to deploy the W0lfSword payload onto devices without OpenSSH."_
+
+- [ ] `K5.8` ⚪ — Study CVE-2025-55177 chain structure for BlastDoor insights  
+  _Prompt: "Read referenceforAI/projects/zero-click-exploit-analysis (paper + patch diffs). Extract exactly how the WhatsApp chain crossed from ImageIO corruption to wider file access, and whether any analogous BlastDoor/thumbnail-provider hop exists on 26.1."_
+
+- [ ] `K5.9` 🟡 — CLI: auto-select the best chain per device in the exploit menu  
+  _Prompt: "In cmd_adderall (or the new exploits subcommand, K1.5), implement chain selection: if DarkSword offsets exist → Chain A; else if 16.x → Chain E; else if A11- → Chain D; else if a userspace bug is available for that version → Chain B; else print the matrix and what's missing."_
+
+---
+
 # STATS
 
 | Section | Total Items | Completed | Remaining |
@@ -774,8 +958,13 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J6 — Original Commands | 2 | 1 | 1 |
 | J7 — Polish | 3 | 1 | 2 |
 | J8 — Beta UX (new) | 6 | 0 | 6 |
-| **TOTAL** | **169** | **60** | **109** |
+| K1 — Exploit Menu | 11 | 4 | 7 |
+| K2 — Beginner-Friendly Reform | 9 | 8 | 1 |
+| K3 — Tweak Menu | 9 | 0 | 9 |
+| K4 — iOS 26.1 Sandbox Escape Research | 10 | 0 | 10 |
+| K5 — Exploit Chains | 9 | 2 | 7 |
+| **TOTAL** | **217** | **74** | **143** |
 
 ---
 
-*Last updated: 2026-08-10*
+*Last updated: 2026-08-13*
