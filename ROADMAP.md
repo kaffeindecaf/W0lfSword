@@ -6,6 +6,33 @@
 
 ---
 
+# ★ SECTION 0 — START HERE (next session)
+
+> The rest of this file is the full backlog. Do these first, in order.
+
+## 0.1 — Quick wins (under 30 min each, no hardware needed)
+
+- [ ] `A3.2` 🔴 — **pe_v2 2GB mach_vm_allocate retry ladder** (kexploit_opa334.m ~line 684)
+  _If the 2GB allocation fails on A18, retry 1GB → 512MB → 256MB before giving up. Log each attempt. THE one remaining code-critical blocker for v1.0._
+- [ ] `V1.1` 🟡 — **Version plumbing to 1.0.0**: single `VERSION="1.0.0"` var in W0lfSword used by header (line 3), `version` command (line ~2033), bump `control` → 1.0.0, README/CONTEXT references
+- [ ] `V1.2` 🟡 — **Restore README "Known Issues"** (removed in reform): 26.1+ kernel cap, padlock/SSV best-effort, MTE/A19 unsupported
+- [ ] `V1.3` 🟡 — **Release build + tag**: `make package FINALPACKAGE=1`, verify .deb, `git tag v1.0.0` + push
+
+## 0.2 — Device/research work (needs iOS 26.1+ hardware or kernelcache)
+
+- [ ] `K4.1` 🔴 — Verify 26.1 kernel struct offsets (sandbox, MACF label) vs 26.0.1 — pull 26.1 kernelcache, run XPF, add offsets.m block if shifted
+- [ ] `K4.7` 🔴 — Reproduce CVE-2025-46285 (kernel root privesc on 26.1, integer overflow in 64-bit timestamps) — diff 26.1 vs 26.2 kernelcaches around timestamp handling
+- [ ] `K4.8` 🔴 — Exploit CVE-2025-43539 (AppleJPEG memory corruption on 26.1) — point the K4.2 fuzzer at AppleJPEG decode paths
+- [ ] `K4.2` 🟠 — Build the ImageIO fuzzing harness (referenceforAI/CVE-2025-43300-hunters analyzer + hex_modifier + Filza viewer crash capture)
+
+## 0.3 — High-value features (userspace direction)
+
+- [ ] `K4.10` 🟡 — Port bad_query containermanagerd traversal into W0lfSword as 26.1+ userspace read-escape module (works 26.0–26.6.1, unpatched)
+- [ ] `K4.12` 🟡 — MobileHouseArrest re-sign mode: optional build producing an MHA-identity Filza IPA for pre-exploit container access
+- [ ] `K3.2` 🟠 — Tweak installer backend (build dylib from templates/catalog, deploy via existing pipeline) — unlocks the tweak menu
+
+---
+
 ## LEGEND
 
 | Icon | Meaning |
@@ -974,8 +1001,9 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | K3 — Tweak Menu | 9 | 1 | 8 |
 | K4 — iOS 26.1 Sandbox Escape Research | 13 | 1 | 12 |
 | K5 — Exploit Chains | 9 | 2 | 7 |
-| **TOTAL** | **220** | **86** | **134** |
+| V1 — v1.0 Release | 3 | 0 | 3 |
+| **TOTAL** | **223** | **86** | **137** |
 
 ---
 
-*Last updated: 2026-08-13*
+*Last updated: 2026-08-13 — added Section 0 (start-here priorities)*
