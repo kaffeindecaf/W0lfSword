@@ -290,7 +290,7 @@ scan_devices() {
 
 cmd_build() {
     $VERBOSE || spinner "compiling"
-    check_theos || { err "THEOS not set — export THEOS=~/theos"; return 1; }
+    check_theos || { err "THEOS not set — export THEOS=~/theos"; hint "Or run: sudo ./W0lfSword setup"; return 1; }
     local log; log=$(make package 2>&1)
     local ec=$?
     $VERBOSE && echo "$log" | tail -20
@@ -299,6 +299,7 @@ cmd_build() {
         ok "Built $(basename "$deb") ($(du -h "$deb" | cut -f1))"
     else
         err "Build failed (exit=$ec)"
+        hint "Run './W0lfSword doctor' to see which tool is missing — it's almost always THEOS or the iOS SDK."
         [ -n "$log" ] && echo "  ${C_DIM}${log}${NC}" | tail -5
         return 1
     fi
@@ -307,11 +308,11 @@ cmd_build() {
 cmd_extract() {
     $VERBOSE || spinner "extracting"
     local deb; deb=$(find_deb)
-    [ -z "$deb" ] && { err "No .deb found — build first"; return 1; }
+    [ -z "$deb" ] && { err "No .deb found — build first"; hint "Run: ./W0lfSword build"; return 1; }
     local edir="/tmp/w0lf_extract_$$"; mkdir -p "$edir"
     dpkg-deb -x "$deb" "$edir/" 2>/dev/null
     local dylib; dylib=$(find "$edir" -name '*.dylib' -type f 2>/dev/null | head -1)
-    [ -z "$dylib" ] && { err "No dylib in package"; rm -rf "$edir"; return 1; }
+    [ -z "$dylib" ] && { err "No dylib in package"; hint "Is dpkg-deb installed? Run: sudo apt install dpkg"; rm -rf "$edir"; return 1; }
     cp "$dylib" "$PROJECT_DIR/W0lfSword.dylib"
     ok "Extracted W0lfSword.dylib ($(du -h W0lfSword.dylib | cut -f1))"
     rm -rf "$edir"
@@ -464,7 +465,7 @@ print(b,p)
 cmd_log() {
     local lines="${1:-50}"
     local ip; ip=$(get_device_ip "${2:-}")
-    [ -z "$ip" ] && { err "No device configured"; return 1; }
+    [ -z "$ip" ] && { err "No device configured"; hint "Connect via USB or: ./W0lfSword device add <ip>"; return 1; }
     $VERBOSE || spinner "fetching log"
 
     echo -e "  ${C_STEEL}${B}── /tmp/FilzaTweak.log @ $ip ──${NC}\n"
@@ -483,7 +484,7 @@ cmd_toggle() {
     local action="${1:-}"
     local ip; ip=$(get_device_ip "${2:-}")
     [ "$action" != "on" ] && [ "$action" != "off" ] && { echo -e "${C_RED}Usage:${NC} toggle on|off [ip]"; return 1; }
-    [ -z "$ip" ] && { err "No device"; return 1; }
+    [ -z "$ip" ] && { err "No device"; hint "Connect via USB or: ./W0lfSword device add <ip>"; return 1; }
     disclaimer <<EOF
 In plain English: 'toggle on' puts a "do nothing" flag on the phone, so the
 next time Filza opens the tweak loads but skips the exploit. 'toggle off'
@@ -669,7 +670,7 @@ cmd_device() {
             ;;
         info)
             local dip="${arg:-$(get_device_ip)}"
-            [ -z "$dip" ] && { err "No device"; return 1; }
+            [ -z "$dip" ] && { err "No device"; hint "Connect via USB or: ./W0lfSword device add <ip>"; return 1; }
             $VERBOSE || spinner "querying $dip"
             if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$dip" "echo ok" 2>/dev/null | grep -q ok; then
                 section "Device Info"
@@ -742,7 +743,7 @@ cmd_history() {
 
 cmd_monitor() {
     local ip; ip=$(get_device_ip)
-    [ -z "$ip" ] && { err "No device configured"; return 1; }
+    [ -z "$ip" ] && { err "No device configured"; hint "Connect via USB or: ./W0lfSword device add <ip>"; return 1; }
     echo ""; echo -e "  ${C_STEEL}${B}── Live Monitor @ $ip ── Ctrl+C to stop ────────${NC}"; echo ""
     ssh_safe "root@$ip" "tail -f /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null | while IFS= read -r l; do
         if   echo "$l" | grep -q '\*\*\*';                   then echo -e "  ${C_GRN}${B}▓▓▓ $l${NC}"
@@ -1411,7 +1412,7 @@ cmd_safe() {
     done
     action="${action:-on}"
     [ -z "$ip" ] && ip=$(get_device_ip)
-    [ -z "$ip" ] && { err "No device IP"; return 1; }
+    [ -z "$ip" ] && { err "No device IP"; hint "Connect via USB or: ./W0lfSword device add <ip>"; return 1; }
     disclaimer <<EOF
 In plain English: 'safe on' tells the tweak to only load the Filza UI hooks
 (no padlocks, license bypass) and skip ALL kernel writes. Nothing risky runs.
@@ -1604,7 +1605,7 @@ EOF
 
 cmd_reboot() {
     local ip; ip=$(get_device_ip "${1:-}")
-    [ -z "$ip" ] && { err "No device IP"; return 1; }
+    [ -z "$ip" ] && { err "No device IP"; hint "Connect via USB or: ./W0lfSword device add <ip>"; return 1; }
     
     disclaimer <<EOF
 In plain English: reboots the phone over SSH. Remember — after a reboot the
@@ -1623,6 +1624,7 @@ EOF
 
 cmd_export() {
     local outfile="${1:-w0lfsword_export_$(date +%Y%m%d_%H%M%S).zip}"
+    case "$outfile" in /*) : ;; *) outfile="$PROJECT_DIR/$outfile" ;; esac
     local tmpdir; tmpdir=$(mktemp -d)
     
     echo -e "  ${C_DIM}Collecting debug data...${NC}"
@@ -1646,9 +1648,13 @@ cmd_export() {
     } > "$tmpdir/info.txt"
     
     # Zip it
-    local cwd; cwd=$(pwd)
-    cd "$tmpdir" && zip -qr "$cwd/$outfile" . 2>/dev/null
-    cd "$cwd" && rm -rf "$tmpdir"
+    if ! ( cd "$tmpdir" && zip -qr "$outfile" . ); then
+        rm -rf "$tmpdir"
+        err "Export failed — is zip installed?"
+        hint "Install zip: sudo apt install zip  (or: brew install zip)"
+        return 1
+    fi
+    rm -rf "$tmpdir"
     
     ok "Export saved: ${C_EYE}${outfile}${NC} ($(du -h "$outfile" | cut -f1))"
     log_script "exported to $outfile"

