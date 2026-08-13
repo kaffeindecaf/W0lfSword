@@ -144,7 +144,8 @@ hint() { printf "  ${C_DIM}  → %s${NC}\n" "$1"; }
 menu_group() { echo -e "  ${C_STEEL}${B}── $1 ──────────────────────────────────────────────${NC}"; }
 menu_opt() {
     local n="$1" name="$2" desc="$3" tag="${4:-}"
-    printf "  ${C_EYE}${B}%2s.${NC} ${C_SNOW}%-18s${NC} ${C_DIM}%s${NC} %s\n" "$n" "$name" "$desc" "$tag"
+    printf "  ${C_EYE}${B}%2s.${NC} ${C_SNOW}%-18s${NC} ${C_DIM}%s${NC} " "$n" "$name" "$desc"
+    if [ -n "$tag" ]; then echo -e "$tag"; else echo ""; fi
 }
 
 # ── Plain-English disclaimers for beginners ───────────────────
@@ -931,10 +932,8 @@ draw_menu() {
     echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
-    printf "  %s build  %s deploy  %s adderall  %s safe  %s status  %s log\n" \
-        "${C_FROST}b${NC}" "${C_FROST}d${NC}" "${C_FROST}a${NC}" "${C_FROST}sf${NC}" "${C_FROST}s${NC}" "${C_FROST}l${NC}"
-    printf "  %s monitor  %s clean  %s explain  %s tweaks  %s quit\n" \
-        "${C_FROST}m${NC}" "${C_FROST}c${NC}" "${C_FROST}x${NC}" "${C_FROST}tw${NC}" "${C_FROST}q${NC}"
+    printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
+    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}q${NC} quit\n"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · everything else works without${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
