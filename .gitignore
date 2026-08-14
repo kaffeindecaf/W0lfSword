@@ -79,3 +79,6 @@ __pycache__/
 *.mobileprovision
 credentials.*
 .env
+
+# Built tool binaries
+tools/xpf-cli/xpf-cli
