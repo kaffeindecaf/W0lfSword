@@ -35,6 +35,17 @@ FilzaApplySandboxExt_CFLAGS = -I$(PWD) -I$(PWD)/XPF/src -I$(PWD)/XPF/external/Ch
     -Wno-incompatible-pointer-types -Wno-incompatible-pointer-types-discards-qualifiers \
     -Wno-deprecated-declarations -Wno-nonportable-include-path -Wno-format
 
+# Release builds (make package FINALPACKAGE=1 DEBUG=0):
+#   -DNDEBUG        FAILURE() returns instead of exit() (A6.1)
+#   no -DDEBUG      KPRINTF() address-leak logging compiles out entirely (A6.2)
+#   -Wl,-S          strip debug symbols from the dylib
+ifeq ($(FINALPACKAGE),1)
+FilzaApplySandboxExt_CFLAGS += -DNDEBUG
+FilzaApplySandboxExt_LDFLAGS += -Wl,-S
+else
+FilzaApplySandboxExt_CFLAGS += -DDEBUG
+endif
+
 FilzaApplySandboxExt_CCFLAGS = $(FilzaApplySandboxExt_CFLAGS)
 FilzaApplySandboxExt_OBJCFLAGS = $(FilzaApplySandboxExt_CFLAGS)
 FilzaApplySandboxExt_OBJCCFLAGS = $(FilzaApplySandboxExt_CFLAGS)

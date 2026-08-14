@@ -1,0 +1,60 @@
+# Template for new device offset configuration.
+# Copy this file, rename to <Model>_<iOS>.yaml, fill in the DEADBEEF sentinels.
+# Run: python3 device_offsets.py --validate <file> to check your work.
+
+device: "Device Name"
+model: "iPhone00,0"
+ios_version: "27.0"
+build: "00A0000h"
+soc: "A12 or A13"
+board: "board_ap"
+apticket: "t8020 or t8030"
+
+patches:
+  ibss:
+    image4_validate_nop:   { offset: 0xDEADBEEF, value: "1f2003d5" }
+    image4_validate_ret0:  { offset: 0xDEADBEEF, value: "000080d2" }
+    boot_args_adrp:        { offset: 0xDEADBEEF, value: "????????" }
+    boot_args_add:         { offset: 0xDEADBEEF, value: "????????" }
+    boot_args_string:      { offset: 0xDEADBEEF, value: "-v wdt=-1 rd=md0 -restore" }
+
+  ibec:
+    keep_nonce_b:          { offset: 0xDEADBEEF, value: "28000014" }
+    image4_validate_nop:   { offset: 0xDEADBEEF, value: "1f2003d5" }
+    image4_validate_ret0:  { offset: 0xDEADBEEF, value: "000080d2" }
+    boot_args_adrp:        { offset: 0xDEADBEEF, value: "????????" }
+    boot_args_add:         { offset: 0xDEADBEEF, value: "????????" }
+    boot_args_string:      { offset: 0xDEADBEEF, value: "-v wdt=-1 rd=md0 -restore" }
+
+  kernel:
+    - name: "USB Restricted Mode bypass"
+      offset: 0xDEADBEEF
+      value: "200080d2c0035fd6"
+    - name: "Sandbox file_check_mmap"
+      offset: 0xDEADBEEF
+      value: "000080d2c0035fd6"
+    - name: "AMFI trust everything"
+      offset: 0xDEADBEEF
+      value: "200080d2c0035fd6"
+
+  devicetree:
+    remove_content_protect: true
+    add_no_effaceable_storage: true
+    ephemeral_storage: true
+
+  restoreramdisk:
+    asr_sig_bypass:     { offset: 0xDEADBEEF, value: "1f2003d5" }
+    fdr_force_succeed:  { offset: 0xDEADBEEF, value: "000080d2" }
+
+  daemons:
+    coreauthd:
+      anti_sep_crash: { offset: 0xDEADBEEF, value: "1f2003d5" }
+    ctkd:
+      anti_sep_crash_ret0: { offset: 0xDEADBEEF, value: "000080d2" }
+      anti_sep_crash_ret:  { offset: 0xDEADBEEF, value: "c0035fd6" }
+    mobileactivationd:
+      should_hactivate: { offset: 0xDEADBEEF, value: "20008052" }
+
+  userland:
+    disable_screentime: true
+    disable_setup: true

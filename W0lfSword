@@ -1,6 +1,8 @@
 #!/bin/bash
+# Single-source version — keep this in sync with control (A6.12).
+VERSION="1.0.0"
 # ╔══════════════════════════════════════════════════════════════╗
-# ║                      W0lfSword v0.9                          ║
+# ║                      W0lfSword v$VERSION                      ║
 # ║  iOS Kernel Exploit Toolkit — Interactive Exploit Menu       ║
 # ║  Made by kaffeindecaf — github.com/kaffeindecaf             ║
 # ╚══════════════════════════════════════════════════════════════╝
@@ -210,7 +212,7 @@ WOLF
 show_header() {
     echo ""
     echo -e "  ${C_DIM}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "  ${C_DIM}║${NC}  ${C_SNOW}${B}W0lfSword${NC}      ${C_WOLF}iOS Kernel Exploit Toolkit${NC}            ${C_DIM}║${NC}"
+    echo -e "  ${C_DIM}║${NC}  ${C_SNOW}${B}W0lfSword v${VERSION}${NC}   ${C_WOLF}iOS Kernel Exploit Toolkit${NC}            ${C_DIM}║${NC}"
     echo -e "  ${C_DIM}╚══════════════════════════════════════════════════════╝${NC}"
 }
 
@@ -842,9 +844,8 @@ EOF
 
 # ── usbliter8-arctic launcher ─────────────────────────────────
 find_ul8() {
-    for p in "$PROJECT_DIR/usbliter8-arctic/main.py" "$PROJECT_DIR/scripts/usbliter8_arctic/main.py"; do
-        [ -f "$p" ] && { echo "$p"; return 0; }
-    done
+    local p="$PROJECT_DIR/scripts/usbliter8_arctic/main.py"
+    [ -f "$p" ] && { echo "$p"; return 0; }
     return 1
 }
 
@@ -1672,7 +1673,7 @@ EOF
         echo ""
         echo -e "  ${C_AMB}Syncing usbliter8-arctic tools...${NC}"
         mkdir -p "$ul8_tools_dir"
-        for src_dir in "$PROJECT_DIR/usbliter8-arctic/tools" referenceforAI/projects/usbliter8-fun/tools referenceforAI/projects/usbliter8-fun2/tools; do
+        for src_dir in referenceforAI/projects/usbliter8-fun/tools referenceforAI/projects/usbliter8-fun2/tools; do
             [ -d "$src_dir" ] && cp "$src_dir"/* "$ul8_tools_dir/" 2>/dev/null && chmod +x "$ul8_tools_dir"/* 2>/dev/null
         done
         ok "usbliter8-arctic tools synced"
@@ -2030,7 +2031,7 @@ main() {
         monitor)   cmd_monitor "${args[@]}";;
         explain)   cmd_explain "${args[@]}";;
         # Add quick version command
-     version|--version|-V) echo -e "${C_WOLF}W0lfSword v0.9${NC} — iOS Kernel Exploit Toolkit"; echo -e "${C_DIM}github.com/kaffeindecaf/W0lfSword${NC}";;
+     version|--version|-V) echo -e "${C_WOLF}W0lfSword v${VERSION}${NC} — iOS Kernel Exploit Toolkit"; echo -e "${C_DIM}github.com/kaffeindecaf/W0lfSword${NC}";;
         help|h|--help|-h) cmd_help "${args[@]}";;
         usbliter8|ul8)
             if [ "$EUID" -ne 0 ]; then

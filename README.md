@@ -77,6 +77,29 @@ Be clear on the limits — this saves confusion:
 - ❌ **It won't work on iPhone 17 / M5.** Apple added MTE (Memory Tagging
   Extension), which blocks this exploit class.
 
+## Known Issues
+
+Honest limits for the current release:
+
+- **iOS 26.1+ is not supported.** The kernel offset table covers iOS
+  17.0–26.0.1. On 26.1+ the exploit refuses to run rather than risk a panic.
+  (26.1 support is tracked in the ROADMAP as post-v1.0 research.)
+- **Padlock bypass is best-effort.** It hooks Filza's UI classes; if a Filza
+  update renames those classes, some padlocks may reappear until the hooks are
+  updated. The exploit, sandbox escape, and SSV writes are unaffected.
+- **SSV writes are best-effort.** Sealed-volume writes race the kernel and can
+  fail on the first attempt under memory pressure. The tweak retries
+  automatically, but a write that fails under heavy load may need a retry from
+  the UI.
+- **MTE devices (iPhone 17 / A19, M5) are unsupported.** The DarkSword heap-spray
+  technique does not survive memory tagging (see ROADMAP F4 for research).
+- **The exploit is probabilistic.** A race wins ~most of the time, but not
+  always — up to 5 automatic attempts run per Filza launch. If the phone
+  kernel-panics 3 launches in a row, the tweak disables itself
+  (`/var/mobile/Documents/.filza_tweak_disable` — delete the flag to re-enable).
+- **Kernel panic risk is real.** This is a kernel exploit; a panic means a
+  reboot, not data loss. Do not run it on a device you can't afford to reboot.
+
 ---
 
 ## What you need before starting

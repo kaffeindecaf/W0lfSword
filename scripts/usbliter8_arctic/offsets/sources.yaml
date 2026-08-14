@@ -1,0 +1,198 @@
+# Online offset repositories for usbliter8 patches.
+# These can be searched with: python3 device_offsets.py --find-online <model>
+
+repos:
+  - name: "wh1te4ever/usbliter8-fun (iOS 27.0b2/b3)"
+    url: "https://github.com/wh1te4ever/usbliter8-fun"
+    devices: ["iPhone12,3"]
+    ios_versions: ["27.0b2", "27.0b3"]
+    notes: "Original CFW scripts + known-good kernel/iBoot/DT offsets for iPhone 11 Pro"
+
+  - name: "W0lfSword offsets.m (kernel struct offsets A10-A18)"
+    url: "https://github.com/kaffeindecaf/W0lfSword/blob/main/kexploit/offsets.m"
+    devices: ["iPhone11,2", "iPhone11,4", "iPhone11,6", "iPhone11,8",
+              "iPhone12,1", "iPhone12,3", "iPhone12,5", "iPhone12,8"]
+    ios_versions: ["17.0", "17.4", "18.0", "18.4", "18.6", "26.0"]
+    notes: "Thread/proc/vnode struct offsets for DarkSword exploit. Check per-SoC blocks for A12/A13"
+
+  - name: "rav000/usbliter8 (re-uploaded source)"
+    url: "https://github.com/rav000/usbliter8"
+    devices: []
+    ios_versions: []
+    notes: "Source code + build system for RP2350 firmware. May include board configs for different devices"
+
+  - name: "surrealra1n (A13 checkm8-like jailbreak)"
+    url: "https://github.com/34306/surrealra1n"
+    devices: ["iPhone12,3"]
+    ios_versions: ["15.6.1"]
+    notes: "iBoot patching for iPhone 11 Pro via usbliter8. Good offset reference for A13"
+
+  - name: "palera1n (A8-A11 checkm8 jailbreak)"
+    url: "https://github.com/palera1n/palera1n"
+    devices: []
+    ios_versions: []
+    notes: "Well-documented offset tables for older devices. Good pattern reference for new devices"
+
+  - name: "Octopus1633/usbliter8-firmware (prebuilt UF2s)"
+    url: "https://github.com/Octopus1633/usbliter8-firmware"
+    devices: []
+    ios_versions: []
+    notes: "Community firmware binaries for 6 RP2350 board variants. Use these — no compilation needed"
+
+device_database:
+  # ── A13 devices (T8030) ──
+  - model: "iPhone12,1"
+    name: "iPhone 11"
+    soc: "A13"
+    board: "n104ap"
+    apticket: "t8030"
+    ipsu_pattern: "iPhone12,1_"
+
+  - model: "iPhone12,3"
+    name: "iPhone 11 Pro"
+    soc: "A13"
+    board: "d421ap"
+    apticket: "t8030"
+    ipsu_pattern: "iPhone12,3,iPhone12,5_"
+
+  - model: "iPhone12,5"
+    name: "iPhone 11 Pro Max"
+    soc: "A13"
+    board: "d431ap"
+    apticket: "t8030"
+    ipsu_pattern: "iPhone12,3,iPhone12,5_"
+
+  - model: "iPhone12,8"
+    name: "iPhone SE (2nd gen)"
+    soc: "A13"
+    board: "d79ap"
+    apticket: "t8030"
+    ipsu_pattern: "iPhone12,8_"
+
+  - model: "iPad12,1"
+    name: "iPad (9th gen) Wi-Fi"
+    soc: "A13"
+    board: "j181ap"
+    apticket: "t8030"
+    ipsu_pattern: "iPad12,1_"
+
+  - model: "iPad12,2"
+    name: "iPad (9th gen) Cellular"
+    soc: "A13"
+    board: "j182ap"
+    apticket: "t8030"
+    ipsu_pattern: "iPad12,2_"
+
+  # ── A12 devices (T8020) ──
+  - model: "iPhone11,2"
+    name: "iPhone XS"
+    soc: "A12"
+    board: "d321ap"
+    apticket: "t8020"
+    ipsu_pattern: "iPhone11,2_"
+
+  - model: "iPhone11,4"
+    name: "iPhone XS Max (China)"
+    soc: "A12"
+    board: "d331pap"
+    apticket: "t8020"
+    ipsu_pattern: "iPhone11,4_"
+
+  - model: "iPhone11,6"
+    name: "iPhone XS Max"
+    soc: "A12"
+    board: "d331ap"
+    apticket: "t8020"
+    ipsu_pattern: "iPhone11,6_"
+
+  - model: "iPhone11,8"
+    name: "iPhone XR"
+    soc: "A12"
+    board: "n841ap"
+    apticket: "t8020"
+    ipsu_pattern: "iPhone11,8_"
+
+  - model: "iPad11,1"
+    name: "iPad mini (5th gen) Wi-Fi"
+    soc: "A12"
+    board: "j211ap"
+    apticket: "t8020"
+    ipsu_pattern: "iPad11,1_"
+
+  - model: "iPad11,2"
+    name: "iPad mini (5th gen) Cellular"
+    soc: "A12"
+    board: "j212ap"
+    apticket: "t8020"
+    ipsu_pattern: "iPad11,2_"
+
+  - model: "iPad11,3"
+    name: "iPad Air (3rd gen) Wi-Fi"
+    soc: "A12"
+    board: "j213ap"
+    apticket: "t8020"
+    ipsu_pattern: "iPad11,3_"
+
+  - model: "iPad11,4"
+    name: "iPad Air (3rd gen) Cellular"
+    soc: "A12"
+    board: "j214ap"
+    apticket: "t8020"
+    ipsu_pattern: "iPad11,4_"
+
+  - model: "iPad11,6"
+    name: "iPad (8th gen) Wi-Fi"
+    soc: "A12"
+    board: "j171ap"
+    apticket: "t8020"
+    ipsu_pattern: "iPad11,6_"
+
+  - model: "iPad11,7"
+    name: "iPad (8th gen) Cellular"
+    soc: "A12"
+    board: "j172ap"
+    apticket: "t8020"
+    ipsu_pattern: "iPad11,7_"
+
+rp2350_boards:
+  - id: "pico2"
+    name: "Raspberry Pi Pico 2"
+    uf2_file: "usbliter8.pico2.uf2"
+    pins: {Dplus: "GP12", Dminus: "GP13", VBUS: "VBUS", GND: "GND"}
+    soldering: true
+    note: "Most common. Requires soldering a cut Lightning-to-USB-A cable."
+
+  - id: "waveshare_usb_a"
+    name: "Waveshare RP2350-USB-A"
+    uf2_file: "usbliter8.waveshare_rp2350_usb_a.uf2"
+    pins: {Dplus: "built-in USB-A host port", Dminus: "built-in USB-A host port"}
+    soldering: false
+    note: "RECOMMENDED. Built-in USB-A host port — no soldering needed. Plug Lightning cable directly."
+
+  - id: "waveshare_usb_c"
+    name: "Waveshare RP2350-USB-C"
+    uf2_file: "usbliter8.waveshare_rp2350_usb_c.uf2"
+    pins: {Dplus: "GP12", Dminus: "GP13", VBUS: "VBUS", GND: "GND"}
+    soldering: true
+    note: "Small form factor. Requires soldering."
+
+  - id: "waveshare_zero"
+    name: "Waveshare RP2350-Zero"
+    uf2_file: "usbliter8.waveshare_rp2350_zero.uf2"
+    pins: {Dplus: "GP12", Dminus: "GP13", VBUS: "VBUS", GND: "GND"}
+    soldering: true
+    note: "Ultra-compact. Requires soldering."
+
+  - id: "waveshare_pizero"
+    name: "Waveshare RP2350-Pizero"
+    uf2_file: "usbliter8.waveshare_rp2350_pizero.uf2"
+    pins: {Dplus: "GP12", Dminus: "GP13", VBUS: "VBUS", GND: "GND"}
+    soldering: true
+    note: "Pi Zero form factor. Requires soldering."
+
+  - id: "pimoroni_tiny2350"
+    name: "Pimoroni Tiny2350"
+    uf2_file: "usbliter8.pimoroni_tiny2350.uf2"
+    pins: {Dplus: "GP12", Dminus: "GP13", VBUS: "VBUS", GND: "GND"}
+    soldering: true
+    note: "Tiny board. Requires soldering."

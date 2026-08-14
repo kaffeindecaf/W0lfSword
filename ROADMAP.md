@@ -12,13 +12,21 @@
 
 ## 0.1 — Quick wins (under 30 min each, no hardware needed)
 
-- [ ] `A3.2` 🔴 — **pe_v2 2GB mach_vm_allocate retry ladder** (kexploit_opa334.m ~line 684)
-  _If the 2GB allocation fails on A18, retry 1GB → 512MB → 256MB before giving up. Log each attempt. THE one remaining code-critical blocker for v1.0._
-- [ ] `V1.1` 🟡 — **Version plumbing to 1.0.0**: single `VERSION="1.0.0"` var in W0lfSword used by header (line 3), `version` command (line ~2033), bump `control` → 1.0.0, README/CONTEXT references
-- [ ] `V1.2` 🟡 — **Restore README "Known Issues"** (removed in reform): 26.1+ kernel cap, padlock/SSV best-effort, MTE/A19 unsupported
-- [ ] `V1.3` 🟡 — **Release build + tag**: `make package FINALPACKAGE=1`, verify .deb, `git tag v1.0.0` + push
+- [x] `A3.2` 🔴 — **pe_v2 2GB mach_vm_allocate retry ladder** (kexploit_opa334.m ~line 684)
+  _Done 2026-08-14: 2GB → 1GB → 512MB → 256MB ladder with logged attempts. Mid-loop VM_FLAGS_FIXED failures are now bounded (1000 tries) and fall back to the next size with partial-page cleanup instead of hanging._
+- [x] `V1.1` 🟡 — **Version plumbing to 1.0.0**: single `VERSION="1.0.0"` var in W0lfSword used by header (line 3), `version` command (line ~2033), bump `control` → 1.0.0, README/CONTEXT references
+  _Done 2026-08-14: VERSION var drives show_header + version command; control bumped to 1.0.0; no stale version refs remain in README/CONTEXT._
+- [x] `V1.2` 🟡 — **Restore README "Known Issues"** (removed in reform): 26.1+ kernel cap, padlock/SSV best-effort, MTE/A19 unsupported
+  _Done 2026-08-14: README Known Issues section restored — 26.1+ cap, best-effort padlock/SSV, MTE/A19, probabilistic race, panic risk + auto-disable._
+- [x] `V1.3` 🟡 — **Release build + tag**: `make package FINALPACKAGE=1`, verify .deb, `git tag v1.0.0` + push
+  _Done 2026-08-14: FINALPACKAGE=1 now defines NDEBUG + strips KPRINTF (verified: address-leak strings absent in final dylib, present in debug); v1.0.0 .deb built; tag pushed._
 
 ## 0.2 — Device/research work (needs iOS 26.1+ hardware or kernelcache)
+
+> **v1.0 scope note:** these are post-v1.0 research items, NOT release blockers.
+> v1.0 ships for iOS 17.0–26.0.1 (A10–A18, M1–M4). K4.1/K4.7/K4.8/K5.6 all need
+> a 26.1+ device or kernelcache we don't have yet — they stay open as documented
+> future research.
 
 - [ ] `K4.1` 🔴 — Verify 26.1 kernel struct offsets (sandbox, MACF label) vs 26.0.1 — pull 26.1 kernelcache, run XPF, add offsets.m block if shifted
 - [ ] `K4.7` 🔴 — Reproduce CVE-2025-46285 (kernel root privesc on 26.1, integer overflow in 64-bit timestamps) — diff 26.1 vs 26.2 kernelcaches around timestamp handling
@@ -197,11 +205,11 @@
 
 ## A3 — Kernel Exploit Robustness
 
-- [ ] `A3.1` 🔴 — Kernel panic recovery: detect previous crash, disable exploit  
-  _Prompt:_ "Write a crash_counter mechanism: after kexploit_opa334() succeeds, write a timestamp to /var/mobile/Documents/.filza_last_success. On TweakInit, check if .filza_last_success was NOT written AND .filza_tweak_disable is absent — this means last launch crashed during exploit. After 3 detected crashes, create .filza_tweak_disable to prevent infinite reboot loops."
+- [x] `A3.1` 🔴 — Kernel panic recovery: detect previous crash, disable exploit  
+  _Done 2026-08-13: Tweak.m TweakInit checks .filza_last_success + .filza_crash_count — after 3 crashes without a success flag it creates TWEAK_DISABLE_FLAG. TweakExploit.m mark_exploit_success() records success + resets the counter; runExploit re-arms the sentinel (unlinks the flag) on attempt 1._
 
-- [ ] `A3.2` 🔴 — A18 device pe_v2: handle mach_vm_allocate failure for 2GB  
-  _Prompt:_ "In kexploit_opa334.m pe_v2(), the 2GB allocation may fail on memory-constrained devices (iPhone with many apps in background). Add a retry with smaller sizes (1GB, 512MB, 256MB) before giving up. Log each attempt."
+- [x] `A3.2` 🔴 — A18 device pe_v2: handle mach_vm_allocate failure for 2GB  
+  _Done 2026-08-14: retry ladder 2GB → 1GB → 512MB → 256MB with logging. Mid-loop VM_FLAGS_FIXED failures are now bounded (1000 tries ≈ 100ms) and fall back to the next size with partial wired-page cleanup — no more infinite hang._
 
 - [x] `A3.3` 🟠 — Socket spray failure: handle `socket(AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6)` returning -1  
   _Fixed 2026-08-10: spray_socket returns MACH_PORT_NULL on failure, both callers check for it._
@@ -677,7 +685,10 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 # SECTION J: W0lfSword-Beta — iOS Exploit Menu
 
-> **W0lfSword-Beta is a SUPERSET of W0lfSword.** It includes every original command (build, deploy, status, audit, log, toggle, offsets, targets, clean, doctor, help) unchanged, plus an interactive exploit menu layer. The original `./W0lfSword` script stays untouched.
+> **W0lfSword-Beta was fully merged into the main `W0lfSword` script
+> (2026-08-10); the legacy `W0lfSword-Beta` stub file was removed in the
+> 2026-08-14 cleanup. Items below are the Beta work log, all implemented in
+> the merged script.
 
 ## J1 — Interactive Menu (no-args mode)
 
@@ -944,6 +955,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
   _Prompt: "Add an 'imagetrigger' mode to W0lfSword: a small tweak (or Filza hook) that programmatically opens crafted images through the QuickLook/UserNotifications/Files decode paths and records which daemon crashes. This is how we map which parser processes are reachable from a tweak on 26.1."_
 
 - [ ] `K5.6` 🔴 — If any kernel OOB R/W is obtained on 26.1/26.4.1, escape immediately  
+  _(Post-v1.0: needs a 26.1+ kernel R/W primitive — see v1.0 scope note in Section 0.2.)_  
   _Prompt: "When a new kernel primitive lands, FIRST re-verify offsets for 26.1+ (K4.1), THEN run the existing ext-set escape — kernel R/W makes sandbox escape nearly free. Don't spend time on userspace chains once a kernel bug exists."_
 
 - [ ] `K5.7` ⚪ — Chain C: WebKit entry for no-SSH/no-jailbreak deployment  
@@ -962,8 +974,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | Section | Total Items | Completed | Remaining |
 |---------|------------|-----------|-----------|
 | A1 — Thread Safety | 14 | 13 | 1 |
-| A2 — Filza Compatibility | 11 | 2 | 9 |
-| A3 — Kernel Exploit Robustness | 22 | 9 | 13 |
+| A2 — Filza Compatibility | 11 | 3 | 8 |
+| A3 — Kernel Exploit Robustness | 22 | 10 | 12 |
 | A5 — SSV & Sandbox Stability | 10 | 4 | 6 |
 | A6 — Production Readiness (new) | 20 | 8 | 12 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
@@ -973,8 +985,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | C1 — Kernel Vuln Hunting | 7 | 1 | 6 |
 | C2 — Bug Bounty Targets | 8 | 1 | 7 |
 | C3 — Attack Chains | 4 | 0 | 4 |
-| D1 — Refactoring | 5 | 4 | 1 |
-| D2 — Testing | 4 | 1 | 3 |
+| D1 — Refactoring | 5 | 2 | 3 |
+| D2 — Testing | 4 | 0 | 4 |
 | D3 — Documentation | 3 | 3 | 0 |
 | E1 — Version/Device Expansion | 5 | 0 | 5 |
 | F1 — PUAF Fallback | 4 | 0 | 4 |
@@ -1001,9 +1013,9 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | K3 — Tweak Menu | 9 | 1 | 8 |
 | K4 — iOS 26.1 Sandbox Escape Research | 13 | 1 | 12 |
 | K5 — Exploit Chains | 9 | 2 | 7 |
-| V1 — v1.0 Release | 3 | 0 | 3 |
-| **TOTAL** | **223** | **86** | **137** |
+| V1 — v1.0 Release | 3 | 3 | 0 |
+| **TOTAL** | **234** | **84** | **150** |
 
 ---
 
-*Last updated: 2026-08-13 — added Section 0 (start-here priorities)*
+*Last updated: 2026-08-14 — v1.0.0 release: FINALPACKAGE gating + verified .deb, README Known Issues, version plumbing, V1 section closed*

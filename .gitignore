@@ -1,17 +1,15 @@
-
+ 
+# Local-only docs (kept out of git deliberately)
 BUG_BOUNTY.md
 AUDIT_REPORT.md
 DEBUG_TRACKING.md
 CONTEXT.md
-TODAY.md
-for_myself.txt
-REPO_SETUP.md
 BUILD.md
-WOLF_ASCII_ART.txt
-temporatyArchitecture
-W0lfSword-Beta
 W0lfSwordChain.drawio
-W0lfSwordChainTransparent.drawio.png
+
+# Research knowledge base (cloned reference repos)
+referenceforAI/
+
 # Build artifacts
 .theos/
 packages/
