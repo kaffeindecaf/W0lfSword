@@ -1,26 +1,18 @@
 {
+  "schema_version": 1,
   "tweaks": [
     {
       "id": "five_icon_dock",
       "name": "5-Icon Dock",
       "description": "Five icons per dock row instead of four",
       "ios_min": "17.0",
-      "ios_max": "26.0",
+      "ios_max": "26.0.1",
       "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
       "required_exploit": "darksword",
+      "files_modified": ["/System/Library/PrivateFrameworks/SpringBoardHome.framework/SpringBoardHome"],
+      "dylib_template": "templates/five_icon_dock.xm",
       "substrate_target": "com.apple.springboard",
-      "status": "planned"
-    },
-    {
-      "id": "custom_icons",
-      "name": "Custom Icon Design",
-      "description": "Theme app icons from /var/mobile/Documents/Icons/<bundleid>.png",
-      "ios_min": "17.0",
-      "ios_max": "26.0",
-      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
-      "required_exploit": "darksword",
-      "substrate_target": "com.apple.springboard",
-      "status": "planned"
+      "status": "available"
     },
     {
       "id": "hide_home_bar",
@@ -30,6 +22,34 @@
       "ios_max": "26.6",
       "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
       "required_exploit": "userspace",
+      "files_modified": ["None (UI hook only)"],
+      "dylib_template": "templates/hide_home_bar.xm",
+      "substrate_target": "com.apple.springboard",
+      "status": "available"
+    },
+    {
+      "id": "hide_dock",
+      "name": "Hide Dock",
+      "description": "Remove the dock background (iDevice-Toolkit parity)",
+      "ios_min": "16.0",
+      "ios_max": "26.6",
+      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
+      "required_exploit": "userspace",
+      "files_modified": ["None (UI hook only)"],
+      "dylib_template": "templates/hide_dock.xm",
+      "substrate_target": "com.apple.springboard",
+      "status": "available"
+    },
+    {
+      "id": "custom_icons",
+      "name": "Custom Icon Design",
+      "description": "Theme app icons from /var/mobile/Documents/Icons/<bundleid>.png",
+      "ios_min": "17.0",
+      "ios_max": "26.0.1",
+      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
+      "required_exploit": "darksword",
+      "files_modified": ["/var/mobile/Documents/Icons/ (new)"],
+      "dylib_template": "",
       "substrate_target": "com.apple.springboard",
       "status": "planned"
     },
@@ -41,6 +61,8 @@
       "ios_max": "18.5",
       "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
       "required_exploit": "darksword",
+      "files_modified": ["None (UI hook only)"],
+      "dylib_template": "",
       "substrate_target": "com.apple.springboard",
       "status": "planned"
     },
@@ -52,17 +74,8 @@
       "ios_max": "18.5",
       "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
       "required_exploit": "darksword",
-      "substrate_target": "com.apple.springboard",
-      "status": "planned"
-    },
-    {
-      "id": "hide_dock",
-      "name": "Hide Dock",
-      "description": "Remove the dock background (iDevice-Toolkit parity)",
-      "ios_min": "16.0",
-      "ios_max": "18.3.2",
-      "socs": ["A12", "A13", "A14", "A15", "A16", "A17", "A18"],
-      "required_exploit": "userspace",
+      "files_modified": ["None (UI hook only)"],
+      "dylib_template": "",
       "substrate_target": "com.apple.springboard",
       "status": "planned"
     }

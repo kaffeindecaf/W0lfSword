@@ -124,15 +124,99 @@ progress_bar() {
     printf "${NC} %d%%" "$pct"
 }
 
+# ── Platform detection (Linux / macOS) ────────────────────────
+OS_NAME="$(uname -s)"
+IS_MACOS=0
+[ "$OS_NAME" = "Darwin" ] && IS_MACOS=1
+
+# Portable helpers — GNU coreutils (Linux) vs BSD (macOS) differ.
+# No seq, sort -V, getent, or mktemp-without-template here (A6.17).
+repeat_char() {
+    local c="$1" n="$2" i s=""
+    for ((i=0; i<n; i++)); do s="${s}${c}"; done
+    printf '%s' "$s"
+}
+
+# ping: Linux -W is seconds, macOS -W is milliseconds (so -W1 would
+# mean 1ms and every device would look offline on a Mac).
+ping_check() {
+    if [ "$IS_MACOS" -eq 1 ]; then
+        ping -c1 -W1000 "$1" >/dev/null 2>&1
+    else
+        ping -c1 -W1 "$1" >/dev/null 2>&1
+    fi
+}
+
+# Portable version comparison (macOS sort has no -V).
+version_sort_first() {
+    printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -1
+}
+
+# ── Exploit selector (K1.7 / K3.3) ────────────────────────────
+# Maps hw.machine model identifier → exploit method + SoC family.
+#   A12-A17 + M1-M4 → DarkSword pe_v1
+#   A18            → DarkSword pe_v2
+#   A9-A11         → PUAF fallback (not ported yet — see K1.6)
+#   anything else  → unknown (refuse)
+select_exploit() {
+    case "$1" in
+        iPhone8,*|iPhone9,*|iPhone10,*) echo "puaf";;  # A9-A11 — must precede iPhone1[1-6]
+        iPhone1[1-6],*)  echo "pe_v1";;   # A12-A16 (incl. A17 Pro)
+        iPhone17,*)      echo "pe_v1";;   # A17 (per project device table)
+        iPhone18,*)      echo "pe_v2";;   # A18
+        iPad1[1-9],*)    echo "pe_v1";;   # A12X/Z + M1-M4 iPads
+        *)               echo "unknown";;
+    esac
+}
+
+soc_family() {
+    case "$1" in
+        iPhone8,*|iPhone9,*|iPhone10,*) echo "A9-A11";;
+        iPhone1[1-6],*)  echo "A12-A16";;
+        iPhone17,*)      echo "A17";;
+        iPhone18,*)      echo "A18";;
+        iPad1[1-9],*)    echo "M1-M4";;
+        *)               echo "unknown";;
+    esac
+}
+
+# ── USB cable reliability probe ───────────────────────────────
+# Reads the device 10 times over usbmuxd. A good cable never misses;
+# a flaky one drops reads or the device disappears mid-test.
+test_usb_cable() {
+    local uuid="${1:-}"
+    [ -n "$uuid" ] || return 1
+    local ok=0 tries=10 i
+    for ((i=0; i<tries; i++)); do
+        local cur; cur=$(idevice_id -l 2>/dev/null | head -1 || echo "")
+        if [ "$cur" != "$uuid" ]; then
+            err "Device disappeared from USB on read $((i+1))/$tries — flaky cable or port"
+            hint "Try a different cable/port. Short, MFI-certified cable straight into the computer (no hub)."
+            return 1
+        fi
+        ideviceinfo -k ProductVersion >/dev/null 2>&1 && ok=$((ok+1))
+        sleep 0.1
+    done
+    if [ "$ok" -ge 9 ]; then
+        ok "USB cable looks good ($ok/$tries reads)"
+    elif [ "$ok" -ge 6 ]; then
+        warn "Cable is flaky ($ok/$tries reads) — swap the cable if deploys fail"
+    else
+        err "Bad USB connection ($ok/$tries reads) — try another cable before deploying"
+        hint "Short MFI-certified cable, direct port (no hub), no extension dongles."
+    fi
+    return 0
+}
+
 # ── Drawing helpers ───────────────────────────────────────────
 
-line()  { printf "${C_DIM}%s${NC}\n" "$(printf '─%.0s' $(seq 1 "$1"))"; }
+line()  { printf "${C_DIM}%s${NC}\n" "$(repeat_char '─' "$1")"; }
 hline() { line 58; }
 
 section() {
     echo ""
     printf "  ${C_FROST}${B}%s${NC}\n" "$1"
-    printf "  ${C_DIM}%s${NC}\n" "$(printf '─%.0s' $(seq 1 ${#1}))"
+    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' "${#1}")"
 }
 
 ok()   { printf "  ${C_GRN}✓${NC} %s\n" "$1"; }
@@ -223,12 +307,13 @@ show_header() {
 check_theos() {
     # Try env var, then common paths
     [ -n "${THEOS:-}" ] && [ -d "$THEOS" ] && return 0
-    for d in "$HOME/theos" /opt/theos /usr/local/theos "$PROJECT_DIR/.theos"; do
+    for d in "$HOME/theos" /opt/theos /usr/local/theos "$PROJECT_DIR/.theos" \
+             /opt/homebrew/theos /opt/homebrew/share/theos /usr/local/share/theos; do
         [ -d "$d/makefiles" ] && { export THEOS="$d"; vlog "THEOS auto-detected at $d"; return 0; }
     done
     # Under sudo, $HOME might be /root — also check the original user's home
     if [ "$EUID" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
-        local sudo_home; sudo_home=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+        local sudo_home; sudo_home=$(eval echo "~$SUDO_USER" 2>/dev/null)
         [ -n "$sudo_home" ] && [ -d "$sudo_home/theos/makefiles" ] && {
             export THEOS="$sudo_home/theos"
             vlog "THEOS auto-detected at $THEOS (via sudo user)"
@@ -280,7 +365,7 @@ scan_devices() {
 
             local mark=" "; [ "$dip" = "$active_active" ] && mark="*"
             local st="${C_DIM}offline${NC}"
-            ping -c1 -W1 "$dip" >/dev/null 2>&1 && st="${C_GRN}online${NC}"
+            ping_check "$dip" && st="${C_GRN}online${NC}"
             DEV_WIFI+=("$mark|$dip|$dname|$st")
             ((DEV_COUNT++))
         done < <(sort -u "$DATA_DIR/devices.list")
@@ -315,7 +400,7 @@ cmd_extract() {
     local edir="/tmp/w0lf_extract_$$"; mkdir -p "$edir"
     dpkg-deb -x "$deb" "$edir/" 2>/dev/null
     local dylib; dylib=$(find "$edir" -name '*.dylib' -type f 2>/dev/null | head -1)
-    [ -z "$dylib" ] && { err "No dylib in package"; hint "Is dpkg-deb installed? Run: sudo apt install dpkg"; rm -rf "$edir"; return 1; }
+    [ -z "$dylib" ] && { err "No dylib in package"; hint "Is dpkg-deb installed? Run: sudo apt install dpkg (Linux) / brew install dpkg (macOS)"; rm -rf "$edir"; return 1; }
     cp "$dylib" "$PROJECT_DIR/W0lfSword.dylib"
     ok "Extracted W0lfSword.dylib ($(du -h W0lfSword.dylib | cut -f1))"
     rm -rf "$edir"
@@ -373,7 +458,7 @@ cmd_status() {
 
     local ip; ip=$(get_device_ip)
     local dev="${C_DIM}none${NC}"
-    [ -n "$ip" ] && ping -c1 -W1 "$ip" >/dev/null 2>&1 && dev="${C_GRN}$ip${NC}" || dev="${C_AMB}$ip (offline)${NC}"
+    [ -n "$ip" ] && ping_check "$ip" && dev="${C_GRN}$ip${NC}" || dev="${C_AMB}$ip (offline)${NC}"
 
     echo ""
     section "Session"
@@ -404,7 +489,7 @@ cmd_status() {
     local ip2; ip2=$(get_device_ip)
     if [ -z "$ip2" ]; then
         echo -e "  ${C_AMB}⚠${NC} device         ${C_DIM}none saved — connect USB or 'device add <ip>'${NC}"
-    elif ping -c1 -W1 "$ip2" >/dev/null 2>&1; then
+    elif ping_check "$ip2"; then
         echo -e "  ${C_GRN}✓${NC} device         ${C_DIM}$ip2 online${NC}"
     else
         echo -e "  ${C_AMB}⚠${NC} device         ${C_DIM}$ip2 offline${NC}"
@@ -414,7 +499,7 @@ cmd_status() {
     else
         echo -e "  ${C_RED}✗${NC} offsets        ${C_DIM}none — exploit cannot run${NC}"
     fi
-    if [ -n "$ip2" ] && ping -c1 -W1 "$ip2" >/dev/null 2>&1; then
+    if [ -n "$ip2" ] && ping_check "$ip2"; then
         if ssh_safe "root@$ip2" "echo ok" 2>/dev/null | grep -q ok; then
             echo -e "  ${C_GRN}✓${NC} SSH            ${C_DIM}root@$ip2 works (phone is jailbroken)${NC}"
             local fz; fz=$(ssh_safe "root@$ip2" "ls -d /var/containers/Bundle/Application/*/Filza.app 2>/dev/null; ls -d /Applications/Filza.app 2>/dev/null" 2>/dev/null || echo "")
@@ -560,17 +645,24 @@ cmd_doctor() {
     echo ""
     section "Toolchain"
     local ok=true
-    if [ -n "${THEOS:-}" ] || [ -d "$HOME/theos" ]; then
-        echo -e "  ${C_GRN}✓${NC} THEOS          ${C_DIM}$([ -n "${THEOS:-}" ] && echo "$THEOS" || echo "~/theos")${NC}"
+    if check_theos; then
+        echo -e "  ${C_GRN}✓${NC} THEOS          ${C_DIM}${THEOS}${NC}"
     else
-        echo -e "  ${C_RED}✗${NC} THEOS          ${C_DIM}export THEOS=~/theos${NC}"; ok=false
+        echo -e "  ${C_RED}✗${NC} THEOS          ${C_DIM}export THEOS=~/theos (Linux) / /opt/theos (macOS)${NC}"; ok=false
     fi
     command -v clang    &>/dev/null && echo -e "  ${C_GRN}✓${NC} clang"          || { echo -e "  ${C_RED}✗${NC} clang"; ok=false; }
-    command -v dpkg-deb &>/dev/null && echo -e "  ${C_GRN}✓${NC} dpkg-deb"       || { echo -e "  ${C_RED}✗${NC} dpkg-deb"; ok=false; }
+    command -v dpkg-deb &>/dev/null && echo -e "  ${C_GRN}✓${NC} dpkg-deb"       || { echo -e "  ${C_RED}✗${NC} dpkg-deb ${C_DIM}(brew install dpkg / apt install dpkg)${NC}"; ok=false; }
     command -v git      &>/dev/null && echo -e "  ${C_GRN}✓${NC} git"            || { echo -e "  ${C_AMB}⚠${NC} git (recommended)"; }
     command -v ssh      &>/dev/null && echo -e "  ${C_GRN}✓${NC} ssh"            || { echo -e "  ${C_AMB}⚠${NC} ssh (for deployment)"; }
     command -v python3  &>/dev/null && echo -e "  ${C_GRN}✓${NC} python3"        || { echo -e "  ${C_AMB}⚠${NC} python3 (for audit)"; }
     command -v ldid     &>/dev/null && echo -e "  ${C_GRN}✓${NC} ldid"           || { echo -e "  ${C_DIM}─${NC} ldid (optional)"; }
+    if [ "$IS_MACOS" -eq 1 ]; then
+        if xcode-select -p &>/dev/null && xcrun --sdk iphoneos --show-sdk-path &>/dev/null; then
+            echo -e "  ${C_GRN}✓${NC} Xcode iPhoneOS SDK  ${C_DIM}$(xcrun --sdk iphoneos --show-sdk-path)${NC}"
+        else
+            echo -e "  ${C_RED}✗${NC} Xcode iPhoneOS SDK  ${C_DIM}run: xcode-select --install, then open Xcode once${NC}"; ok=false
+        fi
+    fi
     echo ""
     if $ok; then
         echo -e "  ${C_GRN}${B}All tools ready. Go break something.${NC}"
@@ -581,9 +673,18 @@ cmd_doctor() {
 }
 
 cmd_tweaks() {
+    local sub="${1:-list}"
+    case "$sub" in
+        install) cmd_tweak_install "${2:-}";;
+        list|"") cmd_tweak_list;;
+        *) err "Unknown tweaks subcommand: $sub"; hint "Use: tweaks list | tweaks install <id>"; return 1;;
+    esac
+}
+
+cmd_tweak_list() {
     show_header
     echo ""
-    section "Tweak Catalog (planned — installer coming, see ROADMAP K3)"
+    section "Tweak Catalog"
     echo ""
     if [ ! -f tweaks/catalog.json ]; then
         warn "tweaks/catalog.json missing"
@@ -601,8 +702,187 @@ for t in d['tweaks']:
           f"  ·  target: {t['substrate_target']}  ·  {status}\033[0m")
 PYEOF
     echo ""
-    echo -e "  ${C_DIM}Legend: ${C_GRN}●${C_DIM} available  ${C_AMB}◌${C_DIM} planned${NC}"
-    echo -e "  ${C_DIM}Installation will pick the right exploit per device automatically (K3.3).${NC}"
+    echo -e "  ${C_DIM}Legend: ${C_GRN}●${C_DIM} available  ${C_AMB}◌${C_DIM} planned (no template yet)${NC}"
+    echo -e "  ${C_DIM}Install: ${C_EYE}./W0lfSword tweaks install <id>${NC} — picks the right"
+    echo -e "  ${C_DIM}exploit for your device automatically (pe_v1 / pe_v2 / PUAF).${NC}"
+    echo ""
+}
+
+cmd_tweak_install() {
+    local tid="${1:-}"
+    [ -n "$tid" ] && [ -f tweaks/catalog.json ] || { err "Usage: tweaks install <id>"; hint "List ids: ./W0lfSword tweaks"; return 1; }
+
+    disclaimer <<EOF
+What this does: compiles ONE catalog tweak on this computer, installs it on
+the phone with dpkg, and resprings SpringBoard. It checks your device's iOS
+and chip BEFORE building, so an incompatible tweak never touches the phone.
+$JAILBREAK_NOTE
+$PERSIST_NOTE
+EOF
+
+    # ── 1. Catalog entry ──────────────────────────────────────
+    local META
+    META=$(python3 - "$tid" <<'PYEOF'
+import json, sys
+want = sys.argv[1]
+d = json.load(open('tweaks/catalog.json'))
+t = next((x for x in d['tweaks'] if x['id'] == want), None)
+if not t:
+    sys.exit(1)
+print("\x1f".join([
+    t['id'], t['name'], t.get('ios_min','17.0'), t.get('ios_max','26.0'),
+    t.get('required_exploit','darksword'), t.get('dylib_template',''),
+    t.get('substrate_target','com.apple.springboard'),
+    ",".join(t.get('socs', [])),
+]))
+PYEOF
+) || { err "No such tweak: $tid"; hint "Run './W0lfSword tweaks' for the catalog."; return 1; }
+
+    local T_ID T_NAME T_IOSMIN T_IOSMAX T_EXPLOIT T_TPL T_TARGET T_SOCS
+    IFS=$'\x1f' read -r T_ID T_NAME T_IOSMIN T_IOSMAX T_EXPLOIT T_TPL T_TARGET T_SOCS <<< "$META"
+
+    echo -e "  ${C_EYE}${B}$T_NAME${NC}  ${C_DIM}($T_ID)${NC}"
+    echo -e "  ${C_DIM}iOS $T_IOSMIN–$T_IOSMAX · exploit $T_EXPLOIT · target $T_TARGET${NC}"
+    echo ""
+
+    [ -n "$T_TPL" ] || { warn "'$T_ID' is planned — no template yet"; hint "See ROADMAP K3.6/K3.7 for the next catalog entries."; return 1; }
+
+    # ── 2. Device probe (USB first, then saved IP over SSH) ────
+    local IOS_VER="" DEV_MODEL="" IP=""
+    if command -v idevice_id &>/dev/null; then
+        local uuid; uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
+        if [ -n "$uuid" ]; then
+            DEV_MODEL=$(ideviceinfo -k HardwareModel 2>/dev/null || echo "")
+            IOS_VER=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
+            echo -e "  ${C_GRN}✓${NC} USB device: ${C_EYE}$DEV_MODEL${NC} — iOS $IOS_VER"
+        fi
+    fi
+    if [ -z "$IOS_VER" ]; then
+        IP=$(get_device_ip)
+        if [ -n "$IP" ] && ping_check "$IP"; then
+            IOS_VER=$(ssh_safe "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
+            DEV_MODEL=$(ssh_safe "root@$IP" "sysctl -n hw.machine" 2>/dev/null || echo "")
+            echo -e "  ${C_GRN}✓${NC} WiFi device: ${C_EYE}$DEV_MODEL${NC} — iOS $IOS_VER"
+        fi
+    fi
+    if [ -z "$IOS_VER" ]; then
+        err "No device found — connect via USB or: ./W0lfSword device add <ip>"
+        return 1
+    fi
+
+    # ── 3. Exploit selector (K3.3 / K1.7) ──────────────────────
+    local METHOD FAMILY
+    METHOD=$(select_exploit "$DEV_MODEL")
+    FAMILY=$(soc_family "$DEV_MODEL")
+    log_script "tweak $tid: device=$DEV_MODEL ios=$IOS_VER method=$METHOD family=$FAMILY"
+
+    if [ "$METHOD" = "unknown" ]; then
+        err "Unsupported device: $DEV_MODEL"
+        hint "No exploit path for this SoC yet (A10-A11 need the PUAF port — ROADMAP K1.6/F1)."
+        return 1
+    fi
+    if [ "$METHOD" = "puaf" ]; then
+        err "A9-A11 device — PUAF fallback is not ported yet"
+        hint "A10-A11 will work once the kfd PhysPuppet/Smith port lands (ROADMAP K1.6). Nothing was installed."
+        return 1
+    fi
+
+    local METHOD_OK=1
+    case "$T_EXPLOIT" in
+        darksword)
+            if [ "$METHOD" = "pe_v1" ] || [ "$METHOD" = "pe_v2" ]; then
+                METHOD_OK=1
+            else
+                METHOD_OK=0
+            fi
+            if [ "$(version_sort_first "$IOS_VER" "26.1")" = "26.1" ]; then
+                warn "DarkSword is patched in iOS 26.1 — '$T_ID' requires it"
+                err "This tweak needs the kernel exploit, unavailable on iOS $IOS_VER"
+                return 1
+            fi
+            ;;
+        userspace) METHOD_OK=1;;  # MCM container access works without kernel R/W
+        puaf) METHOD_OK=0;;
+        *) METHOD_OK=0;;
+    esac
+    [ "$METHOD_OK" -eq 1 ] || { err "Exploit requirement '$T_EXPLOIT' cannot be met ($METHOD on $DEV_MODEL)"; return 1; }
+
+    # ── 4. Compatibility check (iOS range + SoC set) ───────────
+    local VERDICT
+    VERDICT=$(python3 - "$IOS_VER" "$FAMILY" "$T_IOSMIN" "$T_IOSMAX" "$T_SOCS" <<'PYEOF'
+import sys
+ios, fam, mn, mx, socs = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+
+def ver(v): return tuple(int(x) for x in v.split('.'))
+def lt(a, b):
+    pa, pb = ver(a), ver(b)
+    for x, y in zip(pa, pb):
+        if x < y: return True
+        if x > y: return False
+    return len(pa) < len(pb)
+
+family_set = {
+    "A12-A16": {"A12","A13","A14","A15","A16"},
+    "A17":     {"A17"},
+    "A18":     {"A18"},
+    "M1-M4":   {"M1","M2","M3","M4"},
+    "A9-A11":  {"A9","A10","A11"},
+}.get(fam, set())
+want = set(socs.split(',')) if socs else set()
+
+problems = []
+if lt(ios, mn): problems.append(f"iOS {ios} < minimum {mn}")
+if lt(mx, ios): problems.append(f"iOS {ios} > maximum {mx}")
+if want and not (family_set & want): problems.append(f"SoC family {fam} not in supported set ({socs})")
+print("; ".join(problems) if problems else "OK")
+PYEOF
+)
+    if [ "$VERDICT" = "OK" ]; then
+        ok "Compatibility: iOS $IOS_VER · $FAMILY · exploit $METHOD"
+    else
+        err "Incompatible: $VERDICT"
+        hint "Nothing was installed. Pick a tweak that covers iOS $IOS_VER."
+        return 1
+    fi
+
+    # ── 5. Build the dylib from template (K3.2) ────────────────
+    echo ""
+    section "Build (on this computer)"
+    echo ""
+    start_pulse "building $T_ID" & PULSE_PID=$!
+    if ! bash tweaks/build_tweak.sh "$T_ID" >/tmp/w0lf_tweak_build.log 2>&1; then
+        stop_pulse
+        err "Build failed — log tail:"
+        tail -5 /tmp/w0lf_tweak_build.log | sed 's/^/      /'
+        return 1
+    fi
+    stop_pulse
+    local DEB; DEB=$(ls -t tweaks/packages/*.deb 2>/dev/null | head -1)
+    [ -n "$DEB" ] || { err "Build produced no .deb"; return 1; }
+    ok "Built $(basename "$DEB")"
+
+    # ── 6. Deploy + respring ───────────────────────────────────
+    if [ -z "$IP" ]; then
+        IP=$(get_device_ip)
+    fi
+    if [ -z "$IP" ] || ! ping_check "$IP"; then
+        warn "No SSH path to the device (USB-only)"
+        hint "Deploy manually: ./W0lfSword deploy <ip> — or copy $(basename "$DEB") and dpkg -i it."
+        return 0
+    fi
+    echo ""
+    section "Deploy (computer → phone)"
+    echo ""
+    local rp="/tmp/$(basename "$DEB")"
+    retry 3 1 "scp_safe '$DEB' 'root@$IP:$rp'" || { err "SCP failed after 3 retries"; return 1; }
+    ssh_safe "root@$IP" "dpkg -i '$rp' 2>&1; rm -f '$rp'" >/dev/null 2>&1
+    ok "Installed on $IP"
+    ssh_safe "root@$IP" "killall -9 SpringBoard 2>/dev/null" || true
+    ok "SpringBoard respringing — tweak live in a few seconds"
+    log_script "tweak $tid installed on $IP (device=$DEV_MODEL ios=$IOS_VER method=$METHOD)"
+    echo ""
+    echo -e "  ${C_DIM}Uninstall anytime on the phone:${NC}"
+    echo -e "  ${C_DIM}  dpkg -r com.kaffeindecaf.w0lfsword.tweak.$T_ID${NC}"
     echo ""
 }
 
@@ -690,7 +970,7 @@ cmd_device() {
                 sort -u "$DATA_DIR/devices.list" | while read -r dip dname; do
                     local m=" "; [ "$dip" = "$active" ] && m="${C_EYE}*${NC}"
                     local st="${C_GRN}online${NC}"
-                    ping -c1 -W1 "$dip" >/dev/null 2>&1 || st="${C_DIM}offline${NC}"
+                    ping_check "$dip" || st="${C_DIM}offline${NC}"
                     printf "  %s ${C_EYE}%-17s${NC} %-10s %s\n" "$m" "$dip" "$st" "$dname"
                 done
             else
@@ -818,7 +1098,7 @@ EOF
     ok "Deployed + restarted"
 
     stage "3/4" "Waiting for exploit... (phone is working)"
-    local dots=""; for i in $(seq 1 10); do dots+="."; echo -ne "\r  ${C_EYE}[3/4]${NC} Waiting for exploit${dots}"; sleep 1; done
+    local dots=""; for ((i=0; i<10; i++)); do dots+="."; echo -ne "\r  ${C_EYE}[3/4]${NC} Waiting for exploit${dots}"; sleep 1; done
     echo ""
 
     stage "4/4" "Verifying... (reading phone logs)"
@@ -854,7 +1134,8 @@ run_usbliter8() {
     if [ -z "$ul8" ]; then
         err "usbliter8-arctic toolkit not found"
         hint "Get it: git clone https://github.com/kaffeindecaf/usbliter8-arctic.git"
-        hint "A12/A13 tethered jailbreak — needs an RP2350 board (not RP2040) + Linux."
+        hint "A12/A13 tethered jailbreak — needs an RP2350 board (not RP2040)."
+        hint "Runs on Linux (tested); macOS works if pyusb + tools install cleanly."
         return 1
     fi
     disclaimer <<EOF
@@ -906,7 +1187,7 @@ draw_menu() {
     else
         local ip; ip=$(get_device_ip)
         if [ -n "$ip" ]; then
-            local st; ping -c1 -W1 "$ip" >/dev/null 2>&1 && st="${C_GRN}online${NC}" || st="${C_AMB}offline${NC}"
+            local st; ping_check "$ip" && st="${C_GRN}online${NC}" || st="${C_AMB}offline${NC}"
             echo -e "  ${C_GREY}device:${NC}  ${C_EYE}${ip}${NC}  $st"
         else
             echo -e "  ${C_GREY}device:${NC}  ${C_DIM}none — connect USB or use 'device add <ip>'${NC}"
@@ -1110,13 +1391,17 @@ cmd_adderall() {
         echo -e "  ${C_AMB}${B}╚════════════════════════════════════════════════╝${NC}"
     fi
     echo ""
-    echo -e "  ${C_DIM}Fully automated: discover device, check offsets, build, deploy, verify${NC}"
-    echo -e "  ${C_DIM}Run with --yes to skip prompts, -vv for extreme verbosity${NC}"
+    echo -e "  ${C_DIM}Fully automated: install missing tools, find your phone, pair it, check the${NC}"
+    echo -e "  ${C_DIM}USB cable, verify offsets, build, deploy, and confirm the exploit${NC}"
+    echo -e "  ${C_DIM}Run with --yes to skip the remaining prompts, -vv for extreme verbosity${NC}"
     echo ""
     disclaimer <<EOF
-What this does, step by step: finds your phone (USB or WiFi), compiles the
-tweak on this computer, installs it on the phone, restarts Filza, then waits
-and checks whether the exploit escaped the sandbox.
+What this does, step by step: installs any missing build tools on this
+computer (clang, dpkg, THEOS, libimobiledevice — no questions asked), finds
+your phone over USB or WiFi, pairs it (tap TRUST on the phone when asked),
+tests that the USB cable is reliable, compiles the tweak, installs it on the
+phone, restarts Filza, then waits and checks whether the exploit escaped
+the sandbox.
 $FILZA_NOTE
 $JAILBREAK_NOTE
 $PERSIST_NOTE
@@ -1124,37 +1409,112 @@ EOF
     log_script "adderall started"
 
     # ── Phase 0: Sudo check ──────────────────────────────────
+    # Linux needs root for apt. macOS runs brew as the user (brew refuses
+    # root) — sudo is only used for /opt/theos there.
+    local SUDO=""
     if [ "$EUID" -ne 0 ]; then
-        echo -e "  ${C_RED}✗ This command needs root. Re-run with:${NC}"
-        echo -e "    ${C_FROST}sudo ./W0lfSword adderall${NC}"
-        return 1
+        if [ "$IS_MACOS" -eq 1 ]; then
+            SUDO="sudo"
+        else
+            echo -e "  ${C_RED}✗ adderall needs root to auto-install packages. Re-run with:${NC}"
+            echo -e "    ${C_FROST}sudo ./W0lfSword adderall${NC}"
+            return 1
+        fi
     fi
 
     local IP="" IOS_VER="" DEV_MODEL="" CPU_FAMILY="" EXPLOIT_METHOD="auto"
     local DEV_NAME=""
 
-    # ── Phase 1: Device Discovery ─────────────────────────────
-    section "Phase 1 — Device Discovery (this computer → phone)"
+    # ── Phase 1: Auto-install dependencies (no prompts) ──────
+    section "Phase 1 — Dependencies (on this computer, fully automatic)"
+    echo ""
+
+    local pkg_manager=""
+    if [ "$IS_MACOS" -eq 1 ]; then pkg_manager="brew"
+    elif command -v apt &>/dev/null; then pkg_manager="apt"
+    elif command -v pacman &>/dev/null; then pkg_manager="pacman"
+    else warn "No package manager detected — see BUILD.md for manual install"; fi
+
+    # macOS: clang + the iPhoneOS SDK come from Xcode CLT, not brew
+    if [ "$IS_MACOS" -eq 1 ] && ! xcode-select -p &>/dev/null; then
+        echo -e "  ${C_AMB}Installing Xcode Command Line Tools (a system dialog will appear)${NC}"
+        xcode-select --install 2>/dev/null || true
+        echo -e "  ${C_DIM}  → Let that finish, then re-run: ./W0lfSword adderall${NC}"
+        return 1
+    fi
+
+    local to_install=""
+    command -v clang &>/dev/null    || { [ "$pkg_manager" != "brew" ] && to_install="$to_install clang"; }
+    command -v dpkg-deb &>/dev/null || to_install="$to_install dpkg"
+    command -v git &>/dev/null      || to_install="$to_install git"
+    command -v python3 &>/dev/null  || to_install="$to_install python3"
+    command -v ssh &>/dev/null      || { [ "$pkg_manager" = "apt" ] && to_install="$to_install openssh-client"; }
+    command -v idevice_id &>/dev/null || {
+        [ "$pkg_manager" = "apt" ]    && to_install="$to_install libimobiledevice-utils"
+        [ "$pkg_manager" = "brew" ]   && to_install="$to_install libimobiledevice"
+        [ "$pkg_manager" = "pacman" ] && to_install="$to_install libimobiledevice"
+    }
+
+    if [ -n "$to_install" ]; then
+        echo -e "  ${C_AMB}Installing missing packages:${NC} ${C_RED}${to_install}${NC}"
+        echo -e "  ${C_DIM}  (automatic — adderall never asks about dependencies)${NC}"
+        start_pulse "installing packages" & PULSE_PID=$!
+        case "$pkg_manager" in
+            apt)    apt update -qq >/dev/null 2>&1; apt install -y $to_install >/dev/null 2>&1 || true;;
+            brew)   brew install $to_install >/dev/null 2>&1 || true;;
+            pacman) pacman -Sy --noconfirm $to_install >/dev/null 2>&1 || true;;
+        esac
+        stop_pulse
+        command -v idevice_id &>/dev/null && ok "libimobiledevice ready — USB device detection active"
+    else
+        ok "All system packages present"
+    fi
+
+    # THEOS
+    if check_theos; then
+        ok "THEOS found at ${THEOS}"
+    else
+        echo -e "  ${C_AMB}Installing THEOS automatically...${NC}"
+        bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" >/dev/null 2>&1 || true
+        if [ "$IS_MACOS" -eq 1 ] && ! check_theos; then
+            $SUDO mkdir -p /opt/theos 2>/dev/null || true
+            $SUDO chown "$(id -u)" /opt/theos 2>/dev/null || true
+            git clone --recursive https://github.com/theos/theos.git /opt/theos >/dev/null 2>&1 || true
+        fi
+        if check_theos; then
+            export THEOS="${THEOS}"
+            ok "THEOS installed at ${THEOS}"
+        else
+            warn "THEOS auto-install failed — follow BUILD.md, then re-run adderall"
+            return 1
+        fi
+    fi
+    echo ""
+
+    # ── Phase 2: Device Discovery ─────────────────────────────
+    section "Phase 2 — Device Discovery (computer → phone)"
     echo ""
 
     local usb_uuid=""
     if command -v idevice_id &>/dev/null; then
         usb_uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
         if [ -n "$usb_uuid" ]; then
+            # Auto-pair — first-time trust dialog appears ON THE PHONE
+            if ! idevicepair validate 2>/dev/null | grep -q "paired"; then
+                echo -e "  ${C_AMB}Pairing with device — tap TRUST on the phone if it asks${NC}"
+                start_pulse "pairing" & PULSE_PID=$!
+                idevicepair pair 2>/dev/null || true
+                stop_pulse
+                sleep 1
+            fi
             echo -e "  ${C_GRN}✓${NC} USB device detected: ${C_EYE}$usb_uuid${NC}"
             DEV_MODEL=$(ideviceinfo -k HardwareModel 2>/dev/null || echo "unknown")
             IOS_VER=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
             DEV_NAME=$(ideviceinfo -k DeviceName 2>/dev/null || echo "iPhone")
             vlog "ideviceinfo: model=$DEV_MODEL ios=$IOS_VER name=$DEV_NAME"
-
-            # Try to pair
-            if ! ideviceinfo -k ProductVersion &>/dev/null; then
-                echo -e "  ${C_AMB}⚠${NC} Device needs pairing..."
-                start_pulse "pairing" & PULSE_PID=$!
-                idevicepair pair 2>/dev/null || true
-                stop_pulse
-                IOS_VER=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
-            fi
+            [ -z "$IOS_VER" ] && echo -e "  ${C_AMB}⚠${NC} Couldn't read device info yet — tap TRUST on the phone, then re-run adderall"
+        else
+            echo -e "  ${C_DIM}No USB device found — checking saved WiFi devices...${NC}"
         fi
     fi
 
@@ -1163,7 +1523,7 @@ EOF
         IP=$(get_device_ip)
         if [ -n "$IP" ]; then
             echo -e "  ${C_GRN}✓${NC} Saved device: ${C_EYE}$IP${NC}"
-            if ping -c1 -W1 "$IP" >/dev/null 2>&1; then
+            if ping_check "$IP"; then
                 echo -e "  ${C_GRN}✓${NC} Device online via WiFi"
                 IOS_VER=$(ssh_safe "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
                 DEV_MODEL=$(ssh_safe "root@$IP" "sysctl -n hw.machine" 2>/dev/null || echo "")
@@ -1178,7 +1538,9 @@ EOF
     fi
 
     if [ -z "$IOS_VER" ]; then
-        echo -e "  ${C_RED}✗ No device found — connect via USB or configure SSH IP${NC}"
+        echo -e "  ${C_RED}✗ No device found${NC}"
+        echo -e "  ${C_DIM}  1. Plug the phone in with a USB cable and tap TRUST on the phone${NC}"
+        echo -e "  ${C_DIM}  2. Or: ./W0lfSword device add <phone-ip>  (phone needs OpenSSH + WiFi)${NC}"
         return 1
     fi
 
@@ -1202,18 +1564,37 @@ EOF
         echo -e "  ${C_DIM}  Remember: W0lfSword does not install Filza. Get it from TrollStore or your package manager.${NC}"
     fi
 
-    # Determine SoC CPU family for exploit method
-    case "$DEV_MODEL" in
-        iPhone1[0-6],*|iPad1[3-6],*) CPU_FAMILY="A12-A16" EXPLOIT_METHOD="pe_v1";;
-        iPhone17,*)                 CPU_FAMILY="A17" EXPLOIT_METHOD="pe_v1";;
-        iPhone18,*)                 CPU_FAMILY="A18" EXPLOIT_METHOD="pe_v2";;
-        *)                          CPU_FAMILY="unknown" EXPLOIT_METHOD="auto";;
-    esac
+    # Determine SoC CPU family for exploit method (shared selector, K1.7/K3.3)
+    EXPLOIT_METHOD=$(select_exploit "$DEV_MODEL")
+    CPU_FAMILY=$(soc_family "$DEV_MODEL")
     echo -e "  CPU: ${C_EYE}$CPU_FAMILY${NC}  •  Exploit: ${C_AMB}$EXPLOIT_METHOD${NC}"
+    if [ "$EXPLOIT_METHOD" = "puaf" ]; then
+        warn "A9-A11 device — PUAF fallback not ported yet (ROADMAP K1.6/F1)"
+        echo -e "  ${C_DIM}Continuing with the standard build; the kernel stage will refuse to run.${NC}"
+    elif [ "$EXPLOIT_METHOD" = "unknown" ]; then
+        warn "Unknown SoC for model $DEV_MODEL — exploit method falls back to 'auto'"
+        EXPLOIT_METHOD="auto"
+    fi
 
-    # ── Phase 2: Environment Check ───────────────────────────
+    # ── Phase 3: USB cable check ──────────────────────────────
+    if [ -n "$usb_uuid" ]; then
+        echo ""
+        section "Phase 3 — USB Cable Check"
+        echo ""
+        test_usb_cable "$usb_uuid" || {
+            if [ -z "$IP" ]; then
+                err "USB is the only connection here — fix the cable/port, then re-run adderall"
+                return 1
+            fi
+            echo -e "  ${C_DIM}Continuing over WiFi (device $IP) — deploys go over the network.${NC}"
+        }
+    else
+        echo -e "  ${C_DIM}(no USB device — cable check skipped, using $([ -n "$IP" ] && echo "WiFi" || echo "USB later"))${NC}"
+    fi
+
+    # ── Phase 4: Environment (on this computer) ───────────────
     echo ""
-    section "Phase 2 — Environment (on this computer)"
+    section "Phase 4 — Environment (on this computer)"
     echo ""
     local missing=""
     check_theos || missing="$missing theos"
@@ -1224,25 +1605,8 @@ EOF
     if [ -z "$missing" ]; then
         echo -e "  ${C_GRN}✓${NC} All build tools present"
     else
-        echo -e "  ${C_AMB}⚠ Missing:${C_RED}$missing${NC}"
-        if confirm "Install missing packages?"; then
-            apt update -qq 2>/dev/null
-            apt install -y clang lld dpkg theos 2>/dev/null || true
-            echo -e "  ${C_GRN}✓${NC} Installation attempted — re-run doctor to verify"
-        fi
-    fi
-
-    # Attempt USB pairing
-    if [ -n "$usb_uuid" ]; then
-        if idevicepair validate 2>/dev/null | grep -q 'paired'; then
-            echo -e "  ${C_GRN}✓${NC} USB pairing valid"
-        else
-            echo -e "  ${C_AMB}⚠${NC} USB not paired — running idevicepair pair..."
-            start_pulse "pairing" & PULSE_PID=$!
-            idevicepair pair 2>/dev/null || true
-            stop_pulse
-            echo -e "  ${C_GRN}✓${NC} Pairing done"
-        fi
+        echo -e "  ${C_RED}✗ Missing:${C_RED}$missing${NC}"
+        echo -e "  ${C_DIM}  Phase 1 should have installed these — see BUILD.md for manual steps.${NC}"
     fi
 
     # SSH check (WiFi)
@@ -1254,7 +1618,7 @@ EOF
 
     # ── Phase 3: Offset Check ────────────────────────────────
     echo ""
-    section "Phase 3 — Offset Coverage (on this computer)"
+    section "Phase 5 — Offset Coverage (on this computer)"
     echo ""
 
     # offsets.m uses >= thresholds (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO).
@@ -1262,11 +1626,11 @@ EOF
     local highest_th=""
     while IFS= read -r th; do
         [ -z "$th" ] && continue
-        if [ "$(printf '%s\n%s\n' "$th" "$IOS_VER" | sort -V | head -1)" = "$th" ]; then
+        if [ "$(version_sort_first "$th" "$IOS_VER")" = "$th" ]; then
             highest_th="$th"
         fi
     done < <(grep -o 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"[0-9.]*")' kexploit/offsets.m \
-             | sed 's/.*(@"\([0-9.]*\)").*/\1/' | sort -uV)
+             | sed 's/.*(@"\([0-9.]*\)").*/\1/' | sort -u -t. -k1,1n -k2,2n -k3,3n)
 
     if [ -n "$highest_th" ]; then
         echo -e "  ${C_GRN}✓${NC} iOS $IOS_VER is covered — offsets apply from iOS ${C_EYE}$highest_th${NC} onward"
@@ -1275,7 +1639,7 @@ EOF
     fi
 
     # DarkSword itself is capped: patched in iOS 26.1 (CVE-2025-43520).
-    if [ "$(printf '%s\n26.1\n' "$IOS_VER" | sort -V | head -1)" = "26.1" ]; then
+    if [ "$(version_sort_first "$IOS_VER" "26.1")" = "26.1" ]; then
         echo -e "  ${C_AMB}⚠${NC} DarkSword kernel exploit is capped at iOS 26.0.1 — patched in 26.1"
         echo -e "  ${C_DIM}On iOS 26.1+ the kernel stage will refuse to run; safe mode and the"
         echo -e "  ${C_DIM}userspace container access (MCM) still work. See SandboxEscape.md.${NC}"
@@ -1307,7 +1671,7 @@ EOF
 
     # ── Phase 4: Configuration ───────────────────────────────
     echo ""
-    section "Phase 4 — Configuration (on this computer)"
+    section "Phase 6 — Configuration (on this computer)"
     echo ""
 
     local TARGET_BUNDLE="com.tigisoftware.Filza"
@@ -1367,7 +1731,7 @@ EOF
 
     # ── Phase 5: Build → Deploy → Verify ─────────────────────
     echo ""
-    section "Phase 5 — Build, Deploy, Verify (computer → phone)"
+    section "Phase 7 — Build, Deploy, Verify (computer → phone)"
     echo ""
 
     stage "1/5" "Building... (on this computer)"
@@ -1417,7 +1781,7 @@ EOF
         return 0
     fi
     local dots=""
-    for i in $(seq 1 12); do
+    for ((i=0; i<12; i++)); do
         dots+="."
         printf "\r  ${C_EYE}[3/5]${NC} Waiting for exploit${dots}"
         sleep 1
@@ -1613,30 +1977,57 @@ In plain English: this installs build tools on THIS COMPUTER (clang, dpkg,
 THEOS, SSH). Nothing is installed on the phone. The phone only needs to be
 jailbroken, have OpenSSH running, and have Filza already installed.
 EOF
-    if [ "$EUID" -ne 0 ]; then
+    # Linux needs root for apt; macOS must NOT be root for brew (brew
+    # refuses to run as root) — sudo is only used for /opt/theos there.
+    if [ "$EUID" -ne 0 ] && [ "$IS_MACOS" -eq 0 ]; then
         err "Run with sudo: sudo ./W0lfSword setup"
         return 1
     fi
+    local SUDO=""
+    if [ "$IS_MACOS" -eq 1 ]; then
+        [ "$EUID" -ne 0 ] && SUDO="sudo"
+    fi
     
     local pkg_manager=""
-    if command -v apt &>/dev/null; then pkg_manager="apt"
-    elif command -v brew &>/dev/null; then pkg_manager="brew"
+    if [ "$IS_MACOS" -eq 1 ]; then pkg_manager="brew"
+    elif command -v apt &>/dev/null; then pkg_manager="apt"
     elif command -v pacman &>/dev/null; then pkg_manager="pacman"
     else err "No supported package manager (apt/brew/pacman)"; hint "Install clang, dpkg, ssh, git, python3 and THEOS manually — see BUILD.md"; return 1; fi
-    
-    echo -e "  ${C_DIM}Detected: ${C_EYE}${pkg_manager}${NC}"
+
+    echo -e "  ${C_DIM}Detected: ${C_EYE}$OS_NAME — ${pkg_manager}${NC}"
     echo ""
-    
+
+    # macOS: clang comes from Xcode Command Line Tools, not brew.
+    if [ "$IS_MACOS" -eq 1 ]; then
+        if ! xcode-select -p &>/dev/null; then
+            echo -e "  ${C_AMB}⚠ Xcode Command Line Tools not found${NC}"
+            echo -e "  ${C_DIM}  → Install them first (provides clang + the iPhoneOS SDK):${NC}"
+            echo -e "  ${C_DIM}    xcode-select --install${NC}"
+            echo ""
+            hint "Re-run 'sudo ./W0lfSword setup' after the install finishes."
+            return 1
+        fi
+        if ! xcrun --sdk iphoneos --show-sdk-path &>/dev/null 2>&1; then
+            warn "iPhoneOS SDK not visible — open Xcode once or install the iOS SDK"
+            hint "xcrun --sdk iphoneos --show-sdk-path should print a path."
+        else
+            ok "Xcode iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)"
+        fi
+        echo ""
+    fi
+
     local to_install=""
-    command -v clang &>/dev/null || to_install="$to_install clang"
+    command -v clang &>/dev/null || { [ "$IS_MACOS" -eq 0 ] && to_install="$to_install clang"; }
     command -v dpkg-deb &>/dev/null || to_install="$to_install dpkg"
-    command -v ssh &>/dev/null || to_install="$to_install openssh-client"
     command -v git &>/dev/null || to_install="$to_install git"
     command -v python3 &>/dev/null || to_install="$to_install python3"
-    
-    # idevice tools (Linux only via apt)
+
+    # idevice tools + ssh: platform-specific package names
     if [ "$pkg_manager" = "apt" ]; then
+        command -v ssh &>/dev/null || to_install="$to_install openssh-client"
         command -v idevice_id &>/dev/null || to_install="$to_install libimobiledevice-utils"
+    elif [ "$pkg_manager" = "brew" ]; then
+        command -v idevice_id &>/dev/null || to_install="$to_install libimobiledevice"
     fi
     
     if [ -n "$to_install" ]; then
@@ -1659,11 +2050,25 @@ EOF
         ok "THEOS found at ${THEOS}"
     else
         echo -e "  ${C_AMB}⚠ THEOS not found${NC}"
-        if confirm "Install THEOS to ~/theos?"; then
-            bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" 2>/dev/null
-            export THEOS="$HOME/theos"
-            ok "THEOS installed"
-            hint "The export only lasts for this session — add 'export THEOS=~/theos' to your shell rc for future runs."
+        if confirm "Install THEOS?"; then
+            if [ "$IS_MACOS" -eq 1 ]; then
+                # macOS: /opt/theos is the default theos.dev location
+                if command -v brew &>/dev/null && [ ! -d /opt/theos ]; then
+                    bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" 2>/dev/null \
+                        && export THEOS=/opt/theos \
+                        || { $SUDO mkdir -p /opt/theos && $SUDO chown "$(id -u)" /opt/theos && git clone --recursive https://github.com/theos/theos.git /opt/theos && export THEOS=/opt/theos; }
+                else
+                    bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" 2>/dev/null \
+                        && export THEOS=/opt/theos
+                fi
+                ok "THEOS installed at ${THEOS:-/opt/theos}"
+                hint "Add 'export THEOS=/opt/theos' to ~/.zshrc (macOS) for future runs."
+            else
+                bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" 2>/dev/null
+                export THEOS="$HOME/theos"
+                ok "THEOS installed"
+                hint "The export only lasts for this session — add 'export THEOS=~/theos' to your shell rc for future runs."
+            fi
         fi
     fi
     
@@ -1706,7 +2111,7 @@ EOF
 cmd_export() {
     local outfile="${1:-w0lfsword_export_$(date +%Y%m%d_%H%M%S).zip}"
     case "$outfile" in /*) : ;; *) outfile="$PROJECT_DIR/$outfile" ;; esac
-    local tmpdir; tmpdir=$(mktemp -d)
+    local tmpdir; tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/w0lfsword.XXXXXX" 2>/dev/null || mktemp -d)
     
     echo -e "  ${C_DIM}Collecting debug data...${NC}"
     
@@ -1751,12 +2156,15 @@ explain_text() {
         adderall)
             cat <<'EOF'
 adderall — the everything command.
-  1. Finds your phone over USB or WiFi
-  2. Checks your iOS version is supported by the offset table
-  3. Compiles the tweak ON THIS COMPUTER (Theos + clang)
-  4. Copies the .deb to the phone and installs it (needs OpenSSH on the phone)
-  5. Restarts Filza and waits ~12s while the kernel exploit runs
-  6. Reads the phone's log and tells you if the sandbox escaped
+  1. Installs missing build tools AUTOMATICALLY (clang, dpkg, THEOS,
+     libimobiledevice) — zero questions
+  2. Finds your phone over USB or WiFi and pairs it (tap TRUST on the phone)
+  3. Tests the USB cable (10 rapid reads — warns if it's flaky)
+  4. Checks your iOS version is supported by the offset table
+  5. Compiles the tweak ON THIS COMPUTER (Theos + clang)
+  6. Copies the .deb to the phone and installs it (needs OpenSSH on the phone)
+  7. Restarts Filza and waits ~12s while the kernel exploit runs
+  8. Reads the phone's log and tells you if the sandbox escaped
 
   It does NOT install Filza (you sideload that yourself), and it does
   NOT jailbreak the phone (that must already be done). Everything it
@@ -1863,18 +2271,21 @@ EOF
 usbliter8 (ul8) — A12/A13 tethered jailbreak toolkit.
   Launches the usbliter8-arctic TUI: guided hardware setup, offset profile
   management, CFW builder, PWN DFU checks, health check, and post-boot
-  setup (SSH/VNC/Sileo). Needs an RP2350 board + Linux + root.
+  setup (SSH/VNC/Sileo). Needs an RP2350 board + root (Linux tested,
+  macOS supported via brew-installed tools; pyusb required).
   TETHERED: the board must re-exploit the device on every cold boot.
   Flashing CFW ERASES all data — back up first.
 EOF
             ;;
         tweaks)
             cat <<'EOF'
-tweaks — the tweak catalog.
-  Lists the customization tweaks W0lfSword will install (5-icon dock,
-  custom icons, hide home bar...), each with its iOS/SoC range and the
-  exploit it needs. Installation itself is planned (ROADMAP K3.2/K3.3):
-  the installer will pick the right exploit for your device automatically.
+tweaks — the tweak catalog + installer.
+  'tweaks' lists every catalog tweak with its iOS/SoC range and required
+  exploit. 'tweaks install <id>' compiles the tweak's Logos template with
+  Theos, checks your device's iOS + chip against the catalog (K3.3/K3.4),
+  installs the .deb over SSH, and resprings SpringBoard.
+  Exploit selection is automatic: A12-A17 → DarkSword pe_v1, A18 → pe_v2,
+  A10-A11 → PUAF fallback (pending port), anything else refuses cleanly.
 EOF
             ;;
         help)
@@ -1946,7 +2357,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "monitor (m)"  "Real-time log tail"
     printf "  ${C_EYE}%-14s${NC} %s\n" "clean (c)"    "Clean build artifacts"
     printf "  ${C_EYE}%-14s${NC} %s\n" "targets (t)"  "Supported apps"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "tweaks (tw)"  "Tweak catalog (installer planned)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "tweaks (tw)"  "Tweak catalog — 'tweaks install <id>' builds + deploys"
     echo ""
     section "Analysis & Config"
     printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check"

@@ -25,12 +25,17 @@ echo ""
 
 # Check THEOS
 if [ -z "$THEOS" ]; then
-    if [ -d "$HOME/theos" ]; then
-        export THEOS="$HOME/theos"
-        echo "[!] THEOS not set, using $THEOS"
-    else
-        echo "[ERROR] THEOS environment variable not set and ~/theos not found."
-        echo "        Install Theos: https://theos.dev/"
+    for d in "$HOME/theos" /opt/theos /usr/local/theos \
+             /opt/homebrew/theos /opt/homebrew/share/theos; do
+        if [ -d "$d/makefiles" ]; then
+            export THEOS="$d"
+            echo "[!] THEOS not set, using $THEOS"
+            break
+        fi
+    done
+    if [ -z "$THEOS" ]; then
+        echo "[ERROR] THEOS environment variable not set and no common install found."
+        echo "        Install Theos: https://theos.dev/ (macOS: /opt/theos, Linux: ~/theos)"
         exit 1
     fi
 fi

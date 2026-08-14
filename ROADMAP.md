@@ -24,11 +24,12 @@
 ## 0.2 — Device/research work (needs iOS 26.1+ hardware or kernelcache)
 
 > **v1.0 scope note:** these are post-v1.0 research items, NOT release blockers.
-> v1.0 ships for iOS 17.0–26.0.1 (A10–A18, M1–M4). K4.1/K4.7/K4.8/K5.6 all need
-> a 26.1+ device or kernelcache we don't have yet — they stay open as documented
-> future research.
+> v1.0 ships for iOS 17.0–26.0.1 (A10–A18, M1–M4). K4.7/K4.8/K5.6 need a 26.1+
+> device (K4.1's kernelcache work is done — see tools/xpf-cli) — they stay open
+> as documented future research.
 
-- [ ] `K4.1` 🔴 — Verify 26.1 kernel struct offsets (sandbox, MACF label) vs 26.0.1 — pull 26.1 kernelcache, run XPF, add offsets.m block if shifted
+- [x] `K4.1` 🔴 — Verify 26.1 kernel struct offsets (sandbox, MACF label) vs 26.0.1 — pull 26.1 kernelcache, run XPF, add offsets.m block if shifted
+  _Done 2026-08-14: XPF diff of 26.0.1 vs 26.1 (iPhone18,1 kc) — structs identical, no new block needed. See K4.1 in Section K4._
 - [ ] `K4.7` 🔴 — Reproduce CVE-2025-46285 (kernel root privesc on 26.1, integer overflow in 64-bit timestamps) — diff 26.1 vs 26.2 kernelcaches around timestamp handling
 - [ ] `K4.8` 🔴 — Exploit CVE-2025-43539 (AppleJPEG memory corruption on 26.1) — point the K4.2 fuzzer at AppleJPEG decode paths
 - [ ] `K4.2` 🟠 — Build the ImageIO fuzzing harness (referenceforAI/CVE-2025-43300-hunters analyzer + hex_modifier + Filza viewer crash capture)
@@ -37,7 +38,8 @@
 
 - [ ] `K4.10` 🟡 — Port bad_query containermanagerd traversal into W0lfSword as 26.1+ userspace read-escape module (works 26.0–26.6.1, unpatched)
 - [ ] `K4.12` 🟡 — MobileHouseArrest re-sign mode: optional build producing an MHA-identity Filza IPA for pre-exploit container access
-- [ ] `K3.2` 🟠 — Tweak installer backend (build dylib from templates/catalog, deploy via existing pipeline) — unlocks the tweak menu
+- [x] `K3.2` 🟠 — Tweak installer backend (build dylib from templates/catalog, deploy via existing pipeline) — unlocks the tweak menu
+  _Done 2026-08-14: see K3.2 in Section K3 — build_tweak.sh + 3 templates + `tweaks install <id>`._
 
 ---
 
@@ -196,8 +198,11 @@
 - [ ] `A6.14` 🟢 — Makefile: kexploit/sandbox_backup.m dead code not compiled
 - [ ] `A6.15` 🟢 — kutils.h:29 `amfi_cslot_get` declared but never defined
 - [ ] `A6.16` 🟢 — xpaci.h: double #include <stdbool.h> (lines 2-3)
-- [ ] `A6.17` 🟢 — W0lfSword: `seq` not on macOS → hline/section broken output
+- [x] `A6.17` 🟢 — W0lfSword: `seq` not on macOS → hline/section broken output  
+  _Done 2026-08-14: replaced seq with bash-native repeat_char() loops. Full macOS audit in A6.21._
 - [ ] `A6.18` 🟢 — W0lfSword: `sleep 0.05` (fractional) doesn't work on busybox
+- [x] `A6.21` 🟠 — Full macOS support for the W0lfSword script + assets  
+  _Done 2026-08-14: platform detection (IS_MACOS) + portable helpers replacing GNU-isms — repeat_char (seq), ping_check (macOS -W is ms, not s), version_sort_first (no sort -V), sort -u -t. k1,1n..., mktemp template, eval-tilde instead of getent. cmd_setup: brew-aware packages (libimobiledevice, dpkg; clang via Xcode CLT with xcode-select gate), no-sudo brew path with $SUDO only for /opt/theos, theos at /opt/theos + Homebrew paths in check_theos. cmd_doctor: Xcode iPhoneOS SDK check. adderall Phase 2: OS-aware installer. usbliter8 hints, dpkg hint, build_and_extract.sh THEOS detection, BUILD.md + README updated._
 - [ ] `A6.19` 🟢 — krw.m + vnode_research.m: debug functions with no #ifdef guards
 - [ ] `A6.20` 🟢 — build_and_extract.sh: missing pipefail → silent build failures
 
@@ -845,6 +850,9 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [ ] `K2.9` 🟡 — Guided full installer: `./W0lfSword install` wizard that handles EVERYTHING  
   _Prompt: "Upgrade cmd_setup into a guided installer. Steps: (1) detect the OS (macOS / Debian / Arch / Fedora) and pick the right package-manager commands, (2) install THEOS + the correct iOS SDK for that platform, (3) install sideloading tooling (libimobiledevice, AltServer/SideStore-style IPA install hints, TrollStore links), (4) optionally download/point to Filza IPA and side-load it, (5) deploy W0lfSword tweak, (6) offer the tweak menu (K3). Show a summary of what WILL be installed before doing anything, and respect --yes. Note: `install` currently aliases cmd_setup (tools only) — this item turns it into the full guided experience."_
 
+- [x] `K2.10` 🟠 — adderall zero-question setup: auto-install deps, auto-pair, USB cable test  
+  _Done 2026-08-14: adderall reorganized — Phase 1 auto-installs clang/dpkg/git/python3/libimobiledevice + THEOS with NO prompts (apt/brew/pacman; macOS Xcode CLT gate with dialog note); Phase 2 discovery auto-pairs via idevicepair (TRUST hint); new Phase 3 test_usb_cable() does 10 rapid usbmuxd reads and scores the cable (good/flaky/bad with MFI-cable guidance, blocks USB-only runs on a bad cable); old env-check became Phase 4 informational. macOS no longer requires root (brew refuses root; $SUDO only for /opt/theos). Phases renumbered 1-7._
+
 ## K3 — Tweak Menu (choose a tweak from the CLI and install it)
 
 > **Goal:** Inside the main W0lfSword script, pick a tweak (5-icon dock, custom
@@ -855,14 +863,14 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `K3.1` 🟠 — Add a `tweaks` subcommand listing the available tweak catalog  
   _Done 2026-08-13: tweaks/catalog.json with 6 seed entries (5-icon dock, custom icons, hide home bar, badge colors, passcode theming, hide dock) each with iOS/SoC range, required exploit, substrate target, status. cmd_tweaks renders a colored table; wired to `./W0lfSword tweaks`, menu shortcut `tw`, help, and explain. Installer backend is K3.2._
 
-- [ ] `K3.2` 🟠 — Tweak installer backend: build dylib from template + install via MobileSubstrate  
-  _Prompt: "Create tweaks/templates/<name>.xm plus a build script that compiles a SpringBoard-targeting dylib with Theos, packages it, deploys via the existing deploy pipeline, and adds a Substrate plist filtering com.apple.springboard."_
+- [x] `K3.2` 🟠 — Tweak installer backend: build dylib from template + install via MobileSubstrate  
+  _Done 2026-08-14: tweaks/build_tweak.sh generates a Theos project (Makefile, control, Filter.plist → com.apple.springboard) from tweaks/templates/*.xm, builds with FINALPACKAGE=1 DEBUG=0, verifies dylib+plist in the .deb, outputs to tweaks/packages/. W0lfSword `tweaks install <id>` wires it to the deploy pipeline (scp + dpkg + respring). Three templates compile end-to-end (five_icon_dock, hide_home_bar, hide_dock)._
 
-- [ ] `K3.3` 🟠 — Auto-pick the right exploit for the connected device before installing a tweak  
-  _Prompt: "In the tweak install flow, query the device iOS/SoC, consult the per-tweak 'required exploit' field, then run the exploit selector (K1.7): A12-A17 → DarkSword pe_v1, A18 → pe_v2, A10-A11 → PUAF fallback, else refuse with a clear message."_
+- [x] `K3.3` 🟠 — Auto-pick the right exploit for the connected device before installing a tweak  
+  _Done 2026-08-14: shared select_exploit()/soc_family() (also used by adderall now): A12-A16/A17/M1-M4 → pe_v1, A18 → pe_v2, A9-A11 → puaf (refused with "PUAF port pending — K1.6"), unknown → refuse. Installer checks the tweak's required_exploit against the selected method, blocks darksword tweaks on iOS 26.1+ (DarkSword cap), and validates ios_min/max + SoC set before building. Fixed a latent case-pattern bug where iPhone10,* (A11) matched iPhone1[0-6],*._
 
-- [ ] `K3.4` 🟡 — Tweak catalog format with compatibility + required capabilities  
-  _Prompt: "Design tweaks/catalog.json schema: id, name, description, ios_min, ios_max, socs, required_exploit (darksword/puaf/checkm8/userspace), files_modified, dylib_template, substrate_target (springboard/filza/etc). Include 3 seed entries."_
+- [x] `K3.4` 🟡 — Tweak catalog format with compatibility + required capabilities  
+  _Done 2026-08-14: tweaks/catalog.json schema v1 — id, name, description, ios_min, ios_max, socs, required_exploit (darksword/puaf/checkm8/userspace), files_modified, dylib_template, substrate_target, status. 6 entries: 3 available (with templates), 3 planned._
 
 - [ ] `K3.5` 🟡 — SpringBoard injection path (excalibur technique) as tweak delivery mechanism  
   _Prompt: "Study referenceforAI/projects/excalibur (Springboard injection TODO list) and kexploit/RemoteCall.m. Implement injecting a dylib into SpringBoard via DarkSword thread hijack, so tweaks can apply without a jailbreak-level substrate."_
@@ -881,8 +889,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 ## K4 — iOS 26.1 Sandbox Escape Research (see referenceforAI/SandboxEscape.md)
 
-- [ ] `K4.1` 🔴 — Verify 26.1 kernel struct offsets (sandbox, MACF label) vs 26.0.1  
-  _Prompt: "Pull the iOS 26.1 kernelcache, run XPF, diff struct sandbox / label offsets against kexploit/offsets.m 26.0 blocks. Add a 26.1 block if anything shifted. Guard against wrong offsets before any kwrite (reuse the A1.14 kstackptr-style validation)."_
+- [x] `K4.1` 🔴 — Verify 26.1 kernel struct offsets (sandbox, MACF label) vs 26.0.1  
+  _Done 2026-08-14 (offline, kernelcache): pulled iPhone18,1 (T8150) kernelcaches for 26.0.1 (23A355, xnu-12377.2.9) and 26.1 (23B85, xnu-12377.42.6) via ranged IPSW downloads from the Apple CDN. Built a host-side XPF resolver (tools/xpf-cli — Linux shims for xpc/mach-o/compression/CommonCrypto, SIGSEGV-guarded item resolution, SPTM-aware) and diffed all 64 resolvable items. Struct constants IDENTICAL: proc.struct_size 0x748, task.itk_space 0x310, vm_map.pmap 0x40, thread.machine_CpuDatap 0x1a0, nsysent 0x22e — so the offsets.m 26.0.x block applies to 26.1, no new block needed (documented at offsets.m gate). Gate stays CLOSED: DarkSword patched in 26.1; A1.14 kstackptr validation guards the flip when a new primitive lands (K5.6). FLAGGED: XPF task.itk_space=0x310 on T8150 arm64e vs 0x318 in offsets.m (SE3-verified) — possible per-SoC delta, needs on-device confirmation._
 
 - [ ] `K4.2` 🟠 — Build the ImageIO fuzzing harness (SandboxEscape.md Phase 1)  
   _Prompt: "Using referenceforAI/projects/CVE-2025-43300-hunters (dng_vulnerability_analyzer.py, hex_modifier.py, dng_images corpus), build research/imageio_fuzz.sh that: mutates DNG/HEIF/TIFF headers, pushes samples to the phone, opens them via Filza's viewer, and collects crash logs from /tmp/FilzaTweak.log. Flag any unique panic signature."_
@@ -977,7 +985,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | A2 — Filza Compatibility | 11 | 3 | 8 |
 | A3 — Kernel Exploit Robustness | 22 | 10 | 12 |
 | A5 — SSV & Sandbox Stability | 10 | 4 | 6 |
-| A6 — Production Readiness (new) | 20 | 8 | 12 |
+| A6 — Production Readiness (new) | 21 | 10 | 11 |
 | B1 — Multi-App Support | 4 | 0 | 4 |
 | B2 — Runtime Control | 3 | 1 | 2 |
 | B3 — Power User Features | 7 | 0 | 7 |
@@ -1009,13 +1017,13 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | J7 — Polish | 3 | 1 | 2 |
 | J8 — Beta UX (new) | 6 | 0 | 6 |
 | K1 — Exploit Menu | 11 | 4 | 7 |
-| K2 — Beginner-Friendly Reform | 9 | 8 | 1 |
-| K3 — Tweak Menu | 9 | 1 | 8 |
-| K4 — iOS 26.1 Sandbox Escape Research | 13 | 1 | 12 |
+| K2 — Beginner-Friendly Reform | 10 | 9 | 1 |
+| K3 — Tweak Menu | 9 | 4 | 5 |
+| K4 — iOS 26.1 Sandbox Escape Research | 13 | 2 | 11 |
 | K5 — Exploit Chains | 9 | 2 | 7 |
 | V1 — v1.0 Release | 3 | 3 | 0 |
-| **TOTAL** | **234** | **84** | **150** |
+| **TOTAL** | **236** | **91** | **145** |
 
 ---
 
-*Last updated: 2026-08-14 — v1.0.0 release: FINALPACKAGE gating + verified .deb, README Known Issues, version plumbing, V1 section closed*
+*Last updated: 2026-08-14 — K4.1 closed: XPF offline diff of 26.0.1 vs 26.1 kernelcaches (tools/xpf-cli) — structs identical, offsets.m 26.0.x block applies; task.itk_space 0x310-vs-0x318 discrepancy flagged for on-device check*
