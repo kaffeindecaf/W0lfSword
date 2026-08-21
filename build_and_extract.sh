@@ -8,10 +8,10 @@
 #   Compiles the tweak via Theos, then extracts the .dylib from
 #   the resulting .deb package for inspection or standalone use.
 
-set -e
+set -euo pipefail
 
 KEEP_TEMP=0
-if [ "$1" = "--keep-temp" ]; then
+if [ "${1:-}" = "--keep-temp" ]; then
     KEEP_TEMP=1
 fi
 
@@ -48,7 +48,11 @@ fi
 
 # Step 1: Build
 echo "[1/5] Building tweak..."
-make package 2>&1 | tail -3
+if ! make package 2>&1 | tail -3; then
+    echo "[ERROR] Build failed — see output above"
+    echo "        Run './W0lfSword doctor' to check the toolchain."
+    exit 1
+fi
 echo ""
 
 # Step 2: Find the .deb

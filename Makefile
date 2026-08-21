@@ -9,7 +9,7 @@ TWEAK_NAME = FilzaApplySandboxExt
 FilzaApplySandboxExt_FILES = Tweak.m sandbox_escape.m TweakExploit.m
 
 # --- kexploit ---
-FilzaApplySandboxExt_FILES += kexploit/kexploit_opa334.m kexploit/krw.m kexploit/kutils.m kexploit/offsets.m kexploit/vnode.m kexploit/file.m kexploit/vnode_research.m kexploit/sandbox.m kexploit/Exception.m kexploit/Thread.m kexploit/VM.m kexploit/MigFilterBypassThread.m kexploit/RemoteCall.m kexploit/PAC.m kexploit/mcm_bridge.m kexploit/container_access.m 
+FilzaApplySandboxExt_FILES += kexploit/kexploit_opa334.m kexploit/krw.m kexploit/kutils.m kexploit/offsets.m kexploit/vnode.m kexploit/file.m kexploit/vnode_research.m kexploit/sandbox.m kexploit/Exception.m kexploit/Thread.m kexploit/VM.m kexploit/MigFilterBypassThread.m kexploit/RemoteCall.m kexploit/PAC.m kexploit/mcm_bridge.m kexploit/container_access.m kexploit/bad_query_escape.m 
 
 # --- SSV Bypass ---
 FilzaApplySandboxExt_FILES += SSV/SSVUtils.m
@@ -45,6 +45,20 @@ FilzaApplySandboxExt_LDFLAGS += -Wl,-S
 else
 FilzaApplySandboxExt_CFLAGS += -DDEBUG
 endif
+
+# MHA identity build (K4.12): re-signed Filza running as
+# com.apple.mobile.MobileHouseArrest gets pre-exploit container access.
+# Use:  make mha IPA=/path/Filza.ipa [OUT=Filza-MHA.ipa]
+ifeq ($(MHA_IDENTITY),1)
+FilzaApplySandboxExt_CFLAGS += -DMHA_IDENTITY
+endif
+
+MHA_DYLIB ?= $(shell ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
+mha:
+	$(MAKE) package MHA_IDENTITY=1
+	@test -n "$(MHA_DYLIB)" || { echo "  ✗ built dylib not found"; exit 1; }
+	@test -n "$(IPA)" || { echo "  ✗ usage: make mha IPA=/path/Filza.ipa [OUT=Filza-MHA.ipa]"; exit 1; }
+	bash scripts/re-sign_mha.sh "$(IPA)" "$(MHA_DYLIB)" "$(OUT)"
 
 FilzaApplySandboxExt_CCFLAGS = $(FilzaApplySandboxExt_CFLAGS)
 FilzaApplySandboxExt_OBJCFLAGS = $(FilzaApplySandboxExt_CFLAGS)

@@ -131,11 +131,12 @@ After a successful run, open Filza. The exploit fires within a second or two.
 | Retries | Up to 5 attempts with backoff; first-try failures are normal |
 | Sandbox escape | Patches Filza's kernel sandbox rules to `/` |
 | SSV bypass | vnode redirection makes `/System`, `/usr`, `/bin` writable |
-| Root ownership | New files in system paths get `root:wheel` |
+| Root ownership | New files in system paths get `root:wheel` — plus Filza itself runs as root via the posix_cred patch after escape (K4.13) |
 | Root helper bypass | Filza's XPC calls intercepted, no helper app |
 | License bypass | "Binary modified" / activation alerts suppressed |
 | Padlock bypass | Edit/delete always allowed, confirmation dialogs skipped |
 | Zip/unzip | Via Filza's own minizip, function pointers validated |
+| Userspace read escape | bad_query containermanagerd traversal (26.0–26.6.1) + MCM bridge — container reads even before the kernel exploit (K4.10/K4.11) |
 | Kill switch | `touch /var/mobile/Documents/.filza_tweak_disable` |
 | Logging | Everything in `/tmp/FilzaTweak.log` (4MB rotation) |
 
@@ -167,6 +168,12 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `doctor` | check your build environment | `./W0lfSword doctor` |
 | `status` | project health overview | `./W0lfSword status` |
 | `offsets [ver]` | offset coverage per iOS version | `./W0lfSword offsets 26.0` |
+| `exploits` | technique matrix: what works on your device (K1.5) | `./W0lfSword exploits` |
+| `poc list` | panic-PoC catalog (research only, crashes the phone) | `./W0lfSword poc list` |
+| `poc sep-panic [ip]` | build + deploy + fire the SEP panic PoC | `./W0lfSword poc sep-panic` |
+| `poc exr [ip]` | deploy the CVE-2026-28990 EXR ImageIO trigger | `./W0lfSword poc exr` |
+| `fuzz [cmd]` | ImageIO fuzz harness: mutate → push → open → crash capture (K4.2) | `./W0lfSword fuzz run --device 192.168.1.5` |
+| `mha <ipa>` | Re-sign Filza as MobileHouseArrest → pre-exploit container access (K4.12) | `./W0lfSword mha Filza.ipa` |
 | `tweaks [install <id>]` | SpringBoard tweak catalog + installer | `./W0lfSword tweaks install five_icon_dock` |
 | `device add\|list\|switch\|info` | manage multiple phones | `./W0lfSword device add 192.168.1.5` |
 | `profile save\|load\|list` | deploy configurations | `./W0lfSword profile save my-ip14` |
@@ -248,8 +255,9 @@ W0lfSword                    # CLI: menu, build, deploy, diagnostics
 ├── utils/                   # logging, permissions, hide/reveal
 ├── kpf/ + XPF/              # kernelcache grabber + offset patchfinder
 ├── tools/xpf-cli/           # host-side XPF resolver (26.1 offset diffs)
+├── pocs/                    # panic-PoC lab (sep_panic Theos tool, EXR trigger gen)
 ├── tweaks/                  # SpringBoard tweak catalog + installer
-├── research/                # sandbox struct notes
+├── research/                # sandbox struct notes + moreprojects deep dive
 └── docs/                    # guides and ADRs
 ```
 
@@ -306,11 +314,12 @@ a new sandbox escape for iOS 26.1, ImageIO memory corruption angle.
 
 ## More docs
 
-`CONTEXT.md` — project knowledge base, start here when resuming ·
+`CONTEXT.md` — project knowledge base, start here when resuming ·  
 `ROADMAP.md` — the task list · `BUG_BOUNTY.md` — security findings with Apple
-bounty ranges · `AUDIT_REPORT.md` — audit findings and fixes ·
+bounty ranges · `AUDIT_REPORT.md` — audit findings and fixes ·  
 `DEBUG_TRACKING.md` — every log statement mapped · `BUILD.md` — Theos setup
-and troubleshooting.
+and troubleshooting · `research/README.md` — index of research tooling and
+deep-dive docs (fuzz harness, AppleJPEG campaign, moreprojects analysis).
 
 ## License
 

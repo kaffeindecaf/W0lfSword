@@ -1,0 +1,101 @@
+#!/bin/bash
+# ═══════════════════════════════════════════════════════════════════
+#  re-sign_mha.sh — K4.12 MobileHouseArrest identity re-sign
+#
+#  Produces a Filza IPA whose bundle + CodeDirectory identifier is
+#  com.apple.mobile.MobileHouseArrest, with the W0lfSword tweak dylib
+#  injected. containermanagerd trusts that identity, so container
+#  leases activate WITHOUT any kernel exploit (works iOS 18–27b).
+#
+#  Usage: scripts/re-sign_mha.sh <Filza.ipa> <tweak.dylib> [out.ipa]
+#  Requires: ldid, python3, unzip, zip
+# ═══════════════════════════════════════════════════════════════════
+set -euo pipefail
+
+MHA_ID="com.apple.mobile.MobileHouseArrest"
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ADD_LC="$DIR/add-load-dylib.py"
+
+IPA="${1:-}"
+DYLIB="${2:-}"
+OUT="${3:-Filza-MHA.ipa}"
+[ -n "$IPA" ] && [ -f "$IPA" ] || { echo "  ✗ usage: re-sign_mha.sh <Filza.ipa> <tweak.dylib> [out.ipa]"; exit 1; }
+[ -f "$DYLIB" ] || { echo "  ✗ tweak dylib not found: $DYLIB (build first: make package, then extract W0lfSword.dylib)"; exit 1; }
+
+command -v ldid    >/dev/null || { echo "  ✗ ldid not found — install: apt install ldid (Linux) / brew install ldid (macOS)"; exit 1; }
+command -v python3 >/dev/null || { echo "  ✗ python3 not found"; exit 1; }
+command -v unzip   >/dev/null || { echo "  ✗ unzip not found"; exit 1; }
+command -v zip     >/dev/null || { echo "  ✗ zip not found"; exit 1; }
+
+TMP="$(mktemp -d /tmp/mha_resign_XXXXXX)"
+trap 'rm -rf "$TMP"' EXIT
+DYLIB_NAME="$(basename "$DYLIB")"
+
+echo "╔════════════════════════════════════════════════════════════╗"
+echo "║  MobileHouseArrest re-sign (K4.12)                          ║"
+echo "╚════════════════════════════════════════════════════════════╝"
+echo "  identity: $MHA_ID"
+echo "  ipa:      $IPA"
+echo "  dylib:    $DYLIB_NAME"
+echo ""
+
+# 1. Extract
+echo "[1/6] Extracting IPA..."
+( cd "$TMP" && unzip -q "$(cd "$(dirname "$IPA")" && pwd)/$(basename "$IPA")" )
+APP="$(find "$TMP" -maxdepth 3 -name '*.app' -type d | head -1)"
+[ -n "$APP" ] || { echo "  ✗ no .app bundle in IPA"; exit 1; }
+BIN="$APP/$(basename "$APP" .app)"
+[ -f "$BIN" ] || BIN="$(find "$APP" -maxdepth 1 -type f -perm -u+x | head -1)"
+[ -f "$BIN" ] || { echo "  ✗ main binary not found in $APP"; exit 1; }
+echo "  bundle: $(basename "$APP")  binary: $(basename "$BIN")"
+
+# 2. Inject the tweak dylib
+echo "[2/6] Injecting $DYLIB_NAME..."
+cp "$DYLIB" "$APP/$DYLIB_NAME"
+python3 "$ADD_LC" "$BIN" "$BIN.patched" "@executable_path/$DYLIB_NAME"
+mv "$BIN.patched" "$BIN"
+
+# 3. Re-bundle as MHA
+echo "[3/6] Setting bundle identifier → $MHA_ID"
+python3 - "$APP/Info.plist" "$MHA_ID" <<'PYEOF'
+import plistlib, sys
+path, ident = sys.argv[1], sys.argv[2]
+with open(path, "rb") as f:
+    d = plistlib.load(f)
+old = d.get("CFBundleIdentifier", "?")
+d["CFBundleIdentifier"] = ident
+with open(path, "wb") as f:
+    plistlib.dump(d, f)
+print(f"  CFBundleIdentifier: {old} -> {ident}")
+PYEOF
+
+# 4. Re-sign (CodeDirectory identifier must match the bundle id)
+echo "[4/6] Re-signing with ldid (identifier $MHA_ID)..."
+ldid -S -I "$MHA_ID" "$BIN"
+ldid -S "$APP/$DYLIB_NAME"
+# everything else that carries an executable bit gets an adhoc signature
+find "$APP" -type f -perm -u+x -exec ldid -S {} \; 2>/dev/null || true
+
+# 5. Repackage
+echo "[5/6] Repackaging..."
+OUTDIR="$(cd "$(dirname "$OUT")" 2>/dev/null && pwd || echo .)"
+OUTABS="$OUTDIR/$(basename "$OUT")"
+( cd "$TMP" && zip -q -r -y "$OUTABS" Payload )
+echo "  wrote: $OUTABS"
+OUT="$OUTABS"
+
+# 6. Verify + instructions
+echo "[6/6] Verify:"
+echo "  $(ls -lh "$OUT" | awk '{print $5}')  $(python3 - "$OUT" <<'PYEOF'
+import plistlib, sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+name = [n for n in z.namelist() if n.endswith('.app/Info.plist')][0]
+d = plistlib.loads(z.read(name))
+print("bundle id:", d.get("CFBundleIdentifier"))
+PYEOF
+)"
+echo ""
+echo "  Install on the phone (TrollStore or Sileo):"
+echo "    open Filza-MHA.ipa in TrollStore, or: scp $OUT root@<ip>:/var/mobile/ && ssh root@<ip> 'installer ...'"
+echo "  After launch, Filza runs with the MHA identity — check /tmp/FilzaTweak.log for"
+echo "  '[MCM] *** CONTAINER ACCESS ACTIVE' (pre-exploit container access, K4.12)."

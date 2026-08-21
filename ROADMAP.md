@@ -31,13 +31,19 @@
 - [x] `K4.1` 🔴 — Verify 26.1 kernel struct offsets (sandbox, MACF label) vs 26.0.1 — pull 26.1 kernelcache, run XPF, add offsets.m block if shifted
   _Done 2026-08-14: XPF diff of 26.0.1 vs 26.1 (iPhone18,1 kc) — structs identical, no new block needed. See K4.1 in Section K4._
 - [ ] `K4.7` 🔴 — Reproduce CVE-2025-46285 (kernel root privesc on 26.1, integer overflow in 64-bit timestamps) — diff 26.1 vs 26.2 kernelcaches around timestamp handling
-- [ ] `K4.8` 🔴 — Exploit CVE-2025-43539 (AppleJPEG memory corruption on 26.1) — point the K4.2 fuzzer at AppleJPEG decode paths
-- [ ] `K4.2` 🟠 — Build the ImageIO fuzzing harness (referenceforAI/CVE-2025-43300-hunters analyzer + hex_modifier + Filza viewer crash capture)
+- [x] `K4.8a` 🔴 — Point the K4.2 fuzzer at AppleJPEG decode paths (CVE-2025-43539 campaign)  \
+  _Done 2026-08-21 (no hardware): `jpeg` strategy in research/imageio_mutate.py (SOF/DQT/DHT/SOS/EXIF/scan recipes across the OOB-write families), research/gen_jpeg_seed.py (6 codec shapes), harness `--strategy jpeg` + auto-detect. 307-sample corpus verified. See research/applejpeg_cve-2025-43539.md._
+- [ ] `K4.8` 🔴 — Reproduce CVE-2025-43539 on 26.1 hardware + escalate (Chain B)  \
+  _Hardware-gated (fuzzer targeting done — K4.8a): run the JPEG campaign on iOS 26.1 arm64e, extract minimal trigger, then SandboxEscape.md Phase 3._
+- [x] `K4.2` 🟠 — Build the ImageIO fuzzing harness (referenceforAI/CVE-2025-43300-hunters analyzer + hex_modifier + Filza viewer crash capture)  \
+  _Done 2026-08-21: `research/imageio_fuzz.sh` (prepare → push → run → collect → report) + `research/imageio_mutate.py` (validated DNG/TIFF parser, deterministic recipes incl. CVE-43300 mismatch; TSV manifest). Run loop attributes crashes per sample via CrashReporter snapshots; report dedupes .ips signatures and flags UNIQUE ones. Wired as `./W0lfSword fuzz` (menu `f`). Verified end-to-end with mock device + reference-analyzer cross-check._
 
 ## 0.3 — High-value features (userspace direction)
 
-- [ ] `K4.10` 🟡 — Port bad_query containermanagerd traversal into W0lfSword as 26.1+ userspace read-escape module (works 26.0–26.6.1, unpatched)
-- [ ] `K4.12` 🟡 — MobileHouseArrest re-sign mode: optional build producing an MHA-identity Filza IPA for pre-exploit container access
+- [x] `K4.10` 🟡 — Port bad_query containermanagerd traversal into W0lfSword as 26.1+ userspace read-escape module (works 26.0–26.6.1, unpatched)  \
+  _Done 2026-08-21: kexploit/bad_query_escape.m + .h — port of Taj C's bad_query on the existing mcm_api bridge: `bad_query_escape(path, create, group_identifier, is_group)` (SystemGroup class-13 or App-Group class-7 route, part 3 + `../../` traversal, consumed sandbox-extension handle, original error codes), `bad_query_release`, `bad_query_list` (fsgetpath enumeration), `bad_query_probe` (4 target paths, logs which opened). Wired into safe mode (Tweak.m) + exploit-exhaustion fallback (TweakExploit.m). Guards: refuses if query_set_part/part_domain symbols missing. Build verified._
+- [x] `K4.12` 🟡 — MobileHouseArrest re-sign mode: optional build producing an MHA-identity Filza IPA for pre-exploit container access  \
+  _Done 2026-08-21: `make mha IPA=Filza.ipa` (Makefile MHA_IDENTITY=1 CFLAG + target) → scripts/re-sign_mha.sh (inject tweak dylib via scripts/add-load-dylib.py Mach-O LC_LOAD_DYLIB patch, CFBundleIdentifier + CodeDirectory → com.apple.mobile.MobileHouseArrest, ldid re-sign, repackage). Tweak logs MHA mode at init. CLI: `./W0lfSword mha <ipa> [out]`. Injector verified on a real arm64 Mach-O; prereq gates tested._
 - [x] `K3.2` 🟠 — Tweak installer backend (build dylib from templates/catalog, deploy via existing pipeline) — unlocks the tweak menu
   _Done 2026-08-14: see K3.2 in Section K3 — build_tweak.sh + 3 templates + `tweaks install <id>`._
 
@@ -193,18 +199,26 @@
 
 - [ ] `A6.10` 🟡 — Tweak.m: 6+ `NSLog()` sites should be TweakLog for unified logging
 - [ ] `A6.11` 🟡 — kutils.m: proc_get_p_name static buffer not thread-safe
-- [ ] `A6.12` 🟡 — control: version 0.7.6 vs script v0.9, placeholder maintainer/author
-- [ ] `A6.13` 🟡 — CONTEXT.md: stale line counts, stale architecture, wrong fixes count
-- [ ] `A6.14` 🟢 — Makefile: kexploit/sandbox_backup.m dead code not compiled
-- [ ] `A6.15` 🟢 — kutils.h:29 `amfi_cslot_get` declared but never defined
-- [ ] `A6.16` 🟢 — xpaci.h: double #include <stdbool.h> (lines 2-3)
-- [x] `A6.17` 🟢 — W0lfSword: `seq` not on macOS → hline/section broken output  
+- [x] `A6.12` 🟡 — control: version 0.7.6 vs script v0.9, placeholder maintainer/author  \
+  _Done 2026-08-14 (V1.1) + verified 2026-08-21: control is 1.0.0 with real Maintainer/Author, matches the script's VERSION var._
+- [x] `A6.13` 🟡 — CONTEXT.md: stale line counts, stale architecture, wrong fixes count  \
+  _Done 2026-08-21: full refresh — line counts, architecture (pocs/, research/, tools/xpf-cli, fuzz/poc/exploits commands), current state._
+- [x] `A6.14` 🟢 — Makefile: kexploit/sandbox_backup.m dead code not compiled  \
+  _Verified 2026-08-21: file no longer exists; Makefile has no reference._
+- [x] `A6.15` 🟢 — kutils.h:29 `amfi_cslot_get` declared but never defined  \
+  _Done 2026-08-21: declaration removed (never referenced in this repo)._
+- [x] `A6.16` 🟢 — xpaci.h: double #include <stdbool.h> (lines 2-3)  \
+  _Done 2026-08-21: duplicate include removed._
+- [x] `A6.17` 🟢 — W0lfSword: `seq` not on macOS → hline/section broken output  \
   _Done 2026-08-14: replaced seq with bash-native repeat_char() loops. Full macOS audit in A6.21._
-- [ ] `A6.18` 🟢 — W0lfSword: `sleep 0.05` (fractional) doesn't work on busybox
-- [x] `A6.21` 🟠 — Full macOS support for the W0lfSword script + assets  
+- [x] `A6.18` 🟢 — W0lfSword: `sleep 0.05` (fractional) doesn't work on busybox  \
+  _Verified 2026-08-21: the only fractional sleep is the host-side spinner (GNU and BSD sleep both support fractions); no fractional sleep is ever sent to the device over SSH._
+- [x] `A6.21` 🟠 — Full macOS support for the W0lfSword script + assets  \
   _Done 2026-08-14: platform detection (IS_MACOS) + portable helpers replacing GNU-isms — repeat_char (seq), ping_check (macOS -W is ms, not s), version_sort_first (no sort -V), sort -u -t. k1,1n..., mktemp template, eval-tilde instead of getent. cmd_setup: brew-aware packages (libimobiledevice, dpkg; clang via Xcode CLT with xcode-select gate), no-sudo brew path with $SUDO only for /opt/theos, theos at /opt/theos + Homebrew paths in check_theos. cmd_doctor: Xcode iPhoneOS SDK check. adderall Phase 2: OS-aware installer. usbliter8 hints, dpkg hint, build_and_extract.sh THEOS detection, BUILD.md + README updated._
-- [ ] `A6.19` 🟢 — krw.m + vnode_research.m: debug functions with no #ifdef guards
-- [ ] `A6.20` 🟢 — build_and_extract.sh: missing pipefail → silent build failures
+- [x] `A6.19` 🟢 — krw.m + vnode_research.m: debug functions with no #ifdef guards  \
+  _Done 2026-08-21: dead khexdump wrapped in #ifdef DEBUG (def + decl). vnode_research.m's apfs_fsnode dump is a live, exploit-gated (A5.2) run-once SSV diagnostics utility — kept, with addresses already KPRINTF-gated._
+- [x] `A6.20` 🟢 — build_and_extract.sh: missing pipefail → silent build failures  \
+  _Done 2026-08-21: set -euo pipefail + ${1:-} guard + build pipeline now fails loudly with a doctor hint._
 
 ---
 
@@ -800,8 +814,10 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `K1.4` 🟢 — Adderall success screen lists "what you can do now" in Filza  
   _Done 2026-08-13: full filesystem access, sealed-volume writes, chown/chmod, hide/unhide, padlock bypass — plus persistence reminder._
 
-- [ ] `K1.5` 🟠 — Add an `exploits` subcommand listing available techniques + support matrix  
-  _Prompt: "Add `cmd_exploits` to W0lfSword: a table of DarkSword pe_v1/pe_v2, kfd PUAF variants (PhysPuppet/Smith/Landa), checkm8, showing iOS range, SoC support, and implemented/planned status. Wire it to `./W0lfSword exploits` and menu option 8 area."_
+- [x] `K1.5` 🟠 — Add an `exploits` subcommand listing available techniques + support matrix  \
+  _Done 2026-08-21: `cmd_exploits` — full technique matrix (DarkSword pe_v1/pe_v2, kfd PhysPuppet/Smith/Landa, checkm8, AppleJPEGDriver UAF, dyld slide, EXR ImageIO, SEP exhaustion) with iOS range / SoC / bug class / status. Wired to `./W0lfSword exploits` (+ `e` shortcut) and menu option 8 (Targets & Exploits)._
+- [x] `K1.5b` 🟠 — Panic-PoC deploy commands (`poc` lab)  \
+  _Done 2026-08-21: `./W0lfSword poc list|sep-panic|exr|applejpeg|dirtyslide` — builds sep_panic via Theos (pocs/sep_panic/), generates the CVE-2026-28990 EXR trigger (pocs/exr/gen_exr_trigger.py, stdlib-only, byte-identical to zygosec's), deploys over SSH, arms the crash-monitor, gates every run behind a confirm prompt. applejpeg/dirtyslide print the macOS+Xcode manual flow. See research/moreprojects_deep_dive.md._
 
 - [ ] `K1.6` 🟠 — Add kfd/PUAF fallback options as menu choices beside DarkSword  
   _Prompt: "Extend adderall Phase 4 exploit prompt to accept puaf-physpuppet / puaf-smith / puaf-landa in addition to pe_v1/pe_v2/auto. Store in profile JSON. Backend: port kfd primitives (kopen/kread/kwrite) into kexploit/ as fallback engine — see SECTION F1."_
@@ -892,8 +908,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `K4.1` 🔴 — Verify 26.1 kernel struct offsets (sandbox, MACF label) vs 26.0.1  
   _Done 2026-08-14 (offline, kernelcache): pulled iPhone18,1 (T8150) kernelcaches for 26.0.1 (23A355, xnu-12377.2.9) and 26.1 (23B85, xnu-12377.42.6) via ranged IPSW downloads from the Apple CDN. Built a host-side XPF resolver (tools/xpf-cli — Linux shims for xpc/mach-o/compression/CommonCrypto, SIGSEGV-guarded item resolution, SPTM-aware) and diffed all 64 resolvable items. Struct constants IDENTICAL: proc.struct_size 0x748, task.itk_space 0x310, vm_map.pmap 0x40, thread.machine_CpuDatap 0x1a0, nsysent 0x22e — so the offsets.m 26.0.x block applies to 26.1, no new block needed (documented at offsets.m gate). Gate stays CLOSED: DarkSword patched in 26.1; A1.14 kstackptr validation guards the flip when a new primitive lands (K5.6). FLAGGED: XPF task.itk_space=0x310 on T8150 arm64e vs 0x318 in offsets.m (SE3-verified) — possible per-SoC delta, needs on-device confirmation._
 
-- [ ] `K4.2` 🟠 — Build the ImageIO fuzzing harness (SandboxEscape.md Phase 1)  
-  _Prompt: "Using referenceforAI/projects/CVE-2025-43300-hunters (dng_vulnerability_analyzer.py, hex_modifier.py, dng_images corpus), build research/imageio_fuzz.sh that: mutates DNG/HEIF/TIFF headers, pushes samples to the phone, opens them via Filza's viewer, and collects crash logs from /tmp/FilzaTweak.log. Flag any unique panic signature."_
+- [x] `K4.2` 🟠 — Build the ImageIO fuzzing harness (SandboxEscape.md Phase 1)  \
+  _Done 2026-08-21: research/imageio_fuzz.sh (full pipeline) + research/imageio_mutate.py (validated DNG/TIFF parser — filters the reference analyzer's garbage-IFD false positives; SOF3 precision whitelist fixed for camera precision=14 — deterministic recipes: SamplesPerPixel, SOF3 components/dims/precision, compression, CVE-43300 combined mismatch, generic flips/truncations; TSV manifest). Run loop snapshots CrashReporter before/after each uiopen to attribute crashes to the exact sample; report dedupes .ips signatures and flags UNIQUE (1x) ones. Wired as `./W0lfSword fuzz` (menu `f`, explain, help). Verified: mutator output re-parsed cleanly by the reference analyzer; pipeline tested end-to-end with a mock device (attribution + signature dedup + UNIQUE flag working). Seeds: hunters dng_images corpus (+ any DNG/HEIF/TIFF via --seeds)._
 
 - [ ] `K4.3` 🟠 — Port bad_query's containermanagerd traversal to iOS 26.1  
   _Prompt: "Study referenceforAI/projects/bad_query. Reproduce the container path traversal on 26.1 hardware (or VMApple), document which mitigations changed since iOS 26.0, and report whether it still grants outside-container writes."_
@@ -910,21 +926,24 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [ ] `K4.7` 🔴 — iOS 26.1: reproduce CVE-2025-46285 (kernel root privesc, integer overflow in 64-bit timestamps)  
   _Prompt: "iOS 26.2 advisory: 'An app may be able to gain root privileges — integer overflow addressed by adopting 64-bit timestamps' (Alibaba, Kaitao Xie/Xiaolong Bai). This bug is ALIVE on 26.1 (patched in 26.2). Recover the vulnerable syscall/interface by diffing 26.1 vs 26.2 kernelcaches around timestamp handling, write a trigger PoC, then verify privesc. Root from an app = instant sandbox escape + SSV access."_
 
-- [ ] `K4.8` 🔴 — iOS 26.1: exploit CVE-2025-43539 (AppleJPEG memory corruption) as the ImageIO-class entry bug  
-  _Prompt: "iOS 26.2 advisory: 'Processing a file may lead to memory corruption' in AppleJPEG (Michael Reeves, @IntegralPilot), fixed with bounds checks. Alive on 26.1. This is the live ImageIO-class bug we wanted — point the K4.2 fuzzing harness at AppleJPEG (JPEG decode paths) on 26.1, reproduce the crash, then follow SandboxEscape.md Phase 3 to escalate the corruption."_
+- [x] `K4.8a` 🔴 — iOS 26.1: point the fuzzer at AppleJPEG decode paths (CVE-2025-43539 campaign)  \
+  _Done 2026-08-21 (no hardware needed): `jpeg` strategy in research/imageio_mutate.py — validated JPEG marker scanner (skips stuffed 0x00/RST, no false segments) + structure-aware recipes across the OOB-write families: SOF precision 8↔16 / dims →0,1,0xFFFF / component count 3↔1↔4 / sampling factors / quant table selectors; DQT 8-bit↔16-bit precision + table-id flips; DHT class flip; SOS component mismatch + spectral→63 + approx→0; APP1 EXIF IFD tag flips (endian-aware value bytes via the DNG/TIFF walker); scan-data stuffing-removal desync, mid-scan/scan-start truncation, byte→0xFF; APPn declared-length inflation. `research/gen_jpeg_seed.py` (Pillow) bootstraps 6 codec shapes: baseline 420/444, grayscale, progressive (SOF2), optimized, EXIF. Harness `--strategy jpeg` + magic auto-detect (FFD8). Verified: 29–88 mutations/seed, 307-sample corpus, manifest attribution, PIL cross-decode. Full writeup: research/applejpeg_cve-2025-43539.md._
+- [ ] `K4.8` 🔴 — iOS 26.1: reproduce CVE-2025-43539 (AppleJPEG memory corruption) + escalate  \
+  _Hardware-gated (fuzzer targeting DONE — K4.8a): on an iOS 26.1 arm64e device run `./W0lfSword fuzz prepare --seeds .w0lfsword/fuzz/seeds --strategy jpeg` → push → run (--wait 8) → collect → report. Extract the minimal trigger from sample_crashes.tsv + manifest, then follow SandboxEscape.md Phase 3 to escalate the corruption (parser-process RCE → that process's sandbox extensions → file reads; Glass Cage report as the template). If a dyld-cache diff of 26.1 vs 26.2 becomes practical, locate the AppleJPEG bounds-check patch sites to guide the campaign._
 
 - [ ] `K4.9` 🟡 — iOS 26.1: study CVE-2025-43518 (spellcheck file-access bypass) + CVE-2025-43537 (Books path handling)  
   _Prompt: "Both fixed in 26.2, both alive on 26.1. 43518: Foundation spellcheck API allowed inappropriate file access (logic bug) — check if it grants read/write beyond the sandbox from an app. 43537: backup restore path handling could modify protected system files. Add both to research/xpc_surface_26.1.md as userspace escape candidates."_
 
-- [ ] `K4.10` 🟡 — Port bad_query into W0lfSword as the 26.1+ userspace read-escape module  
+- [x] `K4.10` 🟡 — Port bad_query into W0lfSword as the 26.1+ userspace read-escape module  \
+  _Done 2026-08-21: kexploit/bad_query_escape.m + .h — port of Taj C's bad_query on the existing mcm_api bridge (class-13 SystemGroup / class-7 App-Group routes, part 3 + `../../` traversal, consumed sandbox-extension handle with the original error codes -1..-255), `bad_query_release`, `bad_query_list` (fsgetpath enumeration), `bad_query_probe` (targets /var/mobile/Containers/Data/Application + InternalDaemon + PluginKitPlugin + Shared/AppGroup, logs which opened). Wired into safe mode (Tweak.m) + exploit-exhaustion fallback (TweakExploit.m). Refuses cleanly when query_set_part/part_domain symbols are missing. Build verified. Original's "obtain tokens for /var/mobile/Containers/** and TCC.db, verify reads" = the probe targets + `bad_query_escape("/var/mobile/Library/TCC/TCC.db", ...)` on-device._
 - [x] `K4.11` 🟠 — Port FilzaSlop's MCM userspace container-access bridge (comparison task)  
   _Done 2026-08-13: analyzed 0xjohnnydev/FilzaSlop v1.0.2 (242★, FilzaJailedDS fork with userspace container escape for iOS 18/26/27b). Ported: kexploit/mcm_bridge.m (dlopen libsystem_containermanager, zero private headers), kexploit/container_access.m (class 2/4/6/7/10/12/13/15 activation, com.apple.lsd LaunchServices store byte-scan app discovery for iOS 26, userspace_container_probe). Wired into safe mode + exploit-exhaustion paths. Clone kept in referenceforAI/projects/FilzaSlop/._
 
-- [ ] `K4.12` 🟡 — MobileHouseArrest identity mode: optional re-sign path for pre-exploit container access  
-  _Prompt: "FilzaSlop's trick: signing as com.apple.mobile.MobileHouseArrest makes ContainerManager trust the caller, so container leases activate WITHOUT any kernel exploit (works iOS 18-27b). Add a build-time switch (Makefile BUNDLE_ID override + docs) so users can produce a W0lfSword-Filza IPA signed with the MHA identity. Log which mode is active via userspace_container_probe()."_
+- [x] `K4.12` 🟡 — MobileHouseArrest identity mode: optional re-sign path for pre-exploit container access  \
+  _Done 2026-08-21: `make mha IPA=Filza.ipa [OUT=...]` — Makefile MHA_IDENTITY=1 CFLAG (tweak logs the mode at TweakInit) + `mha` target → scripts/re-sign_mha.sh: extracts the IPA, injects the tweak dylib with scripts/add-load-dylib.py (Mach-O LC_LOAD_DYLIB patch, ported from DirtySlide), sets CFBundleIdentifier + CodeDirectory identifier to com.apple.mobile.MobileHouseArrest, ldid re-signs, repackages. CLI wrapper: `./W0lfSword mha <ipa> [out]` (needs ldid). MHA mode is observable via userspace_container_probe() → '[MCM] *** CONTAINER ACCESS ACTIVE'. Injector verified on a real arm64 Mach-O (LC_LOAD_DYLIB present, file intact); prereq gates tested. Docs: BUILD.md._
 
-- [ ] `K4.13` 🟡 — Port FilzaSlop's dormant posix_cred root patch (OFF_UCRED_CR_POSIX=0x18, uid/gid groups)  
-  _Prompt: "FilzaSlop's sandbox_escape.m defines OFF_UCRED_CR_POSIX/UID/RUID/SVUID/RGID/GROUPS offsets but never uses them. Implement set_root_credentials() in W0lfSword's sandbox_escape.m: after escape, patch ucred->cr_posix uid/gid/groups to 0 so Filza runs as root:wheel for everything — completes the 'Root Ownership' feature without relying on fsnode chown."_
+- [x] `K4.13` 🟡 — Port FilzaSlop's dormant posix_cred root patch (OFF_UCRED_CR_POSIX=0x18, uid/gid groups)  \
+  _Done 2026-08-21: `set_root_credentials(ucred)` in sandbox_escape.m — patches ucred+0x18 posix_cred via per-field `kwrite32` read-modify-write (uid/ruid/svuid @ 0x00-0x0B, groups[0] @ 0x10, gid/rgid/svgid/gmuid @ 0x50-0x5B → 0; ngroups, gmuid/flags, and cr_label right after the 0x60-byte struct are NEVER touched — no oversized buffer writes), read-back verified, best-effort (doesn't fail the escape). Called on both sandbox_escape success paths. Logs before/after + ROOT CREDENTIALS ACTIVE. FilzaSlop's layout notes documented in-file. Build + audit verified; DEBUG_TRACKING updated._
 
 
   _Prompt: "bad_query's containermanagerd traversal is confirmed working iOS 26.0-26.6.1 + 27.0b4. Port it from referenceforAI/projects/bad_query into kexploit/ (or utils/) as a no-kernel-rw escape stage: obtain extension tokens for /var/mobile/Containers/** and TCC.db, verify reads, log results. Use as the fallback when DarkSword retries are exhausted."_

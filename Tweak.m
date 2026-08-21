@@ -17,6 +17,7 @@
 #include "kexploit/kexploit_opa334.h"
 #include "kexploit/kutils.h"
 #include "kexploit/container_access.h"
+#include "kexploit/bad_query_escape.h"
 #include "kexploit/sandbox.h"
 #include "sandbox_escape.h"
 #include "SSV/SSVUtils.h"
@@ -1002,13 +1003,18 @@ static void installHooks(void) {
 #pragma mark - Entry Point
 
 __attribute__((constructor)) void TweakInit(void) {
+#ifdef MHA_IDENTITY
+    TweakLog("[Tweak] MHA identity build (K4.12) — signed as com.apple.mobile.MobileHouseArrest; "
+             "containermanagerd trusts this identity, userspace container access expected pre-exploit");
+#endif
     // Safe mode: if flag file exists, skip all kernel operations entirely
     if (access("/var/mobile/Documents/.filza_safe_mode", F_OK) == 0) {
         TweakLog("[Tweak] SAFE MODE — skipping exploit, sandbox escape, and kernel writes");
         TweakLog("[Tweak] Only UI hooks active. Delete /var/mobile/Documents/.filza_safe_mode to enable exploit.");
         installHooks();
-        TweakLog("[Tweak] Safe mode — probing userspace container access (MCM)");
+        TweakLog("[Tweak] Safe mode — probing userspace container access (MCM + bad_query)");
         userspace_container_probe();
+        bad_query_probe();
         return;
     }
 
