@@ -1989,32 +1989,35 @@ confirm() {
 # Validated choice prompt — loops until the answer is one of the allowed
 # values (empty = default). Rejects typos like "autp" instead of "auto".
 # Respects --yes (returns the default without asking).
+# NOTE: prompt goes to STDERR — these are usually called inside $(...) so
+# stdout must carry ONLY the final value (no prompt text pollution).
 ask_choice() {
     local prompt="${1:-}" default="${2:-}" valid="$3"
     $YES_MODE && { echo "$default"; return 0; }
     local ans
     while true; do
-        echo -ne "  ${C_FROST}${prompt} [${default}]:${NC} "; read -r ans
+        echo -ne "  ${C_FROST}${prompt} [${default}]:${NC} " >&2; read -r ans
         [ -z "$ans" ] && ans="$default"
         for v in $valid; do
             [ "$ans" = "$v" ] && { echo "$ans"; return 0; }
         done
-        echo -e "  ${C_RED}✗${NC} Invalid: '${ans}' — choose from: ${C_EYE}$valid${NC}"
+        echo -e "  ${C_RED}✗${NC} Invalid: '${ans}' — choose from: ${C_EYE}$valid${NC}" >&2
     done
 }
 
 # Validated integer prompt — bounded, re-asks on garbage. Respects --yes.
+# NOTE: prompt goes to STDERR — see ask_choice.
 ask_int() {
     local prompt="${1:-}" default="${2:-}" min="${3:-1}" max="${4:-20}"
     $YES_MODE && { echo "$default"; return 0; }
     local ans
     while true; do
-        echo -ne "  ${C_FROST}${prompt} [${default}]:${NC} "; read -r ans
+        echo -ne "  ${C_FROST}${prompt} [${default}]:${NC} " >&2; read -r ans
         [ -z "$ans" ] && ans="$default"
         if [[ "$ans" =~ ^[0-9]+$ ]] && [ "$ans" -ge "$min" ] && [ "$ans" -le "$max" ]; then
             echo "$ans"; return 0
         fi
-        echo -e "  ${C_RED}✗${NC} Invalid: '${ans}' — enter a number ${min}–${max}"
+        echo -e "  ${C_RED}✗${NC} Invalid: '${ans}' — enter a number ${min}–${max}" >&2
     done
 }
 
@@ -2377,10 +2380,23 @@ EOF
     echo ""
 
     local TARGET_BUNDLE="com.tigisoftware.Filza"
-    if confirm "Target Filza 4.0.2 (com.tigisoftware.Filza000) instead of 4.0.0?"; then
-        TARGET_BUNDLE="com.tigisoftware.Filza000"
+    # Detect the installed Filza bundle ID from the phone instead of guessing
+    # from version numbers (ROADMAP A2.1: Filza versioning is misleading —
+    # 4.0.0 is newer than 4.0.2). Falls back to the question when unreachable.
+    local detected_bundle=""
+    if [ -n "$SSH_TUNNEL_PORT" ] || [ -n "$IP" ]; then
+        detected_bundle=$(ssh_safe "root@${IP:-localhost}" \
+            "p=\$(dpkg -L com.tigisoftware.filza64bit 2>/dev/null | grep -m1 \"Filza.app/Info.plist\$\"); [ -n \"\$p\" ] && grep -ao \"com.tigisoftware.Filza[0-9]*\" \"\$p\" | sort -u | head -1" 2>/dev/null)
     fi
-    echo -e "  ${C_GREY}Target:${NC}  ${C_EYE}$TARGET_BUNDLE${NC}"
+    if [ -n "$detected_bundle" ]; then
+        TARGET_BUNDLE="$detected_bundle"
+        echo -e "  ${C_GREY}Target:${NC}  ${C_EYE}$TARGET_BUNDLE${NC}  ${C_DIM}(detected on phone)${NC}"
+    else
+        if confirm "Target Filza 4.0.2 (com.tigisoftware.Filza000) instead of 4.0.0?"; then
+            TARGET_BUNDLE="com.tigisoftware.Filza000"
+        fi
+        echo -e "  ${C_GREY}Target:${NC}  ${C_EYE}$TARGET_BUNDLE${NC}"
+    fi
 
     if [ "$EXPLOIT_METHOD" = "auto" ]; then
         EXPLOIT_METHOD=$(ask_choice "Exploit method" "auto" "auto pe_v1 pe_v2")
