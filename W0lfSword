@@ -21,7 +21,9 @@ cd "$PROJECT_DIR"
 # ── Sudo check ───────────────────────────────────────────────
 SUDO_NEEDED_COMMANDS="adderall setup usbliter8"
 SUDO_UNSAFE_COMMANDS="build deploy monitor log status targets doctor offsets"  # work fine without
-if [ "$EUID" -ne 0 ]; then
+JSON_MODE=false
+for _a in "$@"; do [ "$_a" = "--json" ] && JSON_MODE=true; done
+if [ "$EUID" -ne 0 ] && ! $JSON_MODE; then
     echo -e "\033[1;33m  ⚠  Not running as root\033[0m"
     echo -e "\033[2m  Commands needing:\033[0m  \033[1;38;5;39m${SUDO_NEEDED_COMMANDS}\033[0m"
     echo -e "\033[2m  Commands safe without:\033[0m  \033[38;5;153m${SUDO_UNSAFE_COMMANDS}...\033[0m"
@@ -37,9 +39,11 @@ log_script() { echo "[$(date '+%H:%M:%S')] $*" >> "$SESSION_LOG"; }
 
 # ── Exit trap — restore terminal ─────────────────────────────
 cleanup() {
-    tput cnorm 2>/dev/null || true
-    stty echo 2>/dev/null || true
-    echo -e "\033[?25h"
+    $JSON_MODE || {
+        tput cnorm 2>/dev/null || true
+        stty echo 2>/dev/null || true
+        echo -e "\033[?25h"
+    }
     stop_crash_monitor
     log_script "session ended (exit=$?)"
 }
@@ -94,10 +98,12 @@ VERBOSE=false
 DEBUG=false
 YES_MODE=false
 EXPLAIN=false
+# JSON_MODE is pre-scanned from argv near the top (before the sudo banner)
 
 # ── Spinner animation (0.5s) ──────────────────────────────────
 
 spinner() {
+    $JSON_MODE && return 0   # machine-readable output stays clean
     local msg="${1:-Working}"
     local frames=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
     local end=$((SECONDS * 10 + 5))
@@ -323,6 +329,155 @@ cmd_usbtest() {
     echo ""
     ok "USB test finished"
     hint "Next: sudo ./W0lfSword adderall"
+}
+
+# ── Panic log analyzer ────────────────────────────────────────
+# Classifies .ips crash reports / panic logs against known CVEs and
+# the BUG_BOUNTY findings (BB-032..037) via scripts/panic_analyzer.py.
+cmd_panic() {
+    local sub="${1:-list}"
+    local panics_dir="$DATA_DIR/panics"
+    mkdir -p "$panics_dir"
+    case "$sub" in
+        list)
+            section "Panic Reports ($panics_dir)"
+            if compgen -G "$panics_dir/*" >/dev/null 2>&1; then
+                ls -t "$panics_dir" | head -20 | while read -r f; do
+                    local ts; ts=$(date -r "$panics_dir/$f" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "?")
+                    echo -e "  ${C_DIM}$ts${NC}  ${C_FROST}$f${NC}"
+                done
+            else
+                echo -e "  ${C_DIM}No panic reports yet. Fetch one with: ./W0lfSword panic fetch${NC}"
+            fi
+            ;;
+        fetch)
+            local ip="${2:-$(get_device_ip)}"
+            [ -z "$ip" ] && { err "No device — pass an IP: ./W0lfSword panic fetch <ip>"; return 1; }
+            section "Fetching latest crash report from $ip"
+            local remote
+            remote=$(ssh_safe "root@$ip" 'ls -t /var/mobile/Library/Logs/CrashReporter/*.ips /Library/Logs/CrashReporter/*.ips 2>/dev/null | head -1' 2>/dev/null || echo "")
+            if [ -z "$remote" ]; then
+                err "No .ips found on the device"
+                return 1
+            fi
+            local base; base=$(basename "$remote")
+            if scp_safe "root@$ip:$remote" "$panics_dir/$base" 2>/dev/null; then
+                ok "Saved $base"
+            else
+                err "scp failed"
+                return 1
+            fi
+            echo ""
+            cmd_panic analyze "$panics_dir/$base"
+            ;;
+        analyze)
+            local f="${2:-}"
+            [ -z "$f" ] && { err "Usage: ./W0lfSword panic analyze <file.ips|panic.log>"; return 1; }
+            [ -f "$f" ] || { err "No such file: $f"; return 1; }
+            section "Analyzing $(basename "$f")"
+            echo ""
+            python3 "$PROJECT_DIR/scripts/panic_analyzer.py" "$f" || true
+            ;;
+        *)
+            err "Usage: panic list | fetch [ip] | analyze <file>"
+            return 1
+            ;;
+    esac
+}
+
+# ── Kernelcache research — offline XPF offset work (K4.1 CLI) ─
+# resolve/diff kernelcaches with the host-side XPF patchfinder,
+# no device needed. The attractive one for iOS security researchers.
+kernelcache_xpf() {
+    local kc="${1:-}"
+    local bin="$PROJECT_DIR/tools/xpf-cli/xpf-cli"
+    if [ ! -x "$bin" ]; then
+        err "xpf-cli not built"
+        hint "Build it: cd tools/xpf-cli && ./build.sh   (needs clang + lzfse)"
+        return 1
+    fi
+    if ! "$bin" "$kc" 2>/dev/null; then
+        err "XPF could not parse: $kc"
+        hint "Expected an IMG4 kernelcache (A12+ are unencrypted). Extract one from an IPSW: ./W0lfSword kernelcache extract <file.ipsw>"
+        return 1
+    fi
+}
+
+cmd_kernelcache() {
+    local sub="${1:-help}"
+    case "$sub" in
+        resolve)
+            local kc="${2:-}"
+            [ -z "$kc" ] && { err "Usage: ./W0lfSword kernelcache resolve <kernelcache.img4>"; return 1; }
+            [ -f "$kc" ] || { err "No such file: $kc"; return 1; }
+            section "XPF resolve — $(basename "$kc")"
+            echo ""
+            kernelcache_xpf "$kc" || return 1
+            ;;
+        diff)
+            local a="${2:-}" b="${3:-}"
+            [ -z "$a" ] || [ -z "$b" ] && { err "Usage: ./W0lfSword kernelcache diff <kcA> <kcB>"; return 1; }
+            [ -f "$a" ] && [ -f "$b" ] || { err "Both kernelcaches must exist"; return 1; }
+            local tmpa tmpb
+            tmpa=$(mktemp 2>/dev/null || echo /tmp/w0lf_xpf_a.$$)
+            tmpb=$(mktemp 2>/dev/null || echo /tmp/w0lf_xpf_b.$$)
+            section "XPF diff — $(basename "$a") vs $(basename "$b")"
+            echo ""
+            if ! kernelcache_xpf "$a" > "$tmpa" 2>/dev/null; then rm -f "$tmpa" "$tmpb"; return 1; fi
+            if ! kernelcache_xpf "$b" > "$tmpb" 2>/dev/null; then rm -f "$tmpa" "$tmpb"; return 1; fi
+            python3 "$PROJECT_DIR/scripts/xpf_diff.py" "$tmpa" "$tmpb"
+            rm -f "$tmpa" "$tmpb"
+            ;;
+        extract)
+            local ipsw="${2:-}"
+            [ -z "$ipsw" ] && { err "Usage: ./W0lfSword kernelcache extract <file.ipsw> [board]"; return 1; }
+            [ -f "$ipsw" ] || { err "No such file: $ipsw"; return 1; }
+            local board="${3:-}"
+            local outdir="$DATA_DIR/kernelcaches"
+            mkdir -p "$outdir"
+            section "Extracting kernelcache from $(basename "$ipsw")"
+            echo ""
+            python3 - "$ipsw" "$board" "$outdir" <<'PYEOF'
+import sys, zipfile, os, re
+ipsw, board, outdir = sys.argv[1], sys.argv[2] or None, sys.argv[3]
+try:
+    z = zipfile.ZipFile(ipsw)
+except Exception as e:
+    print(f"ERR not a readable zip: {e}"); sys.exit(1)
+cands = [n for n in z.namelist() if re.search(r"kernelcache\.release", n)]
+if not cands:
+    print("ERR no kernelcache.release.* entry in IPSW"); sys.exit(1)
+if board:
+    cands = [n for n in cands if board.lower() in n.lower()]
+    if not cands:
+        print(f"ERR no kernelcache entry matching board {board}"); sys.exit(1)
+name = cands[0]
+data = z.read(name)
+out = os.path.join(outdir, os.path.basename(name))
+with open(out, "wb") as fh:
+    fh.write(data)
+print(f"OK {name} -> {out} ({len(data)} bytes)")
+PYEOF
+            local got; got=$(ls -t "$outdir"/* 2>/dev/null | head -1 || echo "")
+            if [ -n "$got" ] && [ -f "$got" ] && confirm "Resolve offsets with XPF now?"; then
+                echo ""
+                cmd_kernelcache resolve "$got"
+            fi
+            ;;
+        *)
+            cat <<'EOF'
+kernelcache — offline XPF offset research, no device needed.
+  resolve <kernelcache.img4>   run the XPF patchfinder, print offsets
+  diff <kcA> <kcB>             resolve both, show identical/changed items
+  extract <file.ipsw> [board]  pull kernelcache.release.* out of an IPSW
+
+  Verify offsets for any iOS build against kexploit/offsets.m before
+  touching hardware — the K4.1 methodology as a command. Feed it the
+  IMG4 kernelcache from an IPSW (A12+ are unencrypted; XPF handles
+  IMG4 + LZFSE decompression). IPSWs: https://ipsw.me
+EOF
+            ;;
+    esac
 }
 
 # ── Drawing helpers ───────────────────────────────────────────
@@ -563,10 +718,10 @@ EOF
 }
 
 cmd_status() {
-    show_header
+    $JSON_MODE || show_header
     local branch; branch=$(git branch --show-current 2>/dev/null || echo "?")
     local dirty="clean"
-    git diff --quiet 2>/dev/null || dirty="${C_AMB}dirty${NC}"
+    git diff --quiet 2>/dev/null || dirty="dirty"
 
     local done=0 total=0 pct=0
     [ -f ROADMAP.md ] && done=$(grep -c '\[x\]' ROADMAP.md 2>/dev/null || echo 0)
@@ -574,26 +729,50 @@ cmd_status() {
     [ "$total" -gt 0 ] && pct=$(( done * 100 / total ))
 
     local ip; ip=$(get_device_ip)
+
+    local pe_v1=0 pe_v2=0
+    grep -q 'pe_v1' kexploit/kexploit_opa334.m 2>/dev/null && pe_v1=1
+    grep -q 'pe_v2' kexploit/kexploit_opa334.m 2>/dev/null && pe_v2=1
+    local ext_count; ext_count=$(grep -c 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO' kexploit/offsets.m 2>/dev/null || echo 0)
+
+    # --json (J6.2): machine-readable snapshot for scripts/CI
+    if $JSON_MODE; then
+        local dev_state="none"
+        [ -n "$ip" ] && { ping_check "$ip" && dev_state="online" || dev_state="offline"; }
+        printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+            "$VERSION" "$branch" "$dirty" "$done" "$total" "$pct" "${ip:-none}" "$dev_state" "$pe_v1,$pe_v2,$ext_count" \
+        | python3 -c '
+import sys, json
+ver, b, d, done, total, pct, ip, dev, rest = [l.strip() for l in sys.stdin.read().splitlines()]
+pe1, pe2, ext = rest.split(",")
+print(json.dumps({
+  "version": ver,
+  "git": {"branch": b, "dirty": d},
+  "roadmap": {"done": int(done), "total": int(total), "pct": int(pct)},
+  "device": {"ip": ip, "state": dev},
+  "exploit_methods": {"pe_v1": int(pe1), "pe_v2": int(pe2)},
+  "offset_blocks": int(ext),
+}, indent=2))
+'
+        return 0
+    fi
+
     local dev="${C_DIM}none${NC}"
     [ -n "$ip" ] && ping_check "$ip" && dev="${C_GRN}$ip${NC}" || dev="${C_AMB}$ip (offline)${NC}"
 
     echo ""
     section "Session"
-    printf "  ${C_GREY}%-12s${NC} %s\n" "git"     "${C_EYE}${branch}${NC} ($dirty)"
+    printf "  ${C_GREY}%-12s${NC} %s\n" "git"     "${C_EYE}${branch}${NC} ($([ "$dirty" = "clean" ] || echo -n "${C_AMB}")${dirty}${NC})"
     printf "  ${C_GREY}%-12s${NC} %s\n" "device"   "$dev"
     printf "  ${C_GREY}%-12s${NC} %s/%s (%s%%)" "roadmap" "$done" "$total" "$pct"
     echo ""
 
     section "Exploit State"
-    local pe_v1=0 pe_v2=0
-    grep -q 'pe_v1' kexploit/kexploit_opa334.m 2>/dev/null && pe_v1=1
-    grep -q 'pe_v2' kexploit/kexploit_opa334.m 2>/dev/null && pe_v2=1
     printf "  ${C_GREY}%-12s${NC} " "methods"
     [ $pe_v1 -eq 1 ] && echo -ne "${C_GRN}pe_v1${NC} "
     [ $pe_v2 -eq 1 ] && echo -ne "${C_GRN}pe_v2${NC} "
     echo ""
 
-    local ext_count; ext_count=$(grep -c 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO' kexploit/offsets.m 2>/dev/null || echo 0)
     printf "  ${C_GREY}%-12s${NC} %s iOS version blocks\n" "offsets" "$ext_count"
     echo ""
 
@@ -640,6 +819,7 @@ cmd_audit() {
     local files=(Tweak.m sandbox_escape.m kexploit/sandbox.m kexploit/offsets.m \
                  kexploit/kexploit_opa334.m kexploit/vnode.m utils/permission_utils.m \
                  TweakExploit.m)
+    local results=""
     for f in "${files[@]}"; do
         [ ! -f "$f" ] && continue
         local r; r=$(python3 -c "
@@ -654,12 +834,25 @@ print(b,p)
         local b; b=$(echo "$r" | awk '{print $1}')
         local p; p=$(echo "$r" | awk '{print $2}')
         if [ "$b" = "0" ] && [ "$p" = "0" ]; then
-            $VERBOSE && ok "$f (braces=$b parens=$p)" || ok "$f"
+            $JSON_MODE || { $VERBOSE && ok "$f (braces=$b parens=$p)" || ok "$f"; }
         else
-            echo -e "  ${C_RED}✗${NC} $f ${C_RED}(braces=$b parens=$p)${NC}"
+            $JSON_MODE || echo -e "  ${C_RED}✗${NC} $f ${C_RED}(braces=$b parens=$p)${NC}"
             ((issues++)) || true
         fi
+        results="$results$f|$b|$p"$'\n'
     done
+    # --json (J6.2): machine-readable audit result
+    if $JSON_MODE; then
+        printf '%s' "$results" | python3 -c '
+import sys, json
+rows = []
+for line in sys.stdin.read().splitlines():
+    f, b, p = line.split("|")
+    rows.append({"file": f, "braces": int(b), "parens": int(p), "ok": b == "0" and p == "0"})
+print(json.dumps({"files": rows, "issues": sum(1 for r in rows if not r["ok"]), "passed": all(r["ok"] for r in rows)}, indent=2))
+'
+        return 0
+    fi
     if [ "$issues" -eq 0 ]; then
         echo ""; echo -e "  ${C_GRN}${B}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  AUDIT PASSED${NC}"
     else
@@ -716,11 +909,42 @@ EOF
 
 cmd_offsets() {
     $VERBOSE || spinner "scanning offsets"
+    # --json (J6.2): machine-readable version blocks + SoC coverage
+    if $JSON_MODE; then
+        local blocks=""
+        while IFS= read -r line; do
+            local ln; ln=$(echo "$line" | cut -d: -f1)
+            local ver; ver=$(echo "$line" | grep -o '@"[^"]*"' | head -1 | tr -d '@"')
+            blocks="$blocks$ln|$ver"$'\n'
+        done < <(grep -n 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO' kexploit/offsets.m 2>/dev/null)
+        local socs=""
+        for cpu in A10 A13Above A15Above A16Above A17Above A18Above; do
+            local c; c=$(grep -c "is$cpu" kexploit/offsets.m 2>/dev/null || echo 0)
+            socs="$socs$cpu:$c"$'\n'
+        done
+        printf '%s---SOCS---%s' "$blocks" "$socs" | python3 -c '
+import sys, json
+data = sys.stdin.read()
+bpart, spart = data.split("---SOCS---")
+blocks = []
+for l in bpart.splitlines():
+    if not l: continue
+    ln, ver = l.split("|", 1)
+    blocks.append({"line": int(ln), "version": ver})
+socs = {}
+for l in spart.splitlines():
+    if not l: continue
+    k, v = l.split(":", 1)
+    socs[k] = int(v)
+print(json.dumps({"version_blocks": blocks, "soc_coverage": socs, "total_blocks": len(blocks)}, indent=2))
+'
+        return 0
+    fi
     echo ""
     section "iOS Version Blocks"
     grep -n 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO' kexploit/offsets.m 2>/dev/null | while read -r line; do
         local ln; ln=$(echo "$line" | cut -d: -f1)
-        local ver; ver=$(echo "$line" | grep -o '@"[^"]*"' | tr -d '@"')
+        local ver; ver=$(echo "$line" | grep -o '@"[^"]*"' | head -1 | tr -d '@"')
         printf "  ${C_FROST}line %-5s${NC} →  ${C_SNOW}%s${NC}\n" "$ln" "$ver"
     done
     echo ""
@@ -1564,16 +1788,18 @@ draw_menu() {
     menu_opt 8 "Targets & Exploits" "supported apps · technique matrix"
     menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
     menu_opt u "USB Test"         "cable · pairing · data round-trip (harmless)"
+    menu_opt p "Panic Analyzer"   "classify .ips crash logs → known CVEs (BB-032..037)"
     echo ""
 
     menu_group "research (device-crashing PoCs)"
     menu_opt 0 "Panic-PoC Lab"    "sep-panic / exr / applejpeg / dirtyslide" "${C_RED}[crashes phone]${NC}"
     menu_opt f "ImageIO Fuzzer"   "mutate DNG/HEIF → phone → crash capture (K4.2)"
+    menu_opt k "Kernelcache Diff" "offline XPF offset research — resolve/diff kernelcaches"
     echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
     printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
-    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
+    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
@@ -1660,7 +1886,9 @@ run_menu() {
             7) { cmd_doctor; echo ""; cmd_audit; echo ""; cmd_status; } || true;;
             8) { cmd_targets || true; echo ""; cmd_exploits || true; };;
             tweaks|tw)    cmd_tweaks || true;;
-            0|poc|panic)  cmd_poc || true;;
+            0|poc)        cmd_poc || true;;
+            panic)        cmd_panic || true;;
+            kernelcache)  cmd_kernelcache || true;;
             f|fuzz)       cmd_fuzz || true;;
             exploits|e)   cmd_exploits || true;;
             # usbliter8-arctic
@@ -2721,6 +2949,33 @@ mha — MobileHouseArrest re-sign (K4.12).
   Usage: ./W0lfSword mha <Filza.ipa> [out.ipa]   (needs ldid)
 EOF
             ;;
+        panic)
+            cat <<'EOF'
+panic — classify crash reports against known bugs.
+  list              — crash reports saved in .w0lfsword/panics/
+  fetch [ip]        — pull the newest .ips off the phone over SSH
+  analyze <file>    — classify a .ips (JSON) or raw panic log:
+                      kernel vs SEP vs MTE vs userspace crash, and map
+                      it to known CVEs (CVE-2026-20687 AppleJPEGDriver,
+                      CVE-2026-43724 DirtySlide, CVE-2026-28990 EXR,
+                      CVE-2025-43520 DarkSword class) + the BUG_BOUNTY
+                      findings BB-032..037.
+EOF
+            ;;
+        kernelcache)
+            cat <<'EOF'
+kernelcache — offline XPF offset research, no device needed.
+  resolve <kc>      — run the XPF patchfinder on a kernelcache, print
+                      every resolved offset/symbol (tools/xpf-cli).
+  diff <a> <b>      — resolve two kernelcaches and diff the tables:
+                      identical vs changed vs one-sided items. This is
+                      the K4.1 methodology as a command — verify the
+                      offsets.m table for any iOS build before touching
+                      hardware.
+  extract <ipsw> [board] — pull kernelcache.release.* out of an IPSW
+                      zip (auto board detection). IPSWs: ipsw.me
+EOF
+            ;;
         usbtest)
             cat <<'EOF'
 usbtest — prove the USB link before you deploy anything.
@@ -2753,7 +3008,8 @@ explain — plain-English explanations of commands.
 Usage: ./W0lfSword explain <command>   (e.g. explain adderall)
 Available: adderall, build, deploy, quick, safe, toggle, setup,
            doctor, status, monitor, log, reboot, offsets, tweaks,
-           exploits, poc, fuzz, usbliter8, usbtest, help
+           exploits, poc, fuzz, usbliter8, usbtest, panic, kernelcache,
+           help
 EOF
             ;;
     esac
@@ -2837,8 +3093,10 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "device ..."   "Multi-device manager"
     printf "  ${C_EYE}%-14s${NC} %s\n" "usbliter8 (ul8)" "A12/A13 tethered jailbreak TUI (RP2350)${C_AMB} [root]${NC}"
     printf "  ${C_EYE}%-14s${NC} %s\n" "usbtest (u)"     "USB cable + pairing + data round-trip (harmless)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "panic"           "classify .ips panic logs → known CVEs (BB-032..037)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "kernelcache"     "offline XPF offset research: resolve / diff / extract"
     echo ""
-    echo -e "  ${C_DIM}Flags: -v verbose  -vv debug  -y/--yes skip prompts${NC}"
+    echo -e "  ${C_DIM}Flags: -v verbose  -vv debug  -y/--yes skip prompts  --json machine-readable (status/offsets/audit)${NC}"
     echo -e "  ${C_DIM}Tip: from menu, type 'b' to build, 'a' for adderall.${NC}"
     echo ""
 }
@@ -2854,12 +3112,13 @@ main() {
         [ "$a" = "-vv" ] || [ "$a" = "--debug" ] && { DEBUG=true; VERBOSE=true; continue; }
         [ "$a" = "-y" ] || [ "$a" = "--yes" ] && { YES_MODE=true; continue; }
         [ "$a" = "-x" ] || [ "$a" = "--explain" ] && { EXPLAIN=true; continue; }
+        [ "$a" = "--json" ] && { JSON_MODE=true; continue; }
     done
 
     local args=()
     local cmd=""
     for a in "$@"; do
-        case "$a" in -v|-vv|--verbose|--debug|-y|--yes|-x|--explain) continue;; esac
+        case "$a" in -v|-vv|--verbose|--debug|-y|--yes|-x|--explain|--json) continue;; esac
         [ "$a" = "--install" ] && a="install"
         [ -z "$cmd" ] && { cmd="$a"; continue; }
         args+=("$a")
@@ -2901,6 +3160,8 @@ main() {
         history)   cmd_history "${args[@]}";;
         monitor)   cmd_monitor "${args[@]}";;
         usbtest)   cmd_usbtest "${args[@]}";;
+        panic)     cmd_panic "${args[@]}";;
+        kernelcache) cmd_kernelcache "${args[@]}";;
         explain)   cmd_explain "${args[@]}";;
         # Add quick version command
      version|--version|-V) echo -e "${C_WOLF}W0lfSword v${VERSION}${NC} — iOS Kernel Exploit Toolkit"; echo -e "${C_DIM}github.com/kaffeindecaf/W0lfSword${NC}";;

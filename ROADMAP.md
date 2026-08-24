@@ -760,7 +760,14 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `J6.1` 🟠 — Route all original W0lfSword commands through W0lfSword-Beta  
   _Done: all 12 commands (build, extract, deploy, status, audit, log, toggle, offsets, targets, clean, doctor, help) are fully reimplemented in W0lfSword-Beta._
 
-- [ ] `J6.2` 🟡 — Add --json flag to status/audit/offsets for machine-readable output
+- [x] `J6.2` 🟡 — Add --json flag to status/audit/offsets for machine-readable output
+  _Done 2026-08-24: `--json` flag parsed in main() (any command position); status emits {version, git, roadmap, device, exploit_methods, offset_blocks}; audit emits {files[], issues, passed}; offsets emits {version_blocks[], soc_coverage, total_blocks}. Pure bash→python3 json.dumps, no deps._
+
+- [x] `J6.4` 🟡 — Panic log analyzer: `panic analyze` classifies .ips/panic logs (kernel/SEP/MTE/userspace) and maps to known CVEs + BB-032..037
+  _Done 2026-08-24: scripts/panic_analyzer.py (pure stdlib) — rules for SEP exhaustion (0x0006fe9x/0x6fea7), AppleJPEGDriver UAF (CVE-2026-20687), DirtySlide (CVE-2026-43724), DarkSword class (CVE-2025-43520), EXR (CVE-2026-28990), MCM activity. CLI: `panic list|fetch [ip]|analyze <file>` (menu `p`)._
+
+- [x] `J6.5` 🟢 — Kernelcache diff: offline XPF offset research (K4.1 automation) — resolve/diff kernelcaches, extract from IPSW
+  _Done 2026-08-24: `kernelcache resolve|diff|extract` (menu `k`) — runs tools/xpf-cli on IMG4 kernelcaches (no device), scripts/xpf_diff.py compares resolved tables (identical/changed/one-sided), extract pulls kernelcache.release.* from an IPSW zip with auto board detection._
 
 ## J7 — Polish
 

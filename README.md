@@ -40,6 +40,15 @@ Filza into a full root file browser.
   visibility, trust pairing, Lightning connection type, a lockdown
   diagnostics round-trip and a short syslog capture. Read-only,
   writes nothing. Run it before `adderall` if the phone isn't found.
+- `panic` command — drop a .ips crash report or panic log in and it
+  classifies the crash (kernel / SEP / MTE / userspace), extracts the
+  xnu build, and maps it to known CVEs + the BUG_BOUNTY findings
+  (BB-032..037). `panic fetch` pulls the latest report off the phone.
+- `kernelcache` command — offline XPF offset research: resolve a
+  kernelcache's offsets, diff two builds (the K4.1 methodology), or
+  extract the kernelcache straight from an IPSW. No device needed.
+- `--json` flag on status / offsets / audit — machine-readable output
+  for scripts and CI.
 - Version-aware hints — right after device detection the script prints
   gray text saying what actually works on that iOS version: full kernel
   exploit on 17.0–26.0.1, userspace-only (MCM / bad_query / fuzz) on
@@ -174,7 +183,8 @@ Not supported: iPhone 17 (A19), M5 iPads. MTE blocks kernel R/W there.
 ## Commands
 
 Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
-`d` deploy, `a` adderall, `u` usbtest, `s` status, `l` log.
+`d` deploy, `a` adderall, `u` usbtest, `p` panic, `k` kernelcache,
+`s` status, `l` log.
 
 | Command | Does | Example |
 |---------|------|---------|
@@ -204,6 +214,9 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `setup` | install build tools (needs sudo on Linux) | `sudo ./W0lfSword setup` |
 | `usbliter8` | A12/A13 tethered jailbreak TUI (needs sudo) | `sudo ./W0lfSword ul8` |
 | `usbtest (u)` | USB cable + pairing + data round-trip — harmless, read-only | `./W0lfSword usbtest` |
+| `panic` | classify .ips crash logs → kernel/SEP/MTE + known CVEs (BB-032..037) | `./W0lfSword panic analyze crash.ips` |
+| `kernelcache` | offline XPF offset research: resolve / diff / extract (K4.1 as a command) | `./W0lfSword kernelcache diff a.img4 b.img4` |
+| `status/offsets/audit --json` | machine-readable output for scripts and CI | `./W0lfSword status --json` |
 | `clean` / `update` / `audit` / `export` | housekeeping and diagnostics | `./W0lfSword update` |
 | `help` | full list with requirements | `./W0lfSword help` |
 
