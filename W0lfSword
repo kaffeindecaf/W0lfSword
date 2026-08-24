@@ -67,14 +67,19 @@ usb_ssh_up() {
     iproxy 2222 22 >/dev/null 2>&1 &
     SSH_TUNNEL_PID=$!
     sleep 1
-    if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o BatchMode=yes \
-           -p 2222 root@localhost "echo ok" 2>/dev/null | grep -q ok; then
+    local out
+    out=$(ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o BatchMode=yes \
+             -p 2222 root@localhost "echo ok" 2>&1) || true
+    if echo "$out" | grep -q ok; then
         SSH_TUNNEL_PORT="2222"
         return 0
     fi
     kill "$SSH_TUNNEL_PID" 2>/dev/null || true
     SSH_TUNNEL_PID=""
-    return 1
+    if echo "$out" | grep -qi "permission denied"; then
+        return 2   # sshd is up, but this computer has no key on the phone
+    fi
+    return 1       # no sshd / unreachable
 }
 
 ssh_safe() {
@@ -2184,8 +2189,15 @@ EOF
     # USB SSH tunnel — prefer USB transport when a device is attached
     # (no WiFi IP needed; iproxy forwards localhost:2222 → device:22).
     if [ -n "$usb_uuid" ]; then
-        if usb_ssh_up; then
+        usb_ssh_up
+        local usb_rc=$?
+        if [ "$usb_rc" -eq 0 ]; then
             echo -e "  ${C_GRN}✓${NC} USB SSH tunnel up — deploys go over USB (localhost:$SSH_TUNNEL_PORT), no WiFi needed"
+        elif [ "$usb_rc" -eq 2 ]; then
+            warn "USB SSH: sshd is up, but this computer has no SSH key on the phone"
+            hint "One-time setup: ssh-copy-id -p 2222 root@localhost   (enter the phone's root password, default alpine)"
+            if $USB_ONLY; then return 1; fi
+            echo -e "  ${C_DIM}Falling back to WiFi${NC}"
         elif $USB_ONLY; then
             err "USB SSH unavailable — is OpenSSH running on the phone? (--usb was set)"
             hint "The tunnel only replaces WiFi; the phone still needs sshd on port 22."
