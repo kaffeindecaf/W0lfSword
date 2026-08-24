@@ -41,6 +41,11 @@ host-side kernel research only.
     identical 14, changed 49. Struct deltas: itk_space 0x300→0x318,
     proc.struct_size 0x730→0x740, nsysent 0x22c→0x22e (2 new syscalls),
     cdevsw resolved→UNRESOLVED. Machine_CpuDatap 0x148 on both.
+11. **26.0.1 (23A355) t8030 kernelcache** — xnu-12377.2.9~1 (same xnu
+    build as K4.1's T8150 baseline). itk_space **0x310** — proving the
+    0x310 value is NOT T8150-only → per-version, and exposing the
+    offsets.m 26.0 block bug (fixed). Three-way diff in the findings
+    section below.
 
 ## What was NOT tested (needs your presence / go-ahead)
 
@@ -54,8 +59,15 @@ host-side kernel research only.
 
 ## Findings from this session (already committed)
 
-- K4.1 per-SoC flag RESOLVED: itk_space 0x318 on A13+A15, 0x310 is
-  T8150/A18-only (offsets.m comment + xpf-cli README updated).
+- K4.1 per-SoC flag RESOLVED — but not as first thought: itk_space is a
+  **per-VERSION** offset. Three-way t8030 diff (17.1→18.4.1→26.0.1):
+  0x300 / 0x318 / 0x310. The offsets.m **26.0 block had a real bug**
+  (0x318) — fixed to 0x310 (verified on t8030 AND T8150). 18.x stays 0x318.
 - offsets.m 18.4 A13 block values verified against real kernelcache.
 - offsets.m 17.x claims verified: itk_space 0x300 confirmed on 17.1.
-- proc.struct_size grows 0x730 → 0x740 → 0x748 (17.1 → 18.4.1 → 26.x).
+- proc.struct_size grows 0x730 → 0x740 → 0x748 (17.1 → 18.4.1 → 26.0.1).
+- nsysent 0x22c → 0x22e (2 syscalls added between 17.1 and 18.4.1; stable
+  into 26.0.1).
+- machine_CpuDatap 0x148 on 17.x/18.x A13, UNRESOLVED on 26.x A13.
+- sptm=0 on ALL t8030 builds (17.1/18.4.1/26.0.1) — SPTM is per-SoC
+  (T8150/A18 has it), not per-version.
