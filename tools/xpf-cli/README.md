@@ -12,6 +12,10 @@ kernel struct offsets against the 26.0.1 table in `kexploit/offsets.m`.
 ./xpf-cli kernelcache.img4 out.macho # decompress kernel to raw Mach-O
 ```
 
+Debian/Ubuntu build deps: `sudo apt install liblzfse-dev libblocksruntime-dev`
+(plus clang). The shipped `xpf-cli` binary is linked against liblzfse.so.1 —
+install `liblzfse1` if you run the prebuilt one instead of rebuilding.
+
 Feed it the **IMG4 kernelcache** (e.g. extracted from an IPSW). Modern
 Apple-CDN kernelcaches for A12+ are unencrypted; XPF's `kdecompress` handles
 IMG4→IM4P→krnl + LZFSE/LZSS. Encrypted ones need firmware keys first.
@@ -39,10 +43,29 @@ affect struct offsets). Conclusion: **the offsets.m 26.0.x block applies to
 26.1** — no new block needed. The kernel exploit itself stays gated on
 iOS < 26.1 (CVE-2025-43520 fixed in 26.1; offsets ≠ exploit availability).
 
-**Flagged discrepancy:** XPF resolves `task.itk_space = 0x310` on T8150
-(arm64e) for BOTH builds, but `offsets.m` sets 0x318 (verified on an SE3).
-Possibly a per-SoC delta — needs on-device confirmation before changing;
-see the note at `offsets.m` line ~864.
+## K4.1 follow-up (2026-08-24) — A13/t8030 18.4.1 (SE 2nd gen)
+
+Pulled `kernelcache.release.iphone12c` from the iPhone12,8 18.4.1 (22E252)
+IPSW via the ranged-download method (8.45GB IPSW, ~19MB fetched; zip64
+central dir + local-header offset resolved from the entry extra field).
+Matches the running kernel on the phone: xnu-11417.102.9~20/RELEASE_ARM64_T8030.
+
+| Item | 18.4.1 A13/t8030 | 26.x T8150 (K4.1) | Verdict |
+|------|------------------|-------------------|---------|
+| `task.itk_space` | 0x318 | 0x310 | **resolves the K4.1 per-SoC flag**: A13+A15 = 0x318, the 0x310 delta is T8150/A18-only |
+| `thread.machine_kstackptr` | 0xf8 | — | matches offsets.m isA13Above (0xF8) |
+| `proc.struct_size` | 0x740 | 0x748 | grew 8 bytes between 18.4.1 and 26.x — kcwatch signal |
+| `thread.machine_CpuDatap` | 0x148 | 0x1a0 | SoC delta, expected |
+| `vm_map.pmap` | 0x40 | 0x40 | identical |
+| sptm | **0** | 1 | SPTM not active on 18.4.1 — appears between 18.4.1 and 26.0 |
+
+Note: kernelcache name is per-board (`kernelcache.release.iphone12c` for
+D79AP), not the SoC — grep the IPSW central dir for `kernelcache.release.*`.
+
+**Resolved discrepancy (see table above):** the earlier T8150 `task.itk_space
+= 0x310` vs `offsets.m` 0x318 flag is now confirmed as a per-SoC delta —
+A13 (SE2/18.4.1) and A15 (SE3/18.6.x) both resolve 0x318; only T8150/A18
+shows 0x310. offsets.m stays 0x318 for iOS 18 blocks.
 
 ## Limitations
 
