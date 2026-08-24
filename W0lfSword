@@ -1981,6 +1981,38 @@ confirm() {
     return 1
 }
 
+# Validated choice prompt — loops until the answer is one of the allowed
+# values (empty = default). Rejects typos like "autp" instead of "auto".
+# Respects --yes (returns the default without asking).
+ask_choice() {
+    local prompt="${1:-}" default="${2:-}" valid="$3"
+    $YES_MODE && { echo "$default"; return 0; }
+    local ans
+    while true; do
+        echo -ne "  ${C_FROST}${prompt} [${default}]:${NC} "; read -r ans
+        [ -z "$ans" ] && ans="$default"
+        for v in $valid; do
+            [ "$ans" = "$v" ] && { echo "$ans"; return 0; }
+        done
+        echo -e "  ${C_RED}✗${NC} Invalid: '${ans}' — choose from: ${C_EYE}$valid${NC}"
+    done
+}
+
+# Validated integer prompt — bounded, re-asks on garbage. Respects --yes.
+ask_int() {
+    local prompt="${1:-}" default="${2:-}" min="${3:-1}" max="${4:-20}"
+    $YES_MODE && { echo "$default"; return 0; }
+    local ans
+    while true; do
+        echo -ne "  ${C_FROST}${prompt} [${default}]:${NC} "; read -r ans
+        [ -z "$ans" ] && ans="$default"
+        if [[ "$ans" =~ ^[0-9]+$ ]] && [ "$ans" -ge "$min" ] && [ "$ans" -le "$max" ]; then
+            echo "$ans"; return 0
+        fi
+        echo -e "  ${C_RED}✗${NC} Invalid: '${ans}' — enter a number ${min}–${max}"
+    done
+}
+
 # Pulse animation — runs in background, stopped by killing $PULSE_PID
 start_pulse() {
     local msg="$1"
@@ -2339,22 +2371,28 @@ EOF
     echo -e "  ${C_GREY}Target:${NC}  ${C_EYE}$TARGET_BUNDLE${NC}"
 
     if [ "$EXPLOIT_METHOD" = "auto" ]; then
-        echo -ne "  ${C_FROST}Exploit method [auto/pe_v1/pe_v2]:${NC} "; read -r em
-        [ -n "$em" ] && EXPLOIT_METHOD="$em"
+        EXPLOIT_METHOD=$(ask_choice "Exploit method" "auto" "auto pe_v1 pe_v2")
     fi
     echo -e "  ${C_GREY}Exploit:${NC} ${C_AMB}$EXPLOIT_METHOD${NC}"
 
     local RETRY_COUNT=5
-    echo -ne "  ${C_FROST}Retry count [5]:${NC} "; read -r rc
-    [ -n "$rc" ] && RETRY_COUNT="$rc"
+    RETRY_COUNT=$(ask_int "Retry count" 5 1 20)
 
     local ENABLE_SSV=true
     confirm "Enable SSV bypass?" || ENABLE_SSV=false
     echo -e "  ${C_GREY}SSV:${NC}     $($ENABLE_SSV && echo "${C_GRN}yes${NC}" || echo "${C_DIM}no${NC}")"
 
     local PROFILE_NAME="${DEV_MODEL}-${IOS_VER}"
-    echo -ne "  ${C_FROST}Profile name [$PROFILE_NAME]:${NC} "; read -r pn
-    [ -n "$pn" ] && PROFILE_NAME="$pn"
+    if ! $YES_MODE; then
+        while true; do
+            echo -ne "  ${C_FROST}Profile name [$PROFILE_NAME]:${NC} "; read -r pn
+            [ -z "$pn" ] && pn="$PROFILE_NAME"
+            if [[ "$pn" =~ ^[A-Za-z0-9._-]+$ ]]; then
+                PROFILE_NAME="$pn"; break
+            fi
+            echo -e "  ${C_RED}✗${NC} Invalid profile name: '${pn}' — letters, digits, . _ - only"
+        done
+    fi
 
     echo ""
     echo -e "  ${C_STEEL}${B}── Configuration Summary ──${NC}"
