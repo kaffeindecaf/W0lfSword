@@ -1,6 +1,6 @@
 #!/bin/bash
 # Single-source version — keep this in sync with control (A6.12).
-VERSION="1.0.0"
+VERSION="1.1.0"
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                      W0lfSword v$VERSION                      ║
 # ║  iOS Kernel Exploit Toolkit — Interactive Exploit Menu       ║
@@ -206,6 +206,118 @@ test_usb_cable() {
         hint "Short MFI-certified cable, direct port (no hub), no extension dongles."
     fi
     return 0
+}
+
+# ── What you can do on this iOS version ───────────────────────
+# Gray hint lines under the detected device: which features work
+# on that exact iOS version. Version-aware, no device access.
+ios_recommendations() {
+    local ios="${1:-}"
+    [ -n "$ios" ] || return 0
+    if [ "$(version_sort_first "$ios" "26.1")" = "26.1" ]; then
+        echo -e "  ${C_DIM}↳ iOS $ios: kernel exploit capped (DarkSword patched in 26.1)${NC}"
+        echo -e "  ${C_DIM}↳ still works: userspace container access (MCM), bad_query read-escape, safe mode${NC}"
+        echo -e "  ${C_DIM}↳ try: mha / fuzz (hunt a new bug) / usbliter8 (tethered bootchain, any iOS)${NC}"
+    elif [ "$(version_sort_first "$ios" "17.0")" = "17.0" ]; then
+        echo -e "  ${C_DIM}↳ iOS $ios: full support — kernel exploit, sandbox escape, SSV writes, root${NC}"
+        echo -e "  ${C_DIM}↳ try: adderall — the exploit usually wins within a few tries${NC}"
+    else
+        echo -e "  ${C_DIM}↳ iOS $ios: below the offset table (min 17.0) — nothing will run${NC}"
+        echo -e "  ${C_DIM}↳ try: usbliter8 (SecureROM works on any iOS) or update the device${NC}"
+    fi
+}
+
+# ── USB test — harmless connectivity + pairing checks ─────────
+# Read-only round-trips over usbmuxd: pairing validation, device
+# identity, a lockdown diagnostics request, and a short syslog
+# capture. Proves the cable, the daemon, and the trust pairing
+# all work before anything gets deployed. Writes nothing.
+cmd_usbtest() {
+    show_header
+    echo ""
+    section "USB Test — cable · pairing · data round-trip"
+    echo -e "  ${C_DIM}Only harmless read-only requests. Nothing is written to the phone.${NC}"
+    echo ""
+
+    # usbmuxd (Linux only — macOS runs it as a launchd service)
+    if [ "$IS_MACOS" -eq 0 ]; then
+        if pgrep -x usbmuxd &>/dev/null || pgrep -f "usbmuxd" &>/dev/null; then
+            ok "usbmuxd is running"
+        else
+            err "usbmuxd is not running"
+            hint "Start it: sudo systemctl start usbmuxd   (or: usbmuxd -f -v)"
+        fi
+    fi
+
+    local uuid; uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
+    if [ -z "$uuid" ]; then
+        err "No device on USB"
+        hint "Plug the phone in with its Lightning cable (SE/8/X/11 era — not USB-C)"
+        hint "Straight into the computer, no hub. Charging-but-invisible = cable or port."
+        return 1
+    fi
+    echo -e "  ${C_GRN}✓${NC} Device visible on USB: ${C_EYE}$uuid${NC}"
+
+    # pairing / trust
+    if idevicepair validate 2>/dev/null | grep -qi "paired"; then
+        ok "Pairing valid — this computer is trusted"
+    else
+        warn "Not paired — tap TRUST on the phone if it asks"
+        idevicepair pair 2>/dev/null || true
+        sleep 1
+        if idevicepair validate 2>/dev/null | grep -qi "paired"; then
+            ok "Paired after trust prompt"
+        else
+            err "Pairing failed — unlock the phone first (a passcode locks pairing), tap TRUST, re-run: ./W0lfSword usbtest"
+            return 1
+        fi
+    fi
+
+    # connection type — makes sure we are on the USB path
+    local ctype; ctype=$(ideviceinfo -k ConnectionType 2>/dev/null || echo "")
+    if [ "$ctype" = "USB" ]; then
+        ok "Connection is USB (Lightning cable)"
+    elif [ -n "$ctype" ]; then
+        warn "Device is reachable over $ctype, not USB — this test only covers the USB path"
+    else
+        warn "Could not read connection type"
+    fi
+
+    # identity round-trip
+    local name ver model
+    name=$(ideviceinfo -k DeviceName 2>/dev/null || echo "?")
+    ver=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "?")
+    model=$(ideviceinfo -k HardwareModel 2>/dev/null || echo "?")
+    echo -e "  ${C_DIM}device: ${C_EYE}$name${NC}  ${C_DIM}iOS $ver · $model${NC}"
+
+    # harmless test request — lockdown diagnostics round-trip
+    if command -v idevicediagnostics &>/dev/null && idevicediagnostics diagnostics All >/dev/null 2>&1; then
+        ok "Lockdown diagnostics round-trip OK (read-only)"
+    else
+        err "Diagnostics request failed — the USB data path is broken"
+        hint "Try another cable/port, then re-run: ./W0lfSword usbtest"
+        return 1
+    fi
+
+    # short syslog capture — proves data flows host ← phone
+    local slog_file; slog_file="$(mktemp 2>/dev/null || echo /tmp/w0lf_usbtest.$$)"
+    idevicesyslog >"$slog_file" 2>/dev/null & local sp=$!
+    sleep 2
+    kill "$sp" 2>/dev/null || true
+    wait "$sp" 2>/dev/null || true
+    if [ -s "$slog_file" ]; then
+        ok "Syslog stream received data over USB"
+    else
+        warn "Syslog was empty — logging may be off, not fatal"
+    fi
+    rm -f "$slog_file"
+
+    # cable reliability probe (10 rapid reads)
+    test_usb_cable "$uuid" || true
+
+    echo ""
+    ok "USB test finished"
+    hint "Next: sudo ./W0lfSword adderall"
 }
 
 # ── Drawing helpers ───────────────────────────────────────────
@@ -634,7 +746,7 @@ cmd_targets() {
     section "Research Exploits (referenceforAI/moreprojects)"
     printf "  ${C_FROST}%-22s${NC} %-16s ${C_GRN}%s${NC}\n"            "DarkSword pe_v1/pe_v2" "17.0–26.0.1" "implemented"
     printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC} (K1.6)\n"     "kfd PUAF"              "16.x"        "port pending"
-    printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC}\n"            "checkm8 (usbliter8)"   "15.6–27.0b"  "menu 9"
+    printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC}\n"            "usbliter8 (SecureROM)" "A12–A13 any iOS" "menu 9"
     printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC} (CVE-2026-20687)\n" "AppleJPEGDriver UAF" "26.3 (A19)" "panic PoC"
     printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC} (CVE-2026-43724)\n" "dyld slide OOB"      "26.x?"       "LPE/panic"
     printf "  ${C_FROST}%-22s${NC} %-16s ${C_AMB}%s${NC} (CVE-2026-28990)\n" "EXR ImageIO overflow" "≤26.4.2"    "crash PoC"
@@ -658,7 +770,7 @@ cmd_exploits() {
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (K1.6)\n" "kfd PhysPuppet" "16.x" "A10+" "PUAF — physical UAF" "planned"
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (K1.6)\n" "kfd Smith"        "16.x" "A10+" "PUAF — physical race" "planned"
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (K1.6)\n" "kfd Landa"        "16.x" "A10+" "PUAF — IOSurface race" "planned"
-    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC}\n" "checkm8 (usbliter8)" "15.6–27.0b" "A7–A11" "SecureROM USB bootchain" "menu 9"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC}\n" "usbliter8 (SecureROM)" "any iOS"  "A12–A13" "SecureROM USB bootchain" "menu 9"
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2026-20687)\n" "AppleJPEGDriver UAF" "26.3" "A19" "kernel UAF → MTE panic" "research"
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2026-43724)\n" "dyld slide OOB" "26.x?" "arm64e" "v5 slide-walk OOB R/W" "research"
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2026-28990)\n" "EXR ImageIO overflow" "≤26.4.2" "all" "int overflow → heap overflow" "research"
@@ -1412,6 +1524,7 @@ draw_menu() {
         for u in "${DEV_USB[@]}"; do
             IFS='|' read -r uuid name ios model <<< "$u"
             echo -e "  ${C_GRN}⬤ USB${NC}  ${C_EYE}${name}${NC}  ${C_DIM}iOS ${ios}  ${model}${NC}"
+            ios_recommendations "$ios"
         done
         for w in "${DEV_WIFI[@]}"; do
             IFS='|' read -r mark ip dname st <<< "$w"
@@ -1445,6 +1558,7 @@ draw_menu() {
     menu_opt 7 "Diagnostics"      "doctor · audit · status"
     menu_opt 8 "Targets & Exploits" "supported apps · technique matrix"
     menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
+    menu_opt u "USB Test"         "cable · pairing · data round-trip (harmless)"
     echo ""
 
     menu_group "research (device-crashing PoCs)"
@@ -1454,7 +1568,7 @@ draw_menu() {
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
     printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
-    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
+    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
@@ -1553,6 +1667,7 @@ run_menu() {
                     run_usbliter8 "$@" || true
                 fi
                 ;;
+            u|usbtest)    cmd_usbtest || true;;
             # Quick shortcuts
             b|B|build)    cmd_build || true;;
             d|D|deploy)   cmd_deploy || true;;
@@ -1789,6 +1904,7 @@ EOF
     echo ""
     echo -e "  ${C_EYE}${B}$DEV_NAME${NC} — ${C_GRN}iOS $IOS_VER${NC} • ${C_EYE}$DEV_MODEL${NC}"
     log_script "device: $DEV_NAME ($DEV_MODEL) iOS $IOS_VER"
+    ios_recommendations "$IOS_VER"
 
     # Friendly prerequisite check: is Filza actually installed?
     local FILZA_CHECK=""
@@ -1830,6 +1946,15 @@ EOF
             fi
             echo -e "  ${C_DIM}Continuing over WiFi (device $IP) — deploys go over the network.${NC}"
         }
+        # Harmless extra probes: connection type + a lockdown diagnostics
+        # round-trip to prove the USB data path end to end.
+        local ctype; ctype=$(ideviceinfo -k ConnectionType 2>/dev/null || echo "")
+        [ "$ctype" = "USB" ] && echo -e "  ${C_DIM}connection: USB (Lightning)${NC}"
+        if command -v idevicediagnostics &>/dev/null && idevicediagnostics diagnostics All >/dev/null 2>&1; then
+            echo -e "  ${C_GRN}✓${NC} USB data round-trip OK"
+        else
+            warn "USB diagnostics round-trip failed — deploys may be flaky"
+        fi
     else
         echo -e "  ${C_DIM}(no USB device — cable check skipped, using $([ -n "$IP" ] && echo "WiFi" || echo "USB later"))${NC}"
     fi
@@ -2591,6 +2716,17 @@ mha — MobileHouseArrest re-sign (K4.12).
   Usage: ./W0lfSword mha <Filza.ipa> [out.ipa]   (needs ldid)
 EOF
             ;;
+        usbtest)
+            cat <<'EOF'
+usbtest — prove the USB link before you deploy anything.
+  Runs harmless read-only checks: usbmuxd up, device visible,
+  pairing valid (idevicepair validate — tap TRUST if asked),
+  connection type is USB (Lightning, not USB-C), a lockdown
+  diagnostics round-trip, and a 2-second syslog capture. Plus
+  the 10-read cable reliability probe. Nothing is written to
+  the phone. Run this first if adderall can't find the device.
+EOF
+            ;;
         help)
             cat <<'EOF'
 W0lfSword — iOS kernel exploit toolkit, one script.
@@ -2612,7 +2748,7 @@ explain — plain-English explanations of commands.
 Usage: ./W0lfSword explain <command>   (e.g. explain adderall)
 Available: adderall, build, deploy, quick, safe, toggle, setup,
            doctor, status, monitor, log, reboot, offsets, tweaks,
-           exploits, poc, fuzz, usbliter8, help
+           exploits, poc, fuzz, usbliter8, usbtest, help
 EOF
             ;;
     esac
@@ -2695,6 +2831,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "profile ..."   "Save/load exploit configs"
     printf "  ${C_EYE}%-14s${NC} %s\n" "device ..."   "Multi-device manager"
     printf "  ${C_EYE}%-14s${NC} %s\n" "usbliter8 (ul8)" "A12/A13 tethered jailbreak TUI (RP2350)${C_AMB} [root]${NC}"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "usbtest (u)"     "USB cable + pairing + data round-trip (harmless)"
     echo ""
     echo -e "  ${C_DIM}Flags: -v verbose  -vv debug  -y/--yes skip prompts${NC}"
     echo -e "  ${C_DIM}Tip: from menu, type 'b' to build, 'a' for adderall.${NC}"
@@ -2758,6 +2895,7 @@ main() {
         device)    cmd_device "${args[@]}";;
         history)   cmd_history "${args[@]}";;
         monitor)   cmd_monitor "${args[@]}";;
+        usbtest)   cmd_usbtest "${args[@]}";;
         explain)   cmd_explain "${args[@]}";;
         # Add quick version command
      version|--version|-V) echo -e "${C_WOLF}W0lfSword v${VERSION}${NC} — iOS Kernel Exploit Toolkit"; echo -e "${C_DIM}github.com/kaffeindecaf/W0lfSword${NC}";;

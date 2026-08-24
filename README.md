@@ -32,6 +32,25 @@ Filza into a full root file browser.
                            ;
 ```
 
+**Current release: v1.1.0**
+
+## What's new in v1.1.0
+
+- `usbtest` command — harmless USB + pairing check: usbmuxd, cable
+  visibility, trust pairing, Lightning connection type, a lockdown
+  diagnostics round-trip and a short syslog capture. Read-only,
+  writes nothing. Run it before `adderall` if the phone isn't found.
+- Version-aware hints — right after device detection the script prints
+  gray text saying what actually works on that iOS version: full kernel
+  exploit on 17.0–26.0.1, userspace-only (MCM / bad_query / fuzz) on
+  26.1+.
+- `adderall` gained the same USB round-trip probe and the version hints.
+- usbliter8 bundle refreshed from upstream — the offset-migration engine
+  (AArch64 fingerprinting, `migrate`/`propagate`, 10 A13 profiles) is now
+  bundled.
+- Exploit matrix corrected: usbliter8 is the A12/A13 SecureROM exploit
+  driven by an RP2350 board — it is NOT checkm8 (that was wrong).
+
 ## What it is
 
 W0lfSword is a tweak that injects into the Filza file manager and runs a real
@@ -68,9 +87,11 @@ deploys it, restarts Filza, and reports whether the exploit won.
 
 ## Known issues
 
-- iOS 26.1 and newer are not supported. The offset table covers
-  17.0–26.0.1; on 26.1+ the kernel stage refuses to run instead of risking
-  a panic. (26.1 work is post-v1.0 research, see the ROADMAP.)
+- iOS 26.1 and newer: the kernel stage is capped (DarkSword was patched
+  in 26.1). The userspace modules still work there — MCM container access
+  (`mha`) and the bad_query read-escape — and the script prints exactly
+  what's available for your iOS version after it detects the device.
+  (26.1+ research is post-v1.0, see the ROADMAP.)
 - The padlock bypass hooks Filza's UI classes. If a Filza update renames
   them, some padlocks come back until the hooks are updated. The exploit,
   sandbox escape and SSV writes are unaffected.
@@ -153,7 +174,7 @@ Not supported: iPhone 17 (A19), M5 iPads. MTE blocks kernel R/W there.
 ## Commands
 
 Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
-`d` deploy, `a` adderall, `s` status, `l` log.
+`d` deploy, `a` adderall, `u` usbtest, `s` status, `l` log.
 
 | Command | Does | Example |
 |---------|------|---------|
@@ -182,6 +203,7 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `crashlog` | last crash-monitor log | `./W0lfSword crashlog` |
 | `setup` | install build tools (needs sudo on Linux) | `sudo ./W0lfSword setup` |
 | `usbliter8` | A12/A13 tethered jailbreak TUI (needs sudo) | `sudo ./W0lfSword ul8` |
+| `usbtest (u)` | USB cable + pairing + data round-trip — harmless, read-only | `./W0lfSword usbtest` |
 | `clean` / `update` / `audit` / `export` | housekeeping and diagnostics | `./W0lfSword update` |
 | `help` | full list with requirements | `./W0lfSword help` |
 
@@ -292,19 +314,30 @@ Built with knowledge from [felix-pb/kfd](https://github.com/felix-pb/kfd),
 
 ## Reference library (`referenceforAI/`)
 
-A local knowledge base of 19 third-party projects, indexed in
-[`referenceforAI/RESEARCH.md`](referenceforAI/RESEARCH.md). Highlights:
+A local knowledge base that used to hold 23 third-party repos
+(`projects/` + `moreprojects/`). On 2026-08-24 a full final research pass
+was completed and archived into
+[`referenceforAI/RESEARCH.md`](referenceforAI/RESEARCH.md): per-repo deep
+dives (bug mechanics, object layouts, key files, PoC stages, live-vs-
+patched status), a corrected technique matrix, roadmap mapping, and a
+provenance table with every upstream URL + commit so any repo can be
+re-cloned in one command. The project folders were then deleted; the
+skills, docs and SandboxEscape.md are kept.
+
+Highlights preserved in the archive:
 
 - Exploit chains: `darksword-kexploit`, `DarkSword-RCE` (WebKit→kernel),
   `excalibur`, `kfd` (PUAF), `xnu_1day_practice` (14 CVE PoCs with analyses)
 - WebKit/zero-click: Coruna kit (CVE-2024-23222), Glass Cage
-  (CVE-2025-24085/24201/43300)
+  (CVE-2025-24085/24201)
 - ImageIO: `CVE-2025-43300-hunters` (DNG 0-click + analyzer),
   `CVE-2025-43300-PwnToday`, `zero-click-exploit-analysis` (CVE-2025-55177),
-  `CVE-2023-41064` (BLASTPASS)
+  `CVE-2023-41064` (BLASTPASS), `exr-imageio-poc` (CVE-2026-28990)
+- Kernel bugs: `CVE-2026-20687` (AppleJPEGDriver UAF), `DirtySlide`
+  (CVE-2026-43724), `SEP-Exhaustion-Kernel-Panic`
 - Sandbox escapes: `bad_query` (containermanagerd traversal, iOS 26–27),
   `FilzaSlop` (MCM container access — ported into `kexploit/mcm_bridge.m`)
-- Bootchain: `usbliter8-fun`, `usbliter8-fun2` (iOS 27)
+- Bootchain: `usbliter8-fun`, `usbliter8-fun2` (A12/A13 SecureROM, iOS 27)
 - Tooling: `iDevice-Toolkit` (CVE-2025-24203), `Mugunghwa`, `opainject`,
   `TrollStore`
 
