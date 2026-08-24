@@ -75,18 +75,22 @@ def main():
         name_len, extra_len, comment_len = struct.unpack_from("<HHH", cds, pos + 28)
         name = cds[pos+46:pos+46+name_len].decode("utf-8", "replace")
         if name.startswith("kernelcache.release."):
+            ucsize = struct.unpack_from("<I", cds, pos + 24)[0]
             csize = struct.unpack_from("<I", cds, pos + 20)[0]
             lho = struct.unpack_from("<I", cds, pos + 42)[0]
-            # zip64: 0xFFFFFFFF placeholders resolved via entry extra field
-            # (ID 0x0001: only fields that were 0xFFFFFFFF appear, in order:
-            #  csize(8) [if placeholder] then lho(8) [if placeholder])
+            # zip64: 0xFFFFFFFF placeholders resolved via the entry extra
+            # field (ID 0x0001). Fields appear in ORDER ucsize, csize, lho —
+            # but only for those that were 0xFFFFFFFF in the CD record.
             extra = cds[pos+46+name_len:pos+46+name_len+extra_len]
-            if lho == 0xFFFFFFFF or csize == 0xFFFFFFFF:
+            if lho == 0xFFFFFFFF or csize == 0xFFFFFFFF or ucsize == 0xFFFFFFFF:
                 epos = 0
                 while epos + 4 <= len(extra):
                     eid, esz = struct.unpack_from("<HH", extra, epos)
                     if eid == 0x0001:
                         eo = epos + 4
+                        if ucsize == 0xFFFFFFFF:
+                            ucsize = struct.unpack_from("<Q", extra, eo)[0]
+                            eo += 8
                         if csize == 0xFFFFFFFF:
                             csize = struct.unpack_from("<Q", extra, eo)[0]
                             eo += 8
