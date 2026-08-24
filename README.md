@@ -1,9 +1,29 @@
 # W0lfSword
 
-Kernel exploit toolkit for iOS. One command turns a jailbroken iPhone with
-Filza into a full root file browser.
+[![GitHub stars](https://img.shields.io/github/stars/kaffeindecaf/W0lfSword?style=flat-square&color=38_9df8)](https://github.com/kaffeindecaf/W0lfSword/stargazers)
+[![License](https://img.shields.io/github/license/kaffeindecaf/W0lfSword?style=flat-square&color=blue)](LICENSE)
+[![iOS](https://img.shields.io/badge/iOS-17.0%E2%80%9326.0.1-8A2BE2?style=flat-square)](https://github.com/kaffeindecaf/W0lfSword)
+[![DarkSword](https://img.shields.io/badge/exploit-DarkSword%20R%2FW-FF4D4D?style=flat-square)](https://github.com/kaffeindecaf/W0lfSword)
+[![Status](https://img.shields.io/badge/status-active%20development-39D353?style=flat-square)](https://github.com/kaffeindecaf/W0lfSword)
 
-```
+**Kernel exploit toolkit for iOS.** One command turns a jailbroken iPhone with
+Filza into a full root file browser — and a separate host-side engine that
+**pulls kernel offsets from any iOS build without owning the device**.
+
+- 🔓 **DarkSword kernel R/W** (CVE-2025-43520) + SSV bypass, deployed over USB
+  in one command — no WiFi, no manual SSH setup
+- 🔍 **XPF offset verification on the host** — resolve a kernelcache's struct
+  offsets, diff two builds, extract from an IPSW. The only toolkit that does
+  this without a jailbroken device
+- 🧪 **Research tools built in** — panic log analyzer, kernelcache diffing,
+  fuzz harness, version-aware exploit guidance
+
+![adderall demo](docs/demo.png)
+
+<details>
+<summary><b>🐺 howl (ascii art)</b></summary>
+
+```text
                               __
                             .d$$b
                           .' TO$;\
@@ -25,12 +45,14 @@ Filza into a full root file browser.
  `-.-"..--""   " /         /  ;
 .-" ..--""        -'          :
 ..--""--.-"         (\      .-(\
-  ..--""              `-\(\/;`
+  ..--""              `-\(\\/;`
     _.                      :
                             ;`-
                            :\
                            ;
 ```
+
+</details>
 
 **Current release: v1.1.0**
 
@@ -62,11 +84,20 @@ Filza into a full root file browser.
 
 ## What it is
 
-W0lfSword is a tweak that injects into the Filza file manager and runs a real
-kernel exploit (DarkSword) every time Filza opens. When the exploit wins,
-Filza stops being a sandboxed app: `/System`, `/usr`, `/bin`, other apps'
-containers, everything becomes readable and writable from the normal file
-browser UI.
+W0lfSword is two things in one repo:
+
+1. **A deployable exploit tweak.** It injects into the Filza file manager and
+   runs a real kernel exploit (DarkSword, CVE-2025-43520) every time Filza
+   opens. When the exploit wins, Filza stops being a sandboxed app:
+   `/System`, `/usr`, `/bin`, other apps' containers — everything becomes
+   readable and writable from the normal file browser UI.
+
+2. **A host-side offset research engine.** `kernelcache` + `panic` + the XPF
+   resolver do real kernel work with **no device at all**: resolve struct
+   offsets from a kernelcache, diff two iOS builds to see what changed
+   (syscalls added, structs resized, SPTM status), and classify crash logs.
+   This is the part that caught a wrong `itk_space` offset in our own table —
+   the tool verifies the exploit's assumptions before the exploit ever runs.
 
 You drive the whole thing from a single script on your computer:
 
@@ -74,8 +105,9 @@ You drive the whole thing from a single script on your computer:
 sudo ./W0lfSword adderall
 ```
 
-It finds the phone, installs any missing build tools, builds the tweak,
-deploys it, restarts Filza, and reports whether the exploit won.
+It finds the phone (USB preferred, no WiFi IP needed), installs any missing
+build tools, generates + installs its own SSH key, builds the tweak, deploys
+it, restarts Filza, and reports whether the exploit won.
 
 ## What you get
 
