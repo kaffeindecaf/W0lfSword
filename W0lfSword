@@ -44,6 +44,8 @@ cleanup() {
         stty echo 2>/dev/null || true
         echo -e "\033[?25h"
     }
+    [ -n "${SSH_TUNNEL_PID:-}" ] && kill "$SSH_TUNNEL_PID" 2>/dev/null || true
+    SSH_TUNNEL_PID="" ; SSH_TUNNEL_PORT=""
     stop_crash_monitor
     log_script "session ended (exit=$?)"
 }
@@ -51,13 +53,51 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
 
 # ── Fail-safe wrappers ───────────────────────────────────────
+# USB SSH tunnel: iproxy forwards localhost:2222 → device:22 over
+# usbmuxd, so deploys work without WiFi/IP. The phone still needs
+# OpenSSH listening on port 22 — the tunnel only replaces the network.
+SSH_TUNNEL_PID=""
+SSH_TUNNEL_PORT=""
+
+usb_ssh_up() {
+    [ -n "$SSH_TUNNEL_PID" ] && return 0
+    command -v iproxy &>/dev/null || return 1
+    command -v idevice_id &>/dev/null || return 1
+    [ -n "$(idevice_id -l 2>/dev/null | head -1)" ] || return 1
+    iproxy 2222 22 >/dev/null 2>&1 &
+    SSH_TUNNEL_PID=$!
+    sleep 1
+    if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o BatchMode=yes \
+           -p 2222 root@localhost "echo ok" 2>/dev/null | grep -q ok; then
+        SSH_TUNNEL_PORT="2222"
+        return 0
+    fi
+    kill "$SSH_TUNNEL_PID" 2>/dev/null || true
+    SSH_TUNNEL_PID=""
+    return 1
+}
+
 ssh_safe() {
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$@" 2>/dev/null
+    local host="${1:-}"
+    shift
+    if [ -n "$SSH_TUNNEL_PORT" ]; then
+        ssh -p "$SSH_TUNNEL_PORT" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+            -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "root@localhost" "$@" 2>/dev/null
+    else
+        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+            -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "$@" 2>/dev/null
+    fi
 }
 scp_safe() {
-    scp -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        "$@" 2>/dev/null
+    local remote="${1:-}"
+    shift
+    if [ -n "$SSH_TUNNEL_PORT" ]; then
+        scp -P "$SSH_TUNNEL_PORT" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+            "root@localhost:${remote#*:}" "$@" 2>/dev/null
+    else
+        scp -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+            "$remote" "$@" 2>/dev/null
+    fi
 }
 retry() {
     local max="${1:-3}" delay="${2:-1}" cmd="${3:-true}"
@@ -1963,9 +2003,10 @@ stop_pulse() {
 cmd_adderall() {
     # Parse adderall-specific flags
     local SAFE_MODE=false
+    local USB_ONLY=false
     local args_clean=()
     for a in "$@"; do
-        case "$a" in --safe|--safe-mode) SAFE_MODE=true;; *) args_clean+=("$a");; esac
+        case "$a" in --safe|--safe-mode) SAFE_MODE=true;; --usb) USB_ONLY=true;; *) args_clean+=("$a");; esac
     done
     set -- "${args_clean[@]}"
 
@@ -2106,6 +2147,23 @@ EOF
         else
             echo -e "  ${C_DIM}No USB device found — checking saved WiFi devices...${NC}"
         fi
+    fi
+
+    # USB SSH tunnel — prefer USB transport when a device is attached
+    # (no WiFi IP needed; iproxy forwards localhost:2222 → device:22).
+    if [ -n "$usb_uuid" ]; then
+        if usb_ssh_up; then
+            echo -e "  ${C_GRN}✓${NC} USB SSH tunnel up — deploys go over USB (localhost:$SSH_TUNNEL_PORT), no WiFi needed"
+        elif $USB_ONLY; then
+            err "USB SSH unavailable — is OpenSSH running on the phone? (--usb was set)"
+            hint "The tunnel only replaces WiFi; the phone still needs sshd on port 22."
+            return 1
+        else
+            echo -e "  ${C_DIM}USB SSH unavailable (OpenSSH not reachable on the phone?) — falling back to WiFi${NC}"
+        fi
+    elif $USB_ONLY; then
+        err "--usb was set but no USB device is connected"
+        return 1
     fi
 
     # If no USB, try WiFi/SSH
@@ -2759,6 +2817,8 @@ adderall — the everything command.
   1. Installs missing build tools AUTOMATICALLY (clang, dpkg, THEOS,
      libimobiledevice) — zero questions
   2. Finds your phone over USB or WiFi and pairs it (tap TRUST on the phone)
+     — when the phone is on USB, a USB SSH tunnel (iproxy) is started and
+     deploys go over USB, no WiFi IP needed. --usb forces USB-only.
   3. Tests the USB cable (10 rapid reads — warns if it's flaky)
   4. Checks your iOS version is supported by the offset table
   5. Compiles the tweak ON THIS COMPUTER (Theos + clang)
@@ -3096,7 +3156,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "panic"           "classify .ips panic logs → known CVEs (BB-032..037)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "kernelcache"     "offline XPF offset research: resolve / diff / extract"
     echo ""
-    echo -e "  ${C_DIM}Flags: -v verbose  -vv debug  -y/--yes skip prompts  --json machine-readable (status/offsets/audit)${NC}"
+    echo -e "  ${C_DIM}Flags: -v verbose  -vv debug  -y/--yes skip prompts  --json machine-readable (status/offsets/audit)  adderall --usb: force USB SSH${NC}"
     echo -e "  ${C_DIM}Tip: from menu, type 'b' to build, 'a' for adderall.${NC}"
     echo ""
 }

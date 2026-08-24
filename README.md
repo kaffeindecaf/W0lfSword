@@ -188,7 +188,8 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 
 | Command | Does | Example |
 |---------|------|---------|
-| `adderall` | discover → build → deploy → verify (needs sudo) | `sudo ./W0lfSword adderall` |
+| `adderall` | discover → build → deploy → verify (needs sudo) — USB SSH preferred when the phone is plugged in | `sudo ./W0lfSword adderall` |
+| `adderall --usb` | force USB-only transport (fails if no USB device/sshd) | `sudo ./W0lfSword adderall --usb` |
 | `quick` | one-shot build → deploy → verify | `./W0lfSword quick` |
 | `build` | compile the tweak into a .deb | `./W0lfSword build` |
 | `deploy <ip>` | install the .deb on the phone | `./W0lfSword deploy 192.168.1.5` |
@@ -271,7 +272,11 @@ Build problems:
 Device problems:
 
 - Filza crashes on launch → a previous run panicked the kernel, reboot the phone
-- `ssh: connect refused` → install OpenSSH on the phone
+- `ssh: connect refused` / scp fails → OpenSSH is not listening on the phone
+  (port 22). This is the #1 cause of deploy failures and no transport fixes
+  it — USB SSH (`adderall --usb`, iproxy over usbmuxd) only replaces WiFi,
+  the phone still needs sshd running (install OpenSSH on the jailbreak).
+  Also verify the phone's IP: `./W0lfSword device add <ip>` if it changed.
 - `Permission denied (publickey)` → run `ssh root@<phone-ip>` once and accept the key
 - Tweak does nothing → kill-switch flag is set, `./W0lfSword toggle off`
 - Writes fail on system paths → SSV didn't activate, check the log for `ensureSSVActive set active=1`
