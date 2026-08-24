@@ -12,7 +12,7 @@ from pathlib import Path
 
 from colors import C, ok, err, warn, info, stage, section, divider, prompt, header
 
-TOOLS_DIR = Path(__file__).parent.parent.parent / ".w0lfsword" / "usbliter8" / "tools"
+TOOLS_DIR = Path(__file__).parent / "tools"
 DRY_RUN = False
 
 
@@ -21,12 +21,31 @@ def _tool(name: str) -> str:
     return str(p) if p.exists() else name
 
 
-def _run(cmd: list[str], cwd: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], cwd: str | None = None, check: bool = False, env: dict | None = None) -> subprocess.CompletedProcess:
     if DRY_RUN:
         print(f"    {C.DIM}[dry-run] {' '.join(cmd)}{C.NC}")
         return subprocess.CompletedProcess(cmd, 0)
     print(f"    {C.DIM}$ {' '.join(cmd)}{C.NC}")
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    run_env = {**os.environ, **env} if env else None
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=run_env)
+
+
+def _find_script(name: str) -> Path | None:
+    """Locate a helper script in CWD or known usbliter8 work directories."""
+    cwd_rel = Path(name)
+    if cwd_rel.exists():
+        return cwd_rel
+    bases = [
+        Path(__file__).parent.parent / "referenceforAI",
+        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI",
+        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI" / "projects",
+    ]
+    for base in bases:
+        for d in base.glob("usbliter8-fun*/work-*"):
+            p = d / name
+            if p.exists():
+                return p
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -124,29 +143,30 @@ def restore_device(work_dir: str | Path, password: str = "") -> bool:
     restore_sh = Path(work_dir) / "restore_cfw.sh"
     tss_proxy = Path(work_dir) / "tss_proxy_server.py"
 
-    if not make_cfw.exists():
-        print(err(f"make_cfw.py not found in {work_dir}"))
+    missing = [str(p.name) for p in (make_cfw, restore_sh, tss_proxy) if not p.exists()]
+    if missing:
+        print(err(f"Required files not found in {work_dir}: {', '.join(missing)}"))
         return False
 
     print(stage(1, "Building custom firmware..."))
-    sudo_askpass = os.environ.get("SUDO_ASKPASS", "")
-    env = {}
-    if sudo_askpass:
-        env["SUDO_ASKPASS"] = sudo_askpass
     r = _run(["python3", str(make_cfw)], cwd=str(work_dir))
     if r.returncode != 0:
         print(err("make_cfw.py failed"))
         return False
     print(ok("CFW built"))
 
+    proxy_proc = None
     print(stage(2, "Starting TSS proxy (background)..."))
-    proxy_proc = subprocess.Popen(
-        ["python3", str(tss_proxy)],
-        cwd=str(work_dir),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(2)
+    if DRY_RUN:
+        print(f"    {C.DIM}[dry-run] python3 {tss_proxy}{C.NC}")
+    else:
+        proxy_proc = subprocess.Popen(
+            ["python3", str(tss_proxy)],
+            cwd=str(work_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(2)
     print(ok("TSS proxy running"))
 
     print(stage(3, "Restoring CFW (this takes 5-15 minutes)..."))
@@ -154,11 +174,18 @@ def restore_device(work_dir: str | Path, password: str = "") -> bool:
     print(f"  {C.DIM}Wait until the script completes and device returns to recovery.{C.NC}")
 
     if not DRY_RUN:
-        r = subprocess.run(["bash", str(restore_sh)], cwd=str(work_dir))
-        proxy_proc.terminate()
-        if r.returncode != 0:
-            print(err("Restore failed"))
-            return False
+        try:
+            r = subprocess.run(["bash", str(restore_sh)], cwd=str(work_dir))
+            if r.returncode != 0:
+                print(err("Restore failed"))
+                return False
+        finally:
+            if proxy_proc and proxy_proc.poll() is None:
+                proxy_proc.terminate()
+                try:
+                    proxy_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proxy_proc.kill()
 
     print(ok("Restore complete! Device is now on custom firmware."))
     return True
@@ -174,10 +201,10 @@ def setup_usb_network(ssh_password: str = "alpine") -> bool:
     print()
 
     # Check for net_up.sh in the work dir
-    net_up = Path("work-27.0b2") / "net_up.sh"
-    if net_up.exists():
+    net_up = _find_script("net_up.sh")
+    if net_up:
         print(stage(1, "Running net_up.sh..."))
-        r = _run(["bash", str(net_up)])
+        r = _run(["bash", str(net_up)], cwd=str(net_up.parent))
         if r.returncode == 0:
             print(ok("USB network configured"))
             print(f"  {C.GREY}Mac: en31 = 10.7.0.1{C.NC}")
@@ -201,10 +228,10 @@ def setup_vnc(ssh_password: str = "alpine") -> bool:
     print(section("VNC Remote Control"))
     print()
 
-    vnc_up = Path("work-27.0b2") / "vnc_up.sh"
-    if vnc_up.exists():
+    vnc_up = _find_script("vnc_up.sh")
+    if vnc_up:
         print(stage(1, "Running vnc_up.sh..."))
-        r = _run(["bash", str(vnc_up)])
+        r = _run(["bash", str(vnc_up)], cwd=str(vnc_up.parent))
         if r.returncode == 0:
             print(ok("VNC server started"))
             print(f"  {C.EYE}vnc://:alpine@10.7.0.2:5901{C.NC}")
@@ -212,7 +239,7 @@ def setup_vnc(ssh_password: str = "alpine") -> bool:
 
     print(info("Manual VNC setup:"))
     print(f"  {C.DIM}# Start VNC server on device:{C.NC}")
-    print(f"  {_tool('sshpass')} -p {ssh_password} ssh root@10.7.0.2 /var/jb/usr/bin/tvncd")
+    print(f"  SSHPASS={ssh_password} {_tool('sshpass')} -e ssh root@10.7.0.2 /var/jb/usr/bin/tvncd")
     print()
     print(f"  {C.DIM}# Connect from Mac:{C.NC}")
     print(f"  open vnc://:alpine@10.7.0.2:5901")
@@ -227,19 +254,22 @@ def ssh_connect(ssh_password: str = "alpine") -> bool:
     sshpass = _tool("sshpass")
     base_args = ["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
                   "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no"]
+    ssh_env = {"SSHPASS": ssh_password}
 
     print(info("Trying USB SSH (10.7.0.2)..."))
-    r = _run([sshpass, "-p", ssh_password, "ssh"] + base_args + ["root@10.7.0.2", "echo ok"])
+    r = _run([sshpass, "-e", "ssh"] + base_args + ["root@10.7.0.2", "echo ok"], env=ssh_env)
     if r.returncode == 0:
         print(ok("USB SSH works — connecting interactively..."))
-        os.execvp(sshpass, [sshpass, "-p", ssh_password, "ssh"] + base_args + ["root@10.7.0.2"])
+        os.environ["SSHPASS"] = ssh_password
+        os.execvp(sshpass, [sshpass, "-e", "ssh"] + base_args + ["root@10.7.0.2"])
         return True
 
     print(info("Trying iproxy (localhost:2222)..."))
-    r = _run([sshpass, "-p", ssh_password, "ssh"] + base_args + ["-p", "2222", "root@localhost", "echo ok"])
+    r = _run([sshpass, "-e", "ssh"] + base_args + ["-p", "2222", "root@localhost", "echo ok"], env=ssh_env)
     if r.returncode == 0:
         print(ok("iproxy SSH works — connecting interactively..."))
-        os.execvp(sshpass, [sshpass, "-p", ssh_password, "ssh"] + base_args + ["-p", "2222", "root@localhost"])
+        os.environ["SSHPASS"] = ssh_password
+        os.execvp(sshpass, [sshpass, "-e", "ssh"] + base_args + ["-p", "2222", "root@localhost"])
         return True
 
     print(err("SSH failed. Make sure the device is booted and on USB network."))

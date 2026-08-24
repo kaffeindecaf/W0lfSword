@@ -145,15 +145,15 @@ def print_device_status():
 
     rp = detect_rp2350()
     if rp:
-        serial = rp.get("serial", "?")
-        print(ok(f"RP2350 board: bus {rp['bus']} addr {rp['address']}  serial={serial[:40]}"))
+        serial = (rp.get("serial") or "?")[:40]
+        print(ok(f"RP2350 board: bus {rp['bus']} addr {rp['address']}  serial={serial}"))
     else:
         print(err("No RP2350 board detected (VID/PID: 2E8A:0003)"))
 
     dfu = detect_apple_dfu()
     if dfu:
         mode = dfu.get("mode", "?")
-        serial = dfu.get("serial", "")[:60]
+        serial = (dfu.get("serial") or "")[:60]
         print(ok(f"Apple {mode}: bus {dfu['bus']} addr {dfu['address']}  serial={serial}"))
     else:
         print(err("No Apple device in DFU/WTF mode (VID/PID: 05AC:1227/1280)"))

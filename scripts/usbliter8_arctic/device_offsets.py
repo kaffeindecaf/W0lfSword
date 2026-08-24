@@ -23,8 +23,15 @@ def _hex_to_bytes(hex_str: str) -> bytes:
     return bytes.fromhex(clean)
 
 
+def _fmt_offset(off: Any) -> str:
+    """Safely format an offset for error messages (handles non-int types)."""
+    return f"0x{off:X}" if isinstance(off, int) else repr(off)
+
+
 def _is_valid_offset(val: int) -> bool:
-    """An offset is valid if it's non-zero and not the sentinel."""
+    """An offset is valid if it's a non-zero int and not the sentinel."""
+    if not isinstance(val, int) or isinstance(val, bool):
+        return False
     return val > 0 and val != SENTINEL and val < 0x100000000
 
 
@@ -38,6 +45,9 @@ def _is_valid_patch_value(val: str | int) -> bool:
     clean = val.replace(" ", "").lower()
     if len(clean) >= 2 and len(clean) % 2 == 0 and all(c in "0123456789abcdef" for c in clean):
         return True
+    # '?' placeholders (template sentinels like "????????") are never valid
+    if "?" in clean:
+        return False
     # otherwise treat as ASCII string (boot-args etc.)
     return True
 
@@ -49,7 +59,10 @@ def _has_offset_value(d: dict) -> bool:
 def _extract_section_offsets(data: dict, section: str) -> list[dict[str, Any]]:
     """Walk a patches section (supports dict, list, and nested dicts like daemons)."""
     items = []
-    section_data = data.get("patches", {}).get(section, {})
+    patches_data = data.get("patches", {})
+    if not isinstance(patches_data, dict):
+        return items
+    section_data = patches_data.get(section, {})
 
     if isinstance(section_data, list):
         for entry in section_data:
@@ -78,8 +91,11 @@ def validate_offsets(filepath: Path) -> tuple[int, int, list[str]]:
     if not filepath.exists():
         return 0, 1, [f"File not found: {filepath}"]
 
-    with open(filepath) as f:
-        data = yaml.safe_load(f)
+    try:
+        with open(filepath) as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        return 0, 1, [f"Invalid YAML: {e}"]
 
     if not isinstance(data, dict) or "patches" not in data:
         return 0, 1, ["Invalid YAML: missing 'patches' top-level key"]
@@ -98,7 +114,7 @@ def validate_offsets(filepath: Path) -> tuple[int, int, list[str]]:
             val = item["value"]
             if not _is_valid_offset(off):
                 failed += 1
-                errors.append(f"[{model}/{ios}] {item['name']}: offset 0x{off:X} is not valid (sentinel or zero)")
+                errors.append(f"[{model}/{ios}] {item['name']}: offset {_fmt_offset(off)} is not valid (sentinel or zero)")
             elif not _is_valid_patch_value(val):
                 failed += 1
                 errors.append(f"[{model}/{ios}] {item['name']}: patch value '{val}' is not valid")
@@ -110,14 +126,15 @@ def validate_offsets(filepath: Path) -> tuple[int, int, list[str]]:
         val = item["value"]
         if not _is_valid_offset(off):
             failed += 1
-            errors.append(f"[{model}/{ios}] {item['name']}: offset 0x{off:X} is not valid")
+            errors.append(f"[{model}/{ios}] {item['name']}: offset {_fmt_offset(off)} is not valid")
         elif not _is_valid_patch_value(val):
             failed += 1
             errors.append(f"[{model}/{ios}] {item['name']}: patch value '{val}' is not valid")
         else:
             passed += 1
 
-    kernel_patches = data.get("patches", {}).get("kernel", [])
+    patches_data = data.get("patches")
+    kernel_patches = patches_data.get("kernel", []) if isinstance(patches_data, dict) else []
     if isinstance(kernel_patches, list):
         for entry in kernel_patches:
             if isinstance(entry, dict):
@@ -126,7 +143,7 @@ def validate_offsets(filepath: Path) -> tuple[int, int, list[str]]:
                 name = entry.get("name", "kernel[]")
                 if not _is_valid_offset(off):
                     failed += 1
-                    errors.append(f"[{model}/{ios}] {name}: offset 0x{off:X} is not valid")
+                    errors.append(f"[{model}/{ios}] {name}: offset {_fmt_offset(off)} is not valid")
                 elif not _is_valid_patch_value(val):
                     failed += 1
                     errors.append(f"[{model}/{ios}] {name}: patch value '{val}' is not valid")
@@ -154,8 +171,10 @@ def list_offset_files() -> list[dict[str, Any]]:
         if f.name in ("sources.yaml", "template.yaml"):
             continue
         passed, failed, _ = validate_offsets(f)
-        with open(f) as fh:
-            data = yaml.safe_load(fh)
+        data: dict[str, Any] = {}
+        if failed == 0:
+            with open(f) as fh:
+                data = yaml.safe_load(fh) or {}
         results.append({
             "file": f.name,
             "model": data.get("model", "?"),
@@ -175,8 +194,13 @@ def find_online_sources(model: str, ios_version: str = "") -> list[dict[str, Any
     if not sources_path.exists():
         return []
 
-    with open(sources_path) as f:
-        sources = yaml.safe_load(f)
+    try:
+        with open(sources_path) as f:
+            sources = yaml.safe_load(f) or {}
+    except yaml.YAMLError:
+        return []
+    if not isinstance(sources, dict):
+        return []
 
     matches = []
     for repo in sources.get("repos", []):
@@ -200,7 +224,7 @@ def set_active_device(filepath: Path) -> bool:
             print(f"    {C.RED}{e}{C.NC}")
         return False
 
-    config_dir = Path.home() / ".w0lfsword" / "usbliter8"
+    config_dir = Path(__file__).parent
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "active_device.yaml"
 
@@ -217,7 +241,7 @@ def set_active_device(filepath: Path) -> bool:
 
 def get_active_device() -> dict[str, Any] | None:
     """Load the currently active device offset configuration."""
-    config_path = Path.home() / ".w0lfsword" / "usbliter8" / "active_device.yaml"
+    config_path = Path(__file__).parent / "active_device.yaml"
     if not config_path.exists():
         return None
     with open(config_path) as f:

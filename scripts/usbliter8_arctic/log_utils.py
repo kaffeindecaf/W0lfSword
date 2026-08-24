@@ -17,7 +17,7 @@ from typing import Callable
 from colors import C, err as _err, warn as _warn, info as _info, ok as _ok
 
 LOG_LOCK = threading.Lock()
-LOG_FILE = Path(__file__).parent.parent.parent / ".w0lfsword" / "usbliter8" / "ul8.log"
+LOG_FILE = Path(__file__).parent / "session.log"
 
 _log_initialized = False
 

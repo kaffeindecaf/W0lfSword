@@ -1,11 +1,12 @@
 """Hardware setup guide for usbliter8-arctic.
 
-Wiring diagrams, RP2350 board selection, firmware download/flash,
+Guided Setup: wiring diagrams, RP2350 board selection, firmware download/flash,
 status/health checks, and pre-flash verification.
 """
 
 import sys
 import socket
+import time
 from pathlib import Path
 from urllib.request import urlretrieve, URLError
 
@@ -14,9 +15,9 @@ import yaml
 from colors import C, ok, err, warn, info, section, key_value, header, divider, prompt
 from log_utils import log_info, log_warn, log_error, log_step
 
-TOOLS_DIR = Path(__file__).parent.parent.parent / ".w0lfsword" / "usbliter8" / "tools"
-FW_DIR = Path(__file__).parent.parent.parent / ".w0lfsword" / "usbliter8" / "firmware"
-CONFIG_PATH = Path(__file__).parent.parent.parent / ".w0lfsword" / "usbliter8" / "config.yaml"
+TOOLS_DIR = Path(__file__).parent / "tools"
+FW_DIR = Path(__file__).parent / "firmware"
+CONFIG_PATH = Path(__file__).parent / "config.yaml"
 
 FW_REPO = "https://raw.githubusercontent.com/Octopus1633/usbliter8-firmware/main"
 UF2_FILES = {
@@ -85,15 +86,49 @@ def _save_config(cfg: dict):
 
 
 def check_firmware(board_id: str) -> bool:
-    """Check if firmware UF2 exists for the given board."""
+    """Check if firmware UF2 exists and is valid for the given board."""
     fname = UF2_FILES.get(board_id)
     if not fname:
         return False
-    return (FW_DIR / fname).exists()
+    return validate_uf2(FW_DIR / fname)
 
 
-def download_firmware(board_id: str) -> bool:
-    """Download RP2350 firmware UF2 from community repo."""
+UF2_MAGICS = {0x0A324655, 0x9E5D5157, 0x0AB16F30}
+
+
+def validate_uf2(path: Path) -> bool:
+    """Verify a UF2 file has a valid magic header (not a 404 HTML page)."""
+    if not path.exists():
+        return False
+    try:
+        if path.stat().st_size < 512:
+            return False
+        with open(path, "rb") as f:
+            block = f.read(512)
+        return len(block) >= 4 and int.from_bytes(block[:4], "little") in UF2_MAGICS
+    except OSError:
+        return False
+
+
+def _download_once(url: str, dst: Path) -> tuple[bool, str]:
+    """Single download attempt. Returns (success, error_message)."""
+    try:
+        urlretrieve(url, dst)
+        size = dst.stat().st_size
+        if size <= 1024 or not validate_uf2(dst):
+            dst.unlink(missing_ok=True)
+            return False, f"bad file ({size} bytes, invalid UF2 magic)"
+        return True, ""
+    except URLError as e:
+        return False, f"network error — {e.reason}"
+    except socket.timeout:
+        return False, "timed out after 30s"
+    except Exception as e:
+        return False, str(e)
+
+
+def download_firmware(board_id: str, retries: int = 3) -> bool:
+    """Download RP2350 firmware UF2 from community repo, with retries and validation."""
     fname = UF2_FILES.get(board_id)
     if not fname:
         print(err(f"Unknown board ID: {board_id}"))
@@ -102,6 +137,7 @@ def download_firmware(board_id: str) -> bool:
 
     url = f"{FW_REPO}/{fname}"
     dst = FW_DIR / fname
+    tmp = FW_DIR / f"{fname}.part"
     FW_DIR.mkdir(parents=True, exist_ok=True)
 
     print(info(f"Downloading {fname}..."))
@@ -110,28 +146,26 @@ def download_firmware(board_id: str) -> bool:
 
     socket.setdefaulttimeout(30)
     try:
-        urlretrieve(url, dst)
-        size = dst.stat().st_size
-        if size > 1024:
-            print(ok(f"Downloaded {fname} ({size:,} bytes)"))
-            log_info(f"Firmware downloaded: {fname} ({size} bytes)")
-            return True
-        else:
-            dst.unlink(missing_ok=True)
-            print(err(f"Downloaded file too small ({size} bytes) — may be a 404 page"))
-            log_error(f"Firmware download too small: {fname} ({size} bytes)")
-            return False
-    except URLError as e:
-        print(err(f"Download failed: network error — {e.reason}"))
-        log_error(f"UF2 download network error: {e}")
-        return False
-    except socket.timeout:
-        print(err("Download timed out after 30s — check your internet connection"))
-        log_error(f"UF2 download timeout: {url}")
-        return False
-    except Exception as e:
-        print(err(f"Download failed: {e}"))
-        log_error(f"UF2 download exception: {e}")
+        for attempt in range(1, retries + 1):
+            if attempt > 1:
+                delay = 1.5 * (attempt - 1)
+                print(info(f"Retry {attempt}/{retries} in {delay:.1f}s..."))
+                time.sleep(delay)
+
+            success, msg = _download_once(url, tmp)
+            if success:
+                tmp.replace(dst)
+                size = dst.stat().st_size
+                print(ok(f"Downloaded + verified {fname} ({size:,} bytes)"))
+                log_info(f"Firmware downloaded: {fname} ({size} bytes)")
+                return True
+
+            tmp.unlink(missing_ok=True)
+            print(warn(f"Attempt {attempt}/{retries} failed: {msg}"))
+            log_warn(f"UF2 download attempt {attempt}/{retries} failed: {msg}")
+
+        print(err(f"All {retries} download attempts failed — check your internet connection"))
+        log_error(f"UF2 download failed after {retries} attempts: {url}")
         return False
     finally:
         socket.setdefaulttimeout(None)
@@ -197,17 +231,26 @@ def show_troubleshooting():
         print()
 
 
-def interactive_hardware_setup():
-    """Full interactive hardware setup walkthrough."""
-    print(header("Hardware Setup — usbliter8-arctic"))
-    print()
-    print(f"  {C.SNOW}You need:{C.NC}")
-    print(f"    1. An RP2350-based microcontroller board")
-    print(f"    2. A Lightning-to-USB-A cable (NOT USB-C)")
-    print(f"    3. {C.DIM}(if using non-USB-A board){C.NC} Soldering iron + multimeter")
-    print()
+def _ask(prompt_text: str, default: str = "", valid: tuple = None, retries: int = 3) -> str:
+    """Input with validation and retries. Never crashes on EOF/Ctrl-C."""
+    for attempt in range(retries):
+        try:
+            ans = input(prompt(prompt_text) or default).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return default
+        if valid is None or ans in valid or ans == default:
+            return ans
+        print(warn(f"Invalid choice '{ans}' — try again ({retries - attempt - 1} left)"))
+    return default
 
-    # Board selection
+
+def _confirm(prompt_text: str, default: str = "y") -> bool:
+    return _ask(prompt_text, default, valid=("y", "n", "yes", "no", "")) in ("y", "yes", "")
+
+
+def _pick_board() -> dict:
+    """Board selection with retry loop. Returns a BOARDS entry."""
     print(section("Step 1 — Select Your Board"))
     print()
     for i, b in enumerate(BOARDS):
@@ -219,45 +262,121 @@ def interactive_hardware_setup():
     print(f"  {C.EYE}[m]{C.NC} More info on all supported boards")
     print()
 
-    choice = input(prompt("Choose board [1]: ") or "1").strip().lower()
+    while True:
+        choice = _ask("Choose board [1]: ", "1")
+        if choice == "m":
+            print(section("All Supported Boards"))
+            for b in BOARDS:
+                print(f"  {C.EYE}{b['name']}{C.NC}")
+                print(f"    {C.DIM}{b['note']}{C.NC}")
+                print()
+            continue
+        try:
+            idx = int(choice) - 1
+        except ValueError:
+            print(warn("Please enter a number between 1 and %d" % len(BOARDS)))
+            continue
+        if 0 <= idx < len(BOARDS):
+            return BOARDS[idx]
+        print(warn(f"Board {idx + 1} does not exist — pick 1-{len(BOARDS)}"))
 
-    if choice == "m":
-        print(section("All Supported Boards"))
-        for b in BOARDS:
-            print(f"  {C.EYE}{b['name']}{C.NC}")
-            print(f"    {C.DIM}{b['note']}{C.NC}")
-            print()
-        choice = input(prompt(f"Choose board [1]: ") or "1").strip()
 
-    try:
-        idx = int(choice) - 1
-        if idx < 0 or idx >= len(BOARDS):
-            idx = 0
-    except ValueError:
-        idx = 0
+def _wait_rp2350(attempts: int = 3, timeout: float = 15.0) -> bool:
+    """Poll for RP2350 USB device; let the user retry between attempts."""
+    from pwn_utils import detect_rp2350
+    for attempt in range(1, attempts + 1):
+        print(info(f"Scanning for RP2350 (attempt {attempt}/{attempts}, {timeout:.0f}s)..."))
+        log_step(f"RP2350 scan attempt {attempt}/{attempts}")
+        start = time.time()
+        found = None
+        while time.time() - start < timeout:
+            found = detect_rp2350()
+            if found:
+                break
+            time.sleep(0.5)
+        if found:
+            print(ok(f"RP2350 detected: bus {found['bus']}, addr {found['address']}, serial={found.get('serial', '?')[:40]}"))
+            log_info(f"RP2350 detected: bus={found['bus']} addr={found['address']}")
+            return True
+        print(warn("No RP2350 board detected — check USB cable and power"))
+        if attempt < attempts:
+            ans = _ask("Reconnect the board and press Enter to retry, [s]kip: ", "r", valid=("", "r", "s", "skip"))
+            if ans in ("s", "skip"):
+                break
+    return False
 
-    board = BOARDS[idx]
+
+def _test_pwn(attempts: int = 3, timeout: int = 60) -> bool:
+    """Live PWN test with retries and troubleshooting hints."""
+    from pwn_utils import wait_for_pwn
+    for attempt in range(1, attempts + 1):
+        print(info(f"PWN test attempt {attempt}/{attempts} — plug iPhone into RP2350 and enter DFU"))
+        if wait_for_pwn(timeout=timeout):
+            return True
+        if attempt < attempts:
+            print(warn("PWN not detected. Common fixes:"))
+            print(f"    {C.DIM}→ Hold Volume Down + Power for 3s, release Power, keep Volume Down 10s{C.NC}")
+            print(f"    {C.DIM}→ Check LED: orange=idle, blue=exploiting, green=success, red=failed (reset board){C.NC}")
+            print(f"    {C.DIM}→ Use a short cable (<30cm), remove USB hubs{C.NC}")
+            ans = _ask("Press Enter to retry, [s]kip: ", "r", valid=("", "r", "s", "skip"))
+            if ans in ("s", "skip"):
+                break
+    return False
+
+
+def guided_setup():
+    """Guided, beginner-friendly setup walkthrough with checks and retries."""
+    print(header("Guided Setup — usbliter8-arctic"))
+    print()
+    print(f"  {C.AMB}★ Recommended for beginners{C.NC} — hardware, firmware and first PWN, step by step")
+    print(f"  {C.DIM}Resumable: re-run anytime. Progress is saved to config.yaml{C.NC}")
+    print()
+
+    # Step 0 — dependencies
+    print(section("Step 0 — Dependencies"))
+    print()
+    from deps import check_dependencies, install_dependencies
+    results = check_dependencies()
+    for mod, pkg in (("usb", "pyusb"), ("yaml", "pyyaml")):
+        key = f"pkg_{pkg}"
+        print(key_value(f"py {pkg}", f"{C.GRN}installed{C.NC}" if results[key] else f"{C.RED}missing{C.NC}"))
+    print(key_value("libusb-1.0", f"{C.GRN}found{C.NC}" if results["libusb"] else f"{C.RED}missing{C.NC}"))
+    if not all(results.values()):
+        print()
+        if _confirm("Some dependencies are missing. Install them now? [Y/n]: ", "y"):
+            install_dependencies()
+        else:
+            print(warn("Continuing without dependencies — USB detection will not work"))
+    print()
+
+    # Step 1 — board selection
+    board = _pick_board()
     print()
     print(ok(f"Selected: {board['name']}"))
     _save_config({"selected_board": board["id"]})
-
-    # Wiring
-    show_wiring(board)
-
-    # Firmware
-    print(section("Step 2 — Firmware"))
+    log_info(f"Guided setup: board selected {board['id']}")
     print()
 
+    # Step 2 — wiring
+    print(section("Step 2 — Wiring"))
+    print()
+    show_wiring(board)
+
+    # Step 3 — firmware
+    print(section("Step 3 — Firmware"))
+    print()
     board_id = board["id"]
+    fname = UF2_FILES[board_id]
+    fw_path = FW_DIR / fname
+
     if check_firmware(board_id):
-        fname = UF2_FILES[board_id]
-        print(ok(f"Firmware already downloaded: {fname}"))
+        print(ok(f"Firmware ready: {fname} ({fw_path.stat().st_size:,} bytes, verified)"))
     else:
-        print(info(f"No firmware found for {board['name']}"))
-        ans = input(prompt("Download firmware from Octopus1633/usbliter8-firmware? [Y/n]: ") or "y")
-        if ans.lower() in ("y", "yes", ""):
-            if download_firmware(board_id):
-                fname = UF2_FILES[board_id]
+        if fw_path.exists():
+            print(warn(f"Existing {fname} is corrupt/incomplete — will re-download"))
+        print(info(f"No valid firmware for {board['name']}"))
+        if _confirm("Download firmware from Octopus1633/usbliter8-firmware? [Y/n]: ", "y"):
+            if download_firmware(board_id, retries=3):
                 print()
                 print(f"  {C.SNOW}To flash:{C.NC}")
                 print(f"    1. Hold {C.EYE}BOOTSEL{C.NC} button on {board['name']}")
@@ -265,26 +384,53 @@ def interactive_hardware_setup():
                 print(f"    3. Drag {C.FROST}{fname}{C.NC} onto the RPI-RP2 drive")
                 print(f"    4. Board will reboot — LED should start blinking")
                 print()
+            else:
+                print(err("Firmware download failed — fix your network and re-run Guided Setup"))
         else:
-            print(info("Skipping firmware download. You can download later from the main menu."))
+            print(info("Skipping firmware download. Re-run Guided Setup anytime."))
+    print()
 
-    # LED guide
+    # Step 4 — connection & PWN test
+    print(section("Step 4 — Connect & Verify"))
+    print()
+    from pwn_utils import check_pyusb_installed
+    if check_pyusb_installed():
+        if _confirm("Board plugged in? Check USB detection now? [Y/n]: ", "y"):
+            _wait_rp2350(attempts=3)
+        print()
+        if _confirm("Test the exploit now (PWN DFU)? [Y/n]: ", "y"):
+            _test_pwn(attempts=3)
+    else:
+        print(warn("pyusb not installed — USB verification skipped (install via Step 0)"))
+    print()
+
+    # Step 5 — final checklist
+    print(section("Step 5 — Ready to Exploit"))
+    print()
+    checklist = [
+        f"Flash the UF2 firmware to your {board['name']}",
+        "Connect Lightning cable to iPhone/iPad",
+        "Put iPhone in DFU mode (Vol Down + Power → release Power)",
+        "Connect RP2350 to your computer via USB",
+        "Wait for LED: steady green (RGB) or steady ON (single-color)",
+        "Run [8] Check PWN Status from the main menu to verify",
+    ]
+    for i, item in enumerate(checklist, 1):
+        print(f"  {C.GRN}{i}.{C.NC} {item}")
+    print()
+
     show_led_guide(board)
-
-    # Final checklist
-    print(section("Step 3 — Ready to Exploit"))
     print()
-    print(f"  {C.GRN}1.{C.NC} Flash the UF2 firmware to your {board['name']}")
-    print(f"  {C.GRN}2.{C.NC} Connect Lightning cable to iPhone/iPad")
-    print(f"  {C.GRN}3.{C.NC} Put iPhone in DFU mode (Vol Down + Power → release Power)")
-    print(f"  {C.GRN}4.{C.NC} Connect RP2350 to your computer via USB")
-    print(f"  {C.GRN}5.{C.NC} Wait for LED to turn steady {C.GRN}green{C.NC} (RGB) or stay ON (single-color)")
-    print(f"  {C.GRN}6.{C.NC} Run {C.EYE}[Check PWN]{C.NC} from the main menu to verify")
-    print()
-
     show_troubleshooting()
 
-    input(prompt("Press Enter to return to menu..."))
+    try:
+        input(prompt("Press Enter to return to menu..."))
+    except (EOFError, KeyboardInterrupt):
+        print()
+
+
+# Backward-compatible alias
+interactive_hardware_setup = guided_setup
 
 
 def run_health_check() -> dict[str, bool]:
@@ -301,7 +447,7 @@ def run_health_check() -> dict[str, bool]:
     print(key_value("Board", board_name))
     results["board_configured"] = board_id != "unknown"
     if not results["board_configured"]:
-        print(warn("No board selected — run [1] Hardware Setup first"))
+        print(warn("No board selected — run [1] Guided Setup first"))
 
     # 2. Firmware
     fw_ok = check_firmware(board_id)
@@ -310,9 +456,9 @@ def run_health_check() -> dict[str, bool]:
     results["firmware_present"] = fw_ok
 
     # 3. Tools
-    from log_utils import check_tools
+    from log_utils import check_command
     required = ["usbliter8ctl"]
-    tools = check_tools(required)
+    tools = {t: (TOOLS_DIR / t).exists() or check_command(t) for t in required}
     for t, ok_val in tools.items():
         color = C.GRN if ok_val else C.RED
         print(key_value(f"Tool: {t}", f"{color}{'found' if ok_val else 'NOT FOUND'}{C.NC}"))

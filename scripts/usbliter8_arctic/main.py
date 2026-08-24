@@ -14,54 +14,93 @@ from colors import C, ok, err, warn, info, stage, section, key_value, divider, h
 from device_offsets import list_offset_files, set_active_device, get_active_device, find_online_sources
 from pwn_utils import print_device_status, verify_pwn_mode, check_pyusb_installed, wait_for_pwn
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent
 SCRIPTS_DIR = Path(__file__).parent
 OFFSETS_DIR = SCRIPTS_DIR / "offsets"
+
+def _find_work_dirs() -> list[Path]:
+    """Find usbliter8-fun work directories from multiple locations."""
+    candidates = [
+        Path(__file__).parent.parent / "referenceforAI",
+        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI",
+        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI" / "projects",
+    ]
+    for base in candidates:
+        if base.exists():
+            dirs = list(base.glob("usbliter8-fun*/work-*"))
+            if dirs:
+                return sorted(dirs)
+    return []
 
 
 def clear():
     os.system("clear 2>/dev/null || true")
 
 
+WOLF_ASCII_ART = r'''
+                              __
+                            .d$$b
+                          .' TO$;\
+                         /  : TP._;
+                        / _.;  :Tb|
+                       /   /   ;j$j
+                   _.-"       d$$$$
+                 .' ..       d$$$$;
+                /  /P'      d$$$$P. |\
+               /   "      .d$$$P' |\^"l
+             .'           `T$P^"""""  :
+         ._.'      _.'                ;
+      `-.-".-'-' ._.       _.-"    .-"
+    `.-" _____  ._              .-"
+   -(.g$$$$$$$b.              .'
+     ""^^T$$$P^)            .(:
+       _/  -"  /.'         /:/;
+    ._.'-'`-'  ")/         /;/;
+ `-.-"..--""   " /         /  ;
+.-" ..--""        -'          :
+..--""--.-"         (\      .-(\
+  ..--""              `-\(\/;`
+    _.                      :
+                            ;`-
+                           :\
+                            ;  (by kaffein)'''
+
+WOLF_GRADIENT = [C.ICE] * 6 + [C.FROST] * 7 + [C.WOLF] * 7 + [C.MOON] * 6
+
+
 def show_wolf():
+    lines = [ln.rstrip() for ln in WOLF_ASCII_ART.strip("\n").splitlines()]
     print()
-    print(f"{C.WOLF}")
-    print("                          .d$$b")
-    print("                        .' TO$;\\")
-    print("                       /  : TP._;")
-    print("                      / _.;  :Tb|")
-    print("                     /   /   ;j$j")
-    print("                 _.-\"       d$$$$")
-    print("               .' ..       d$$$$;")
-    print("              /  /P'      d$$$$P. |\\")
-    print("             /   \"      .d$$$P' |\\^\"l")
-    print("           .'           `T$P^\"\"\"\"\"\"  :")
-    print(f"{C.NC}")
+    for i, art in enumerate(lines):
+        if i == len(lines) - 1 and art.endswith("(by kaffein)"):
+            body = art[: -len("(by kaffein)")]
+            art = body + f"{C.AMB}{C.B}(by kaffein){C.NC}"
+        color = WOLF_GRADIENT[min(i, len(WOLF_GRADIENT) - 1)]
+        print(f"  {color}{art}{C.NC}")
     print()
 
 
 def show_banner():
     print()
-    print(f"  {C.DIM}╔══════════════════════════════════════════════════════════╗{C.NC}")
-    print(f"  {C.DIM}║{C.NC}  {C.SNOW}{C.B}W0lfSword · usbliter8-arctic{C.NC}                          {C.DIM}║{C.NC}")
-    print(f"  {C.DIM}║{C.NC}  {C.FROST}CFW Builder · PWN DFU · Restore · Boot{C.NC}                {C.DIM}║{C.NC}")
-    print(f"  {C.DIM}╚══════════════════════════════════════════════════════════╝{C.NC}")
+    print(f"  {C.SNOW}{C.B}usbliter8-arctic{C.NC}")
+    print(f"  {C.FROST}CFW Builder · PWN DFU · Restore · Boot{C.NC}")
+    print(f"  {C.DIM}usbliter8 exploit by {C.NC}{C.DIM}rav000 · wh1te4ever · Octopus1633{C.NC}")
+    print()
 
 
 def show_device_status():
     """Display active device config and hardware status."""
     active = get_active_device()
-    print(f"  {C.GREY}── device ─────────────────────────────────────────────────────{C.NC}")
+    print(f"  {C.GREY}── device ──────────────────────────────────────────────────────{C.NC}")
     if active:
         model = active.get("model", "?")
         name = active.get("device", "?")
         ios = active.get("ios_version", "?")
         soc = active.get("soc", "?")
         board = active.get("board", "?")
-        print(f"  Target:  {C.EYE}{name}{C.NC} ({C.DIM}{model}{C.NC}) · {C.FROST}{soc}{C.NC} · board {C.EYE}{board}{C.NC}")
-        print(f"  iOS:     {C.FROST}{ios}{C.NC}")
+        print(f"  {C.EYE}{name}{C.NC}   {C.DIM}{model}{C.NC}   {C.FROST}{soc}{C.NC}   board {C.EYE}{board}{C.NC}   iOS {C.FROST}{ios}{C.NC}")
     else:
-        print(f"  {C.DIM}No device configured — use [2] Configure Device{C.NC}")
+        print(f"  {C.DIM}no device configured — use [2] Configure Device{C.NC}")
     print()
 
 
@@ -70,7 +109,7 @@ def show_board_status():
     from hardware_guide import _load_config, check_firmware, UF2_FILES
     cfg = _load_config()
     board_id = cfg.get("selected_board", "unknown")
-    print(f"  {C.GREY}── microcontroller ─────────────────────────────────────────────{C.NC}")
+    print(f"  {C.GREY}── microcontroller ──────────────────────────────────────────────{C.NC}")
 
     board_names = {
         "pico2": "Raspberry Pi Pico 2",
@@ -81,20 +120,23 @@ def show_board_status():
         "pimoroni_tiny2350": "Pimoroni Tiny2350",
     }
     name = board_names.get(board_id, board_id)
-    print(f"  Board:   {C.EYE}{name}{C.NC}")
 
-    if check_firmware(board_id):
-        print(f"  Firmware: {C.GRN}installed{C.NC}")
-    else:
-        print(f"  Firmware: {C.RED}NOT installed{C.NC}")
+    fw_ok = check_firmware(board_id)
+    fw_tag = f"{C.GRN}installed{C.NC}" if fw_ok else f"{C.RED}not installed{C.NC}"
+
+    parts = [f"{C.EYE}{name}{C.NC}", f"firmware  {fw_tag}"]
 
     if check_pyusb_installed():
         from pwn_utils import detect_rp2350
         rp = detect_rp2350()
         if rp:
-            print(f"  USB:     {C.GRN}detected{C.NC} (bus {rp['bus']}, addr {rp['address']})")
+            parts.append(f"{C.GRN}usb detected{C.NC} (bus {rp['bus']}, addr {rp['address']})")
         else:
-            print(f"  USB:     {C.DIM}no RP2350 device detected{C.NC}")
+            parts.append(f"{C.DIM}no usb device{C.NC}")
+    else:
+        parts.append(f"{C.DIM}pyusb not installed{C.NC}")
+
+    print(f"  {' · '.join(parts)}")
     print()
 
 
@@ -110,23 +152,41 @@ def menu():
         show_device_status()
         show_board_status()
 
-        print(f"  {C.EYE}{C.B}[ 1 ]{C.NC}  Hardware Setup     {C.DIM}Wiring guide · flash firmware · test PWN{C.NC}")
-        print(f"  {C.EYE}{C.B}[ 2 ]{C.NC}  Configure Device   {C.DIM}Select model / iOS · edit offsets{C.NC}")
-        print(f"  {C.EYE}{C.B}[ 3 ]{C.NC}  Build CFW          {C.DIM}Patch IPSW → custom firmware{C.NC}")
-        print(f"  {C.EYE}{C.B}[ 4 ]{C.NC}  Flash Device       {C.DIM}Restore CFW {C.RED}(ERASES DEVICE!){C.NC}")
-        print(f"  {C.EYE}{C.B}[ 5 ]{C.NC}  SSHRD Boot         {C.DIM}Ramdisk · mount · edit filesystem{C.NC}")
-        print(f"  {C.EYE}{C.B}[ 6 ]{C.NC}  Normal Boot        {C.DIM}Full iOS boot with patches{C.NC}")
-        print(f"  {C.EYE}{C.B}[ 7 ]{C.NC}  Post-Boot Setup    {C.DIM}USB network · VNC · SSH · bootstrap{C.NC}")
-        print(f"  {C.EYE}{C.B}[ 8 ]{C.NC}  Check PWN Status   {C.DIM}Verify DFU / PWND state · wait for device{C.NC}")
-        print(f"  {C.EYE}{C.B}[ 9 ]{C.NC}  Health Check        {C.DIM}Verify hardware, tools, firmware{C.NC}")
-        print(f"  {C.EYE}{C.B}[ 0 ]{C.NC}  Explain             {C.DIM}What can you DO with usbliter8?{C.NC}")
-        print()
-        print(f"  {C.DIM}─── shortcuts ───{C.NC}")
-        print(f"  {C.EYE}h{C.NC}=hw guide  {C.EYE}c{C.NC}=config  {C.EYE}b{C.NC}=build  {C.EYE}f{C.NC}=flash  {C.EYE}p{C.NC}=pwn check  {C.EYE}e{C.NC}=explain  {C.EYE}x{C.NC}=health")
-        print()
-        print(f"  {C.EYE}{C.B}[ q ]{C.NC}  Back to W0lfSword")
-        print()
+        # Menu items — aligned columns with consistent spacing
+        items = [
+            ("1", "Guided Setup",       f"{C.AMB}★ recommended for beginners{C.NC} — wire · flash · test"),
+            ("2", "Configure Device",   "Select model / iOS · edit offsets"),
+            ("3", "Build CFW",          "Patch IPSW → custom firmware"),
+            ("4", "Flash Device",       f"Restore CFW {C.RED}(ERASES DEVICE!){C.NC}"),
+            ("5", "SSHRD Boot",         "Ramdisk · mount · edit filesystem"),
+            ("6", "Normal Boot",        "Full iOS boot with patches"),
+            ("7", "Post-Boot Setup",    "USB network · VNC · SSH · bootstrap"),
+            ("8", "Check PWN Status",   "Verify DFU / PWND state · wait for device"),
+            ("9", "Health Check",       "Verify hardware, tools, firmware"),
+            ("i", "Install Dependencies", "pyusb · pyyaml · libusb"),
+            ("0", "Explain",            "What can you do with usbliter8?"),
+        ]
+        for num, title, desc in items:
+            tcolor = C.AMB if num == "1" else C.SNOW
+            print(f"  {C.EYE}{C.B}[ {num} ]{C.NC}  {tcolor}{title:<20}{C.NC} {C.DIM}{desc}{C.NC}")
 
+        print()
+        print(f"  {C.GREY}── shortcuts ────────────────────────────────────────────────────{C.NC}")
+        shortcuts = [
+            ("h", "hw guide"), ("c", "config"), ("b", "build"),
+            ("f", "flash"), ("p", "pwn check"), ("e", "explain"),
+            ("x", "health"), ("i", "deps"), ("q", "quit"),
+        ]
+        cols = 4
+        width = 19
+        rows = [shortcuts[i:i + cols] for i in range(0, len(shortcuts), cols)]
+        for row in rows:
+            cells = []
+            for key, label in row:
+                cells.append(f"{C.EYE}[{key}]{C.NC} {C.DIM}{label:<{width}}{C.NC}")
+            print(f"  {'   '.join(cells)}")
+
+        print()
         try:
             choice = input(f"  {C.FROST}{C.B}usbliter8 ▸{C.NC} ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -137,8 +197,8 @@ def menu():
 
         # Dispatch
         if choice in ("1", "h", "hw"):
-            from hardware_guide import interactive_hardware_setup
-            interactive_hardware_setup()
+            from hardware_guide import guided_setup
+            guided_setup()
 
         elif choice in ("2", "c", "config"):
             menu_configure()
@@ -171,6 +231,10 @@ def menu():
             from hardware_guide import run_health_check
             run_health_check()
 
+        elif choice in ("i", "deps"):
+            from deps import install_dependencies
+            install_dependencies()
+
         elif choice in ("0", "e", "explain"):
             from boot_chain import explain_usbliter8
             explain_usbliter8()
@@ -180,7 +244,7 @@ def menu():
             break
 
         else:
-            print(warn(f"Unknown: '{choice}' — try 1-9, h/c/b/f/p/e, or q"))
+            print(warn(f"Unknown: '{choice}' — try 1-9, h/c/b/f/p/e/x/i, or q"))
 
         input(f"\n  {C.DIM}── Press Enter to continue ──{C.NC}")
 
@@ -288,7 +352,7 @@ def menu_flash():
     print()
 
     # Find work directory
-    work_dirs = list(PROJECT_ROOT.glob("referenceforAI/usbliter8-fun*/work-*"))
+    work_dirs = _find_work_dirs()
     if work_dirs:
         print(section("Available Work Dirs"))
         for i, d in enumerate(work_dirs):
@@ -322,7 +386,7 @@ def menu_sshrd():
         print(err(f"Not in PWN DFU: {msg}"))
         return
 
-    work_dirs = list(PROJECT_ROOT.glob("referenceforAI/usbliter8-fun*/work-*"))
+    work_dirs = _find_work_dirs()
     work_dir = None
     if work_dirs:
         work_dir = Path(input(prompt(f"Work dir [{work_dirs[0]}]: ") or str(work_dirs[0])))
@@ -347,7 +411,7 @@ def menu_normal_boot():
         print(err(f"Not in PWN DFU: {msg}"))
         return
 
-    work_dirs = list(PROJECT_ROOT.glob("referenceforAI/usbliter8-fun*/work-*"))
+    work_dirs = _find_work_dirs()
     work_dir = None
     if work_dirs:
         work_dir = Path(input(prompt(f"Work dir [{work_dirs[0]}]: ") or str(work_dirs[0])))
@@ -367,11 +431,17 @@ def menu_postboot():
     while True:
         print(header("Post-Boot Setup"))
         print()
-        print(f"  {C.EYE}[ 1 ]{C.NC}  USB Network        {C.DIM}Share Mac internet over USB{C.NC}")
-        print(f"  {C.EYE}[ 2 ]{C.NC}  VNC Remote Control  {C.DIM}View/control iPhone screen{C.NC}")
-        print(f"  {C.EYE}[ 3 ]{C.NC}  SSH to Device       {C.DIM}Open interactive shell{C.NC}")
-        print(f"  {C.EYE}[ 4 ]{C.NC}  Bootstrap           {C.DIM}Install Sileo + packages{C.NC}")
-        print(f"  {C.EYE}[ b ]{C.NC}  Back{C.NC}")
+
+        items = [
+            ("1", "USB Network",       "Share Mac internet over USB"),
+            ("2", "VNC Remote Control", "View/control iPhone screen"),
+            ("3", "SSH to Device",     "Open interactive shell"),
+            ("4", "Bootstrap",         "Install Sileo + packages"),
+        ]
+        for num, title, desc in items:
+            print(f"  {C.EYE}[ {num} ]{C.NC}  {C.SNOW}{title:<20}{C.NC} {C.DIM}{desc}{C.NC}")
+        print()
+        print(f"  {C.EYE}[ b ]{C.NC}  {C.SNOW}{'Back':<20}{C.NC}")
         print()
 
         choice = input(prompt("Choose: ")).strip().lower()

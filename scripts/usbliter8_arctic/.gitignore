@@ -1,0 +1,7 @@
+diagrams.txt
+__pycache__/
+*.pyc
+session.log
+config.yaml
+firmware/
+

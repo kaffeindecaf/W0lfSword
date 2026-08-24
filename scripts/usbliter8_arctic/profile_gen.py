@@ -193,6 +193,7 @@ if __name__ == "__main__":
         print(f"  Commands:")
         print(f"    {C.EYE}create{C.NC} <Model> <iOS> [build] [kernel_file]")
         print(f"    {C.EYE}diff{C.NC}   <base.yaml> <updated.yaml>")
+        print(f"    {C.EYE}migrate{C.NC} <base.yaml> <target.yaml|iOS> [--comp-dir DIR] [--auto] [--report FILE]")
         print(f"    {C.EYE}list{C.NC}   Show all known devices")
         print()
         sys.exit(0)
@@ -204,6 +205,9 @@ if __name__ == "__main__":
         cmd_create(args)
     elif cmd == "diff":
         cmd_diff(args)
+    elif cmd == "migrate":
+        from migrate import cli_main
+        cli_main(args)
     elif cmd == "list":
         cmd_list_templates()
     else:
