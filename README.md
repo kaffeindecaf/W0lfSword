@@ -10,18 +10,18 @@
 Filza into a full root file browser — and a separate host-side engine that
 **pulls kernel offsets from any iOS build without owning the device**.
 
-- 🔓 **DarkSword kernel R/W** (CVE-2025-43520) + SSV bypass, deployed over USB
+- **DarkSword kernel R/W** (CVE-2025-43520) + SSV bypass, deployed over USB
   in one command — no WiFi, no manual SSH setup
-- 🔍 **XPF offset verification on the host** — resolve a kernelcache's struct
+- **XPF offset verification on the host** — resolve a kernelcache's struct
   offsets, diff two builds, extract from an IPSW. The only toolkit that does
   this without a jailbroken device
-- 🧪 **Research tools built in** — panic log analyzer, kernelcache diffing,
+- **Research tools built in** — panic log analyzer, kernelcache diffing,
   fuzz harness, version-aware exploit guidance
 
 ![adderall demo](docs/demo.png)
 
 <details>
-<summary><b>🐺 howl (ascii art)</b></summary>
+<summary><b>howl (ascii art)</b></summary>
 
 ```text
                               __
