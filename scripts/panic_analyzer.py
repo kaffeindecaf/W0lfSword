@@ -47,12 +47,38 @@ def first_line(haystack, limit=180):
 
 
 def from_ips(path):
-    """Extract a 'haystack' + metadata from an .ips (JSON crash report)."""
+    """Extract a 'haystack' + metadata from an .ips (JSON crash report).
+
+    Modern .ips files are NDJSON-ish: line 1 is a one-line header object,
+    then the actual report object follows. Plain json.load fails on those
+    (the header is not a full document), so decode object-by-object with
+    raw_decode and use the LARGEST object (the report, not the header).
+    """
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            doc = json.load(fh)
+            text = fh.read()
     except Exception as e:
         return None, {"error": str(e)}
+
+    doc = None
+    decoder = json.JSONDecoder()
+    idx = 0
+    n = len(text)
+    while idx < n:
+        while idx < n and text[idx] in " \t\r\n":
+            idx += 1
+        if idx >= n:
+            break
+        try:
+            obj, idx = decoder.raw_decode(text, idx)
+        except Exception:
+            break
+        # keep the biggest object seen so far — the header is small, the
+        # report is large; a single-object .ips just takes this branch once
+        if doc is None or len(json.dumps(obj)) > len(json.dumps(doc)):
+            doc = obj
+    if doc is None:
+        return None, {"error": "no JSON object found"}
 
     # Crash reports nest the actual report under a key when the file has
     # a metadata preamble ("crashReporterKey" / "tailspin" style). Flatten.

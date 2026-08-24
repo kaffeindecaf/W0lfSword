@@ -5,6 +5,8 @@ Devices: iPhone SE 2nd gen (A13/t8030, D79AP) on iOS 18.4.1 (22E252) —
 Dopamine rootless, Filza 4.0.1-4, ElleKit 1.2, OpenSSH 9.7p1 (key auth)
 Second unit: same model, iOS 17.1 (21B74) — not yet jailbroken, used for
 host-side kernel research only.
+iPhone 14 (A15/t8110, D27AP) on iOS 26.0.1 (23A355) — main device, NOT
+jailbroken; read-only lockdown/crash-report/syslog testing only.
 
 ## What was tested and PASSED
 
@@ -47,6 +49,28 @@ host-side kernel research only.
     offsets.m 26.0 block bug (fixed). Three-way diff in the findings
     section below.
 
+### iPhone 14 main device (26.0.1, NOT jailbroken — read-only only)
+
+12. **`usbtest`** — 10/10 reads, pairing valid, lockdown diagnostics
+    round-trip OK, syslog stream received. Device: iPhone14,7 / D27AP /
+    iOS 26.0.1 (23A355).
+13. **Crash-report pull (read-only, idevicecrashreport)** — 144 .ips
+    files retrieved; ZERO kernel panics (no panicString/ktriageinfo).
+    Bug types: 313/226/298 (jetsam + app faults), 4× JetsamEvent all
+    TikTok memory kills — normal main-device behavior.
+14. **panic analyzer on real data** — found + fixed an NDJSON parsing
+    bug: modern .ips have a one-line header object followed by the
+    report; plain json.load failed. Now decodes object-by-object and
+    keeps the largest (the report). JetsamEvent classifies as UNKNOWN
+    kind (correct — not kernel/SEP/MTE).
+15. **t8110 (A15) 26.0.1 kernelcache (host-side, from IPSW)** —
+    xnu-12377.2.9~1/RELEASE_ARM64_T8110, matches the device's own
+    crash-report kernel string. **itk_space 0x310 — same as t8030 and
+    T8150 at 26.0.1: the 26.x fix is now verified on THREE SoCs.**
+    sptm=1 on t8110 (vs 0 on t8030) — SPTM is per-SoC.
+16. **Live syslog over USB** — kernel messages streaming (ApplePPMCPMS
+    power management, wlan0 p2p, netagent) — read-only, device healthy.
+
 ## What was NOT tested (needs your presence / go-ahead)
 
 - **Adderall full deploy + exploit run** — builds, installs into Filza,
@@ -71,3 +95,11 @@ host-side kernel research only.
 - machine_CpuDatap 0x148 on 17.x/18.x A13, UNRESOLVED on 26.x A13.
 - sptm=0 on ALL t8030 builds (17.1/18.4.1/26.0.1) — SPTM is per-SoC
   (T8150/A18 has it), not per-version.
+- **Cross-SoC verification at 26.0.1 (iPhone 14 / t8110):** itk_space
+  0x310 on t8030, t8110 AND T8150 — the 26.x fix is triple-verified.
+  proc.struct_size 0x748 identical across all three SoCs. machine_
+  CpuDatap differs per SoC (0x150 t8110 / 0x1a0 T8150 / UNRESOLVED
+  t8030). sptm=1 on t8110+T8150, 0 on t8030 — SPTM presence is SoC-,
+  not version-, dependent.
+- **panic_analyzer NDJSON fix** — real .ips files from the iPhone 14
+  exposed it; now handles multi-object crash reports.
