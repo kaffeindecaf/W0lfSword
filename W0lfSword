@@ -59,6 +59,52 @@ trap 'cleanup; exit 130' INT TERM
 SSH_TUNNEL_PID=""
 SSH_TUNNEL_PORT=""
 
+# SSH key for deploys: reuse the invoking user's key even under sudo
+# (sudo resets HOME to /root, which would silently look in /root/.ssh).
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME="$(eval echo "~$REAL_USER" 2>/dev/null || echo "$HOME")"
+SSH_KEY="${SSH_KEY:-$REAL_HOME/.ssh/id_ed25519}"
+
+# Ensure this computer has an SSH keypair; generate one if missing.
+ssh_ensure_key() {
+    [ -f "$SSH_KEY" ] && [ -f "$SSH_KEY.pub" ] && return 0
+    mkdir -p "$(dirname "$SSH_KEY")" 2>/dev/null
+    chmod 700 "$(dirname "$SSH_KEY")" 2>/dev/null
+    if command -v ssh-keygen &>/dev/null; then
+        echo -e "  ${C_AMB}No SSH key on this computer — generating one now${NC}"
+        ssh-keygen -t ed25519 -N "" -f "$SSH_KEY" \
+            -C "$REAL_USER@$(hostname 2>/dev/null || echo localhost)" >/dev/null 2>&1
+    fi
+    [ -f "$SSH_KEY.pub" ]
+}
+
+# Install this computer's public key on the phone (one-time; prompts for
+# the phone's root password). Returns 0 when key auth now works.
+ssh_install_key() {
+    local host="${1:-root@localhost}" port="${2:-}"
+    local portargs=()
+    [ -n "$port" ] && portargs=(-p "$port")
+    ssh_ensure_key || { err "cannot create SSH key"; return 1; }
+    # fast path: key already works
+    if ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+            "${portargs[@]}" "$host" "echo ok" 2>/dev/null | grep -q ok; then
+        return 0
+    fi
+    if $YES_MODE; then
+        hint "Add the key yourself: ssh-copy-id ${portargs[*]} $host   (phone root password)"
+        return 1
+    fi
+    if ! command -v ssh-copy-id &>/dev/null; then
+        err "ssh-copy-id not installed — add the key manually: ssh-copy-id ${portargs[*]} $host"
+        return 1
+    fi
+    echo -e "  ${C_AMB}This computer has no SSH key on the phone — installing it now${NC}"
+    echo -e "  ${C_DIM}(one-time setup; enter the phone's root password, default alpine)${NC}"
+    ssh-copy-id -i "$SSH_KEY.pub" -o StrictHostKeyChecking=no "${portargs[@]}" "$host" 2>&1 | tail -2
+    ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+        "${portargs[@]}" "$host" "echo ok" 2>/dev/null | grep -q ok
+}
+
 usb_ssh_up() {
     [ -n "$SSH_TUNNEL_PID" ] && return 0
     command -v iproxy &>/dev/null || return 1
@@ -68,17 +114,19 @@ usb_ssh_up() {
     SSH_TUNNEL_PID=$!
     sleep 1
     local out
-    out=$(ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o BatchMode=yes \
+    out=$(ssh -i "$SSH_KEY" -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o BatchMode=yes \
              -p 2222 root@localhost "echo ok" 2>&1) || true
     if echo "$out" | grep -q ok; then
         SSH_TUNNEL_PORT="2222"
         return 0
     fi
-    kill "$SSH_TUNNEL_PID" 2>/dev/null || true
-    SSH_TUNNEL_PID=""
     if echo "$out" | grep -qi "permission denied"; then
+        # sshd is up; keep the tunnel alive so a key can be installed now
+        SSH_TUNNEL_PORT="2222"
         return 2   # sshd is up, but this computer has no key on the phone
     fi
+    kill "$SSH_TUNNEL_PID" 2>/dev/null || true
+    SSH_TUNNEL_PID=""
     return 1       # no sshd / unreachable
 }
 
@@ -86,10 +134,10 @@ ssh_safe() {
     local host="${1:-}"
     shift
     if [ -n "$SSH_TUNNEL_PORT" ]; then
-        ssh -p "$SSH_TUNNEL_PORT" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        ssh -i "$SSH_KEY" -p "$SSH_TUNNEL_PORT" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
             -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "root@localhost" "$@" 2>/dev/null
     else
-        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        ssh -i "$SSH_KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
             -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$host" "$@" 2>/dev/null
     fi
 }
@@ -97,10 +145,10 @@ scp_safe() {
     local remote="${1:-}"
     shift
     if [ -n "$SSH_TUNNEL_PORT" ]; then
-        scp -P "$SSH_TUNNEL_PORT" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        scp -i "$SSH_KEY" -P "$SSH_TUNNEL_PORT" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
             "root@localhost:${remote#*:}" "$@" 2>/dev/null
     else
-        scp -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        scp -i "$SSH_KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
             "$remote" "$@" 2>/dev/null
     fi
 }
@@ -1601,7 +1649,7 @@ cmd_device() {
             local dip="${arg:-$(get_device_ip)}"
             [ -z "$dip" ] && { err "No device"; hint "Connect via USB or: ./W0lfSword device add <ip>"; return 1; }
             $VERBOSE || spinner "querying $dip"
-            if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$dip" "echo ok" 2>/dev/null | grep -q ok; then
+            if ssh -i "$SSH_KEY" -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$dip" "echo ok" 2>/dev/null | grep -q ok; then
                 section "Device Info"
                 local ios; ios=$(ssh_safe "root@$dip" "sw_vers -productVersion" 2>/dev/null || echo "?")
                 local mdl; mdl=$(ssh_safe "root@$dip" "sysctl -n hw.machine" 2>/dev/null || echo "?")
@@ -2198,9 +2246,20 @@ EOF
             echo -e "  ${C_GRN}✓${NC} USB SSH tunnel up — deploys go over USB (localhost:$SSH_TUNNEL_PORT), no WiFi needed"
         elif [ "$usb_rc" -eq 2 ]; then
             warn "USB SSH: sshd is up, but this computer has no SSH key on the phone"
-            hint "One-time setup: ssh-copy-id -p 2222 root@localhost   (enter the phone's root password, default alpine)"
-            if $USB_ONLY; then return 1; fi
-            echo -e "  ${C_DIM}Falling back to WiFi${NC}"
+            # Adderall installs the key itself (one password prompt) — no
+            # manual ssh-copy-id needed anymore.
+            if ssh_install_key "root@localhost" 2222; then
+                echo -e "  ${C_GRN}✓${NC} SSH key installed on the phone — USB tunnel ready (localhost:2222)"
+            else
+                kill "$SSH_TUNNEL_PID" 2>/dev/null || true
+                SSH_TUNNEL_PID=""
+                SSH_TUNNEL_PORT=""
+                if $USB_ONLY; then
+                    err "USB SSH key install failed — OpenSSH reachable but auth not set up"
+                    return 1
+                fi
+                echo -e "  ${C_DIM}Falling back to WiFi${NC}"
+            fi
         elif $USB_ONLY; then
             err "USB SSH unavailable — is OpenSSH running on the phone? (--usb was set)"
             hint "The tunnel only replaces WiFi; the phone still needs sshd on port 22."
@@ -2220,6 +2279,10 @@ EOF
             echo -e "  ${C_GRN}✓${NC} Saved device: ${C_EYE}$IP${NC}"
             if ping_check "$IP"; then
                 echo -e "  ${C_GRN}✓${NC} Device online via WiFi"
+                # ensure this computer's key is on the phone (one prompt)
+                if ! ssh_install_key "root@$IP"; then
+                    warn "SSH key install to $IP failed — WiFi deploys may not work"
+                fi
                 IOS_VER=$(ssh_safe "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
                 DEV_MODEL=$(ssh_safe "root@$IP" "sysctl -n hw.machine" 2>/dev/null || echo "")
             else
@@ -2228,7 +2291,10 @@ EOF
         fi
         if [ -z "$IOS_VER" ]; then
             echo -ne "  ${C_FROST}Enter device IP (or press enter for USB only):${NC} "; read -r IP
-            [ -n "$IP" ] && IOS_VER=$(ssh_safe "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
+            if [ -n "$IP" ]; then
+                ssh_install_key "root@$IP" >/dev/null 2>&1 || true
+                IOS_VER=$(ssh_safe "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
+            fi
         fi
     fi
 
@@ -2316,7 +2382,7 @@ EOF
 
     # SSH check (WiFi)
     if [ -n "$IP" ]; then
-        ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$IP" "echo ok" 2>/dev/null | grep -q ok \
+        ssh -i "$SSH_KEY" -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$IP" "echo ok" 2>/dev/null | grep -q ok \
             && echo -e "  ${C_GRN}✓${NC} SSH to $IP: ok" \
             || echo -e "  ${C_AMB}⚠${NC} SSH to $IP failed — check OpenSSH on device"
     fi
