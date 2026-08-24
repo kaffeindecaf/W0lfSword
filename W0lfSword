@@ -258,29 +258,34 @@ cmd_usbtest() {
     fi
     echo -e "  ${C_GRN}✓${NC} Device visible on USB: ${C_EYE}$uuid${NC}"
 
-    # pairing / trust
-    if idevicepair validate 2>/dev/null | grep -qi "paired"; then
+    # pairing / trust — use the exit code, not output text: the success
+    # wording changed between libimobiledevice versions ("is paired with
+    # device" vs "Validated pairing with device").
+    if idevicepair validate >/dev/null 2>&1; then
         ok "Pairing valid — this computer is trusted"
     else
         warn "Not paired — tap TRUST on the phone if it asks"
-        idevicepair pair 2>/dev/null || true
-        sleep 1
-        if idevicepair validate 2>/dev/null | grep -qi "paired"; then
-            ok "Paired after trust prompt"
+        if idevicepair pair >/dev/null 2>&1; then
+            sleep 1
+            if idevicepair validate >/dev/null 2>&1; then
+                ok "Paired after trust prompt"
+            else
+                warn "Pairing recorded but validation still failing — try again in a moment"
+            fi
         else
-            err "Pairing failed — unlock the phone first (a passcode locks pairing), tap TRUST, re-run: ./W0lfSword usbtest"
+            err "Pairing failed — unlock the phone first (a passcode locks pairing), tap TRUST, then re-run: ./W0lfSword usbtest"
             return 1
         fi
     fi
 
-    # connection type — makes sure we are on the USB path
+    # connection type — idevice_id -l only lists USB devices, so a UDID
+    # here already means the USB path is live. The ConnectionType key is
+    # not populated on every libimobiledevice build, so don't rely on it.
     local ctype; ctype=$(ideviceinfo -k ConnectionType 2>/dev/null || echo "")
     if [ "$ctype" = "USB" ]; then
         ok "Connection is USB (Lightning cable)"
-    elif [ -n "$ctype" ]; then
-        warn "Device is reachable over $ctype, not USB — this test only covers the USB path"
     else
-        warn "Could not read connection type"
+        echo -e "  ${C_DIM}connection: USB (Lightning) — found via the USB device list${NC}"
     fi
 
     # identity round-trip
@@ -1857,7 +1862,7 @@ EOF
         usb_uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
         if [ -n "$usb_uuid" ]; then
             # Auto-pair — first-time trust dialog appears ON THE PHONE
-            if ! idevicepair validate 2>/dev/null | grep -q "paired"; then
+            if ! idevicepair validate >/dev/null 2>&1; then
                 echo -e "  ${C_AMB}Pairing with device — tap TRUST on the phone if it asks${NC}"
                 start_pulse "pairing" & PULSE_PID=$!
                 idevicepair pair 2>/dev/null || true
