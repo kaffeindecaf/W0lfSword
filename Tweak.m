@@ -1054,6 +1054,10 @@ __attribute__((constructor)) void TweakInit(void) {
         if (check_sandbox_var_rw() == 0) {
             TweakLog("[Tweak] sandbox already escaped + rw confirmed, running diagnostics");
             runSSVDiagnosticsOnce();
+            // On a jailbroken device the sandbox is escaped by the jailbreak
+            // itself — record it so the crash counter doesn't auto-disable the
+            // tweak after 3 launches (the exploit path never runs here).
+            mark_exploit_success();
         } else {
             TweakLog("[Tweak] sandbox already escaped but rw not confirmed, skip diagnostics");
         }

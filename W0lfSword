@@ -2226,9 +2226,24 @@ EOF
         if [ "$IS_MACOS" -eq 1 ]; then
             SUDO="sudo"
         else
-            echo -e "  ${C_RED}✗ adderall needs root to auto-install packages. Re-run with:${NC}"
-            echo -e "    ${C_FROST}sudo ./W0lfSword adderall${NC}"
-            return 1
+            # Root is only needed for the apt auto-install below. If every
+            # dependency is already present, running as the normal user is
+            # actually better: $HOME and the SSH keys stay intact (sudo resets
+            # HOME to /root, which breaks key lookups for the deploy phase).
+            local need_root=false
+            command -v clang &>/dev/null      || need_root=true
+            command -v dpkg-deb &>/dev/null   || need_root=true
+            command -v git &>/dev/null        || need_root=true
+            command -v python3 &>/dev/null    || need_root=true
+            command -v ssh &>/dev/null        || need_root=true
+            command -v idevice_id &>/dev/null || need_root=true
+            check_theos || need_root=true
+            if $need_root; then
+                echo -e "  ${C_RED}✗ adderall needs root to auto-install packages. Re-run with:${NC}"
+                echo -e "    ${C_FROST}sudo ./W0lfSword adderall${NC}"
+                return 1
+            fi
+            echo -e "  ${C_DIM}All dependencies present — running as $USER (auto-install skipped)${NC}"
         fi
     fi
 
@@ -2335,6 +2350,11 @@ EOF
         local usb_rc=$?
         if [ "$usb_rc" -eq 0 ]; then
             echo -e "  ${C_GRN}✓${NC} USB SSH tunnel up — deploys go over USB (localhost:$SSH_TUNNEL_PORT), no WiFi needed"
+            # Deploy target = the tunnel; ssh_safe/scp_safe route via
+            # SSH_TUNNEL_PORT and ignore the host, so a bare localhost keeps
+            # later phases from prompting for a WiFi IP (which would hang in
+            # USB-only runs and is pointless when the tunnel is up).
+            [ -z "$IP" ] && IP="localhost"
         elif [ "$usb_rc" -eq 2 ]; then
             warn "USB SSH: sshd is up, but this computer has no SSH key on the phone"
             # Adderall installs the key itself (one password prompt) — no
@@ -2404,7 +2424,7 @@ EOF
     # Friendly prerequisite check: is Filza actually installed?
     local FILZA_CHECK=""
     if [ -n "$IP" ]; then
-        FILZA_CHECK=$(ssh_safe "root@$IP" "ls -d /var/containers/Bundle/Application/*/Filza.app 2>/dev/null; ls -d /Applications/Filza.app 2>/dev/null" 2>/dev/null || echo "")
+        FILZA_CHECK=$(ssh_safe "root@$IP" "ls -d /var/containers/Bundle/Application/*/Filza.app 2>/dev/null; ls -d /Applications/Filza.app 2>/dev/null; ls -d /var/jb/Applications/Filza.app 2>/dev/null" 2>/dev/null || echo "")
     fi
     if [ -n "$FILZA_CHECK" ]; then
         echo -e "  ${C_GRN}✓${NC} Filza found on device — ready to inject"
@@ -2473,7 +2493,7 @@ EOF
 
     # SSH check (WiFi)
     if [ -n "$IP" ]; then
-        ssh -i "$SSH_KEY" -o ConnectTimeout=3 -o StrictHostKeyChecking=no "root@$IP" "echo ok" 2>/dev/null | grep -q ok \
+        ssh_safe "root@$IP" "echo ok" 2>/dev/null | grep -q ok \
             && echo -e "  ${C_GRN}✓${NC} SSH to $IP: ok" \
             || echo -e "  ${C_AMB}⚠${NC} SSH to $IP failed — check OpenSSH on device"
     fi
@@ -2643,9 +2663,31 @@ EOF
     fi
     local rp="/tmp/$(basename "$deb")"
     scp_safe "$deb" "root@$IP:$rp" >/dev/null 2>&1 || { err "SCP failed"; hint "Is the phone on the same WiFi? Is OpenSSH installed and running?"; return 1; }
-    ssh_safe "root@$IP" "dpkg -i '$rp' >/dev/null 2>&1; rm -f '$rp'" 2>/dev/null \
-        || { err "dpkg install failed"; hint "Try './W0lfSword device info $IP' to check the phone is reachable."; return 1; }
+    # Preserve dpkg's real exit code: a bare `; rm -f` chain would let rm's
+    # status mask a failed install (silent no-op deploys).
+    local dep_out
+    dep_out=$(ssh_safe "root@$IP" "dpkg -i '$rp' 2>&1; rc=\$?; rm -f '$rp'; exit \$rc" 2>/dev/null) \
+        || { err "dpkg install failed: $(echo "$dep_out" | tail -3 | tr '\n' ' ')"; hint "Rootless devices need a rootless-built deb (THEOS_PACKAGE_SCHEME=rootless). Try './W0lfSword doctor'."; return 1; }
+    # Dopamine/rootless: adhoc-signed dylibs are only loadable if their cdhash
+    # is in the trust cache. Package managers register it on install; a raw
+    # dpkg -i bypasses that, so dyld silently skips the tweak. Register it now.
+    local dylib_src=".theos/obj/debug/FilzaApplySandboxExt.dylib"
+    local cdhash=""
+    [ -f "$dylib_src" ] && cdhash=$(./scripts/ldid -h "$dylib_src" 2>/dev/null | grep -oE "CandidateCDHash sha256=[a-f0-9]+" | awk -F= '{print $2}' | head -1)
+    if [ -n "$cdhash" ]; then
+        ssh_safe "root@$IP" "/var/jb/usr/bin/jbctl trustcache add $cdhash 2>/dev/null || true" 2>/dev/null || true
+        vlog "trust cache: $cdhash"
+    fi
     ssh_safe "root@$IP" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
+    # Launch Filza so the tweak injects and the exploit actually runs —
+    # a self-contained run shouldn't depend on someone tapping the icon.
+    # uiopen silently no-ops on Dopamine rootless when the app isn't in
+    # SpringBoard's LaunchServices, so fall back to launching the binary
+    # directly (nohup keeps it alive after the ssh session ends).
+    sleep 2
+    local filza_bin=""
+    [ -n "$FILZA_CHECK" ] && filza_bin="$(echo "$FILZA_CHECK" | head -1)/Filza"
+    ssh_safe "root@$IP" "uiopen '$TARGET_BUNDLE' 2>/dev/null; sleep 2; ps ax -o comm= 2>/dev/null | grep -qx Filza || { [ -n '$filza_bin' ] && nohup env HOME=/var/mobile '$filza_bin' >/dev/null 2>&1 & }" 2>/dev/null || true
     ok "Deployed + Filza restarted"
 
     # Start crash monitor (captures log + detects kernel panic)
@@ -2676,12 +2718,22 @@ EOF
     stage "5/5" "Final result..."
     echo ""
 
-    if echo "$log" | grep -q "ESCAPED"; then
+    if echo "$log" | grep -qE "ESCAPED|already escaped"; then
+        local already_escaped=false
+        echo "$log" | grep -q "already escaped" && ! echo "$log" | grep -q "ESCAPED" && already_escaped=true
         echo -e "  ${C_GRN}${B}  ╔════════════════════════════════════════════╗${NC}"
-        echo -e "  ${C_GRN}${B}  ║      SANDBOX ESCAPED — EXPLOIT SUCCESS     ║${NC}"
+        if $already_escaped; then
+            echo -e "  ${C_GRN}${B}  ║   SANDBOX ALREADY ESCAPED (jailbroken)    ║${NC}"
+        else
+            echo -e "  ${C_GRN}${B}  ║      SANDBOX ESCAPED — EXPLOIT SUCCESS     ║${NC}"
+        fi
         echo -e "  ${C_GRN}${B}  ╚════════════════════════════════════════════╝${NC}"
         echo ""
-        echo -e "  ${C_GRN}Device $DEV_NAME ($IOS_VER) is now fully exploited${NC}"
+        if $already_escaped; then
+            echo -e "  ${C_GRN}Device $DEV_NAME ($IOS_VER) is jailbroken — the kernel exploit isn't needed; hooks + SSV bypass are active${NC}"
+        else
+            echo -e "  ${C_GRN}Device $DEV_NAME ($IOS_VER) is now fully exploited${NC}"
+        fi
         echo -e "  ${C_DIM}SSV writes: $($ENABLE_SSV && echo 'enabled' || echo 'disabled')${NC}"
         echo ""
         disclaimer <<EOF

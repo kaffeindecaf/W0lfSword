@@ -1,5 +1,11 @@
 TARGET := iphone:clang:latest:15.0
 ARCHS = arm64
+# Rootless (Dopamine) install target. NOTE: don't use THEOS_PACKAGE_SCHEME=
+# rootless here — this Theos build's scheme-staging mv in package/deb.mk is
+# broken (parse-time $(shell mv) runs before the stage exists → empty deb
+# layout). INSTALL_PATH achieves the same /var/jb layout without the scheme;
+# ElleKit's substrate shim resolves the classic substrate load path at runtime.
+FilzaApplySandboxExt_INSTALL_PATH = /var/jb/Library/MobileSubstrate/DynamicLibraries
 
 include $(THEOS)/makefiles/common.mk
 
