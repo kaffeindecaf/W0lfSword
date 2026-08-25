@@ -443,58 +443,86 @@ def cmd_html(args):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kernel-deltas — iOS kernel delta feed</title>
 <style>
-  :root { color-scheme: dark; }
+  /* machine-room printout: cream paper, ink, rubber stamps */
   * { box-sizing: border-box; }
-  body { margin: 0; font: 15px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif;
-         background: #0d1117; color: #e6edf3; }
-  header { padding: 3rem 1.5rem 2rem; text-align: center;
-           background: radial-gradient(1200px 300px at top, #1f2937, #0d1117); }
-  header h1 { margin: 0; font-size: 2.2rem; letter-spacing: .5px; }
-  header p { color: #8b949e; max-width: 640px; margin: .6rem auto 0; }
-  .links { margin-top: 1rem; }
-  .links a { color: #58a6ff; text-decoration: none; margin: 0 .6rem; font-size: .9rem; }
-  .links a:hover { text-decoration: underline; }
-  main { max-width: 1000px; margin: 0 auto; padding: 1rem 1.5rem 4rem; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-           gap: 1rem; margin: 1.5rem 0 2.5rem; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 1rem 1.2rem; }
-  .card h3 { margin: 0 0 .2rem; font-size: 1.05rem; }
-  .card .big { font-size: 1.25rem; font-weight: 600; margin: .4rem 0; }
-  .dim { color: #8b949e; font-size: .85rem; margin: .15rem 0; }
-  table { width: 100%%; border-collapse: collapse; background: #161b22;
-          border: 1px solid #30363d; border-radius: 10px; overflow: hidden; }
-  th, td { padding: .55rem .8rem; text-align: left; border-bottom: 1px solid #21262d; }
-  th { color: #8b949e; font-weight: 600; font-size: .8rem; text-transform: uppercase;
-       letter-spacing: .4px; }
-  tr:last-child td { border-bottom: none; }
-  code { background: #21262d; padding: 1px 5px; border-radius: 4px; font-size: .85em; }
-  .badge { padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 700; }
-  .ok { background: #12291c; color: #3fb950; border: 1px solid #238636; }
-  .bad { background: #2d1215; color: #f85149; border: 1px solid #da3633; }
-  .warn { background: #2d2411; color: #d29922; border: 1px solid #9e6a03; }
-  footer { text-align: center; color: #484f58; font-size: .8rem; padding: 2rem 0 3rem; }
-  footer a { color: #58a6ff; text-decoration: none; }
+  body { margin: 0; background: #efe9d8; color: #201d17;
+         font: 14px/1.6 ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace; }
+  .paper { max-width: 980px; margin: 2rem auto; background: #f6f3e9;
+           border: 1px solid #c8c1ac; box-shadow: 0 1px 2px rgba(60,50,20,.08), 0 8px 30px rgba(60,50,20,.12);
+           position: relative; }
+  .paper::before { content: ""; position: absolute; inset: 0;
+                   background: repeating-linear-gradient(0deg, transparent 0 27px, rgba(80,70,40,.025) 27px 28px);
+                   pointer-events: none; }
+  header { padding: 2.2rem 2.5rem 1.4rem; border-bottom: 2px solid #201d17; }
+  .pre { margin: 0; white-space: pre; letter-spacing: .5px; }
+  .stampbox { border: 1px solid #b3261e; color: #b3261e; display: inline-block;
+              padding: .15rem .6rem; font-weight: 700; letter-spacing: 2px;
+              transform: rotate(-2deg); text-transform: uppercase; }
+  .sub { color: #6b6353; margin: .6rem 0 0; font-size: .85rem; }
+  main { padding: 1.6rem 2.5rem 2.5rem; }
+  h2 { font-size: .95rem; text-transform: uppercase; letter-spacing: 2px;
+       border-bottom: 1px solid #201d17; padding-bottom: .35rem; margin: 1.8rem 0 1rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+           gap: 1rem; margin-bottom: .5rem; }
+  .card { border: 1px solid #b9b29c; padding: .9rem 1.1rem; background: #faf8f1;
+          position: relative; }
+  .card::before { content: "+"; position: absolute; top: -8px; left: -7px; color: #b3261e;
+                  font-weight: 700; font-size: 1rem; }
+  .card h3 { margin: 0 0 .2rem; font-size: .95rem; letter-spacing: 1px; }
+  .card .meta { color: #6b6353; font-size: .8rem; margin: 0 0 .5rem; }
+  .card .big { font-size: 1.1rem; font-weight: 700; margin: 0 0 .3rem; }
+  .card .dim { color: #6b6353; font-size: .8rem; margin: 0; }
+  table { width: 100%%; border-collapse: collapse; margin-top: .4rem; }
+  th { text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: 1.5px;
+       color: #6b6353; border-bottom: 2px solid #201d17; padding: .5rem .6rem; }
+  td { padding: .55rem .6rem; border-bottom: 1px dotted #c8c1ac; vertical-align: top; }
+  tbody tr:nth-child(even) { background: rgba(80,70,40,.04); }
+  code { background: #ece6d3; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+  .badge { display: inline-block; padding: 1px 9px; border: 2px solid #b3261e; color: #b3261e;
+           font-weight: 700; letter-spacing: 2px; font-size: .72rem; text-transform: uppercase;
+           transform: rotate(-2deg); }
+  .badge.ok { border-color: #1f6d3a; color: #1f6d3a; }
+  .badge.warn { border-color: #9a6b00; color: #9a6b00; }
+  .badge.bad { border-color: #b3261e; color: #b3261e; }
+  footer { padding: 1rem 2.5rem 2rem; border-top: 2px dashed #c8c1ac; color: #6b6353;
+           font-size: .8rem; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  footer a { color: #1f4e8c; text-decoration: none; border-bottom: 1px dotted #1f4e8c; }
+  a { color: #1f4e8c; }
+  .links { margin-top: .9rem; font-size: .85rem; }
+  .links a { margin-right: 1.2rem; }
 </style></head><body>
+<div class="paper">
 <header>
-  <h1>🐺 kernel-deltas</h1>
-  <p>What changed in the iOS kernel between builds — resolved offsets and symbols,
-     diffed per release, published automatically.</p>
+  <div class="pre">+--------------------------------------------------------------+
+|  &#x1F43A;  KERNEL-DELTAS  //  iOS KERNEL DELTA FEED               |
+|  PRINTED %s                                            |
++--------------------------------------------------------------+</div>
+  <p class="sub">What changed in the iOS kernel between builds — resolved offsets
+  and symbols, diffed per release, published automatically. No devices, no
+  jailbreaks, no 8 GB downloads.</p>
   <div class="links">
-    <a href="https://github.com/kaffeindecaf/kernel-deltas">GitHub</a>
-    <a href="https://github.com/kaffeindecaf/kernel-deltas/blob/main/kernel-deltas.md">Markdown feed</a>
-    <a href="https://github.com/kaffeindecaf/kernel-deltas/raw/main/atom.xml">Atom / RSS</a>
+    <a href="https://github.com/kaffeindecaf/kernel-deltas">GITHUB</a>
+    <a href="https://github.com/kaffeindecaf/kernel-deltas/blob/main/kernel-deltas.md">MARKDOWN FEED</a>
+    <a href="https://github.com/kaffeindecaf/kernel-deltas/raw/main/atom.xml">ATOM/RSS</a>
   </div>
 </header>
 <main>
+  <h2>&#x25B8; watched boards</h2>
   <div class="cards">%s</div>
+
+  <h2>&#x25B8; history</h2>
   <table>
     <thead><tr><th>date</th><th>board</th><th>release</th><th>build</th>
     <th>xnu</th><th>same</th><th>changed</th><th>degraded</th><th>verdict</th></tr></thead>
     <tbody>%s</tbody>
   </table>
 </main>
-<footer>generated by <a href="https://github.com/kaffeindecaf/W0lfSword">W0lfSword</a> kcwatch · %s</footer>
-</body></html>""" % ("\n".join(board_cards), "\n".join(trs), now)
+<footer>
+  <span>generated by W0lfSword kcwatch — github.com/kaffeindecaf/W0lfSword</span>
+  <span>same = struct offsets identical &middot; changed = symbol addresses &middot; degraded = resolved&#x2192;unresolved</span>
+</footer>
+</div>
+</body></html>""" % (now, "\n".join(board_cards), "\n".join(trs))
 
     os.makedirs("docs", exist_ok=True)
     with open(os.path.join("docs", "index.html"), "w") as fh:

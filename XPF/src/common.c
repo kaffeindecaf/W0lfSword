@@ -769,6 +769,123 @@ static uint64_t xpf_find_proc_struct_size(void)
 	}
 }
 
+static uint64_t xpf_find_proc_p_name(void)
+{
+	// kernel-deltas extension: offsetof(proc, p_name).
+	// p_name is not statically initialized in modern XNU, but logging code
+	// does strncmp(p->p_name, "kernel_task", ...) — the instruction loading
+	// p_name sits right before the ADRP of that string. Mirror the
+	// proc.struct_size technique, with a mid-struct sanity range.
+	PFStringMetric *sm = pfmetric_string_init("kernel_task");
+	__block uint64_t strAddr = 0;
+	pfmetric_run(gXPF.kernelStringSection, sm, ^(uint64_t vmaddr, bool *stop) {
+		strAddr = vmaddr;
+		*stop = true;
+	});
+	pfmetric_free(sm);
+	XPF_ASSERT(strAddr);
+
+	PFXrefMetric *xm = pfmetric_xref_init(strAddr, XREF_TYPE_MASK_REFERENCE);
+	__block uint64_t p_name = 0;
+	uint32_t ldrAnyInst = 0, ldrAnyMask = 0;
+	arm64_gen_ldr_imm(0, LDR_STR_TYPE_UNSIGNED, ARM64_REG_ANY, ARM64_REG_ANY, OPT_UINT64_NONE, &ldrAnyInst, &ldrAnyMask);
+	pfmetric_run(gXPF.kernelTextSection, xm, ^(uint64_t vmaddr, bool *stop) {
+		uint64_t ldr = pfsec_find_prev_inst(gXPF.kernelTextSection, vmaddr, 10, ldrAnyInst, ldrAnyMask);
+		if (!ldr)
+			return;
+		arm64_register r;
+		uint64_t imm = 0;
+		arm64_dec_ldr_imm(pfsec_read32(gXPF.kernelTextSection, ldr), NULL, &r, &imm, NULL, NULL);
+		if (imm >= 0x100 && imm < 0x800 && ARM64_REG_GET_NUM(r) != ARM64_REG_NUM_SP) {
+			p_name = imm;
+			*stop = true;
+		}
+	});
+	pfmetric_free(xm);
+	return p_name;
+}
+
+static uint64_t xpf_find_task_threads_next(void)
+{
+	// kernel-deltas extension: offsetof(task, threads.next).
+	// Same code walk as xpf_find_task_itk_space, but take the SECOND
+	// non-SP LDR in the window: task_collect_crash_info reads
+	// task->itk_space first, then walks task->threads.next for the
+	// crash-info thread state collection.
+	__block uint64_t task_collect_crash_info = xpf_item_resolve("kernelSymbol.task_collect_crash_info");
+	XPF_ASSERT(task_collect_crash_info);
+
+	uint32_t movzW2_1 = 0, movzW2_1Mask = 0;
+	arm64_gen_mov_imm('z', ARM64_REG_W(2), OPT_UINT64(1), OPT_UINT64(0), &movzW2_1, &movzW2_1Mask);
+
+	__block uint64_t xref = 0;
+	PFXrefMetric *m = pfmetric_xref_init(task_collect_crash_info, XREF_TYPE_MASK_CALL);
+	pfmetric_run(gXPF.kernelTextSection, m, ^(uint64_t vmaddr, bool *stop) {
+		if ((pfsec_read32(gXPF.kernelTextSection, vmaddr - 4) & movzW2_1Mask) != movzW2_1) return;
+		xref = vmaddr;
+		*stop = true;
+	});
+	pfmetric_free(m);
+	XPF_ASSERT(xref);
+
+	uint64_t cbz1Addr = xref + 4;
+	bool isCbnz = false;
+	uint64_t target1 = 0;
+	int decRet = arm64_dec_cb_n_z(pfsec_read32(gXPF.kernelTextSection, cbz1Addr), cbz1Addr, &isCbnz, NULL, &target1);
+	XPF_ASSERT(decRet == 0);
+	if (isCbnz)
+		target1 = cbz1Addr + 4;
+
+	uint32_t cbzAnyInst = 0, cbzAnyMask = 0;
+	arm64_gen_cb_n_z(OPT_BOOL_NONE, ARM64_REG_ANY, OPT_UINT64_NONE, &cbzAnyInst, &cbzAnyMask);
+	uint64_t cbz2Addr = pfsec_find_next_inst(gXPF.kernelTextSection, target1, 0x20, cbzAnyInst, cbzAnyMask);
+
+	uint64_t target2 = 0;
+	decRet = arm64_dec_cb_n_z(pfsec_read32(gXPF.kernelTextSection, cbz2Addr), cbz2Addr, &isCbnz, NULL, &target2);
+	XPF_ASSERT(decRet == 0);
+	if (isCbnz)
+		target2 = cbz2Addr + 4;
+
+	uint32_t ldrAnyInst = 0, ldrAnyMask = 0;
+	arm64_gen_ldr_imm(0, LDR_STR_TYPE_UNSIGNED, ARM64_REG_ANY, ARM64_REG_ANY, OPT_UINT64_NONE, &ldrAnyInst, &ldrAnyMask);
+
+	uint64_t ldrAddr = target2;
+	uint64_t ldrEndAddr = ldrAddr + (0x40 * sizeof(uint32_t));   // wider window: thread-walk code
+	uint64_t first = 0, second = 0;
+	while (true) {
+		// bound the walk: the window is real code, but a missing second
+		// non-SP LDR must not run us off the end (find_next_inst can return
+		// 0 on an exhausted window)
+		if (!ldrAddr || ldrAddr >= ldrEndAddr) {
+			second = 0;
+			break;
+		}
+		ldrAddr = pfsec_find_next_inst(gXPF.kernelTextSection, ldrAddr, (ldrEndAddr - ldrAddr) / 4, ldrAnyInst, ldrAnyMask);
+		if (!ldrAddr) {
+			second = 0;
+			break;
+		}
+		arm64_register addrReg;
+		uint64_t imm = 0;
+		arm64_dec_ldr_imm(pfsec_read32(gXPF.kernelTextSection, ldrAddr), NULL, &addrReg, &imm, NULL, NULL);
+		if (ARM64_REG_GET_NUM(addrReg) != ARM64_REG_NUM_SP) {
+			if (!first)
+				first = imm;
+			else {
+				second = imm;
+				break;
+			}
+		}
+		ldrAddr += 4;
+	}
+	// sanity: threads.next must sit between the task struct start and
+	// itk_space (threads list head is early, itk_space late in the struct)
+	uint64_t itk_space = xpf_item_resolve("kernelStruct.task.itk_space");
+	if (!(second >= 0x10 && second < itk_space))
+		second = 0;
+	return second;
+}
+
 static uint64_t xpf_find_perfmon_dev_open(void)
 {
 	PFStringMetric *perfmonMetric = pfmetric_string_init("perfmon: attempt to open unsupported source: 0x%x @%s:%d");
@@ -1356,6 +1473,8 @@ void xpf_common_init(void)
 
 	xpf_item_register("kernelStruct.vm_map.pmap", xpf_find_vm_map_pmap, NULL);
 	xpf_item_register("kernelStruct.proc.struct_size", xpf_find_proc_struct_size, NULL);
+	xpf_item_register("kernelStruct.proc.p_name", xpf_find_proc_p_name, NULL);
+	xpf_item_register("kernelStruct.task.threads_next", xpf_find_task_threads_next, NULL);
 
 	xpf_item_register("kernelSymbol.perfmon_dev_open", xpf_find_perfmon_dev_open, NULL);
 	xpf_item_register("kernelSymbol.perfmon_devices", xpf_find_perfmon_devices, NULL);

@@ -121,8 +121,27 @@ XPFSet gStructSet = {
 	.supported=xpf_supported_always,
 	.metrics={
 		"kernelStruct.proc.struct_size",
+		"kernelStruct.proc.p_name",
 		"kernelStruct.task.itk_space",
 		"kernelStruct.vm_map.pmap",
+		NULL
+	}
+};
+
+XPFSet gExtendedSet = {
+	.name="extended",
+	.supported=xpf_supported_always,
+	.metrics={
+		"kernelSymbol.arm_vm_init",
+		"kernelSymbol.fatal_error_fmt",
+		"kernelSymbol.iorvbar",
+		"kernelSymbol.phystokv",
+		"kernelSymbol.pmap_bootstrap",
+		"kernelSymbol.proc_apply_sandbox",
+		"kernelSymbol.proc_get_syscall_filter_mask_size",
+		"kernelSymbol.start_first_cpu",
+		"kernelSymbol.task_collect_crash_info",
+		"kernelSymbol.task_crashinfo_release_ref",
 		NULL
 	}
 };
@@ -238,6 +257,7 @@ XPFSet *gSets[] = {
 	&gSandboxSet,
 	&gPhysmapSet,
 	&gStructSet,
+	&gExtendedSet,
 	&gTrustcache15Set,
 	&gTrustcache16Set,
 	&gBadRecoverySet,
