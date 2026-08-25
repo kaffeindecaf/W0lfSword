@@ -7,7 +7,7 @@
 
 | File | What | How to run |
 |------|------|-----------|
-| `imageio_fuzz.sh` | K4.2 ImageIO fuzzing harness: prepare → push → run → collect → report (per-sample crash attribution + signature dedup) | `./W0lfSword fuzz [prepare\|list\|push\|run\|collect\|report]` |
+| `imageio_fuzz.sh` | K4.2 ImageIO fuzzing harness: prepare → push → run → collect → report (per-sample crash attribution + signature dedup) + `probe` (K4.13, headless imgio_probe decode — no UI, no respring) | `./W0lfSword fuzz [prepare\|list\|push\|run\|probe\|collect\|report]` |
 | `imageio_mutate.py` | Deterministic mutator: validated DNG/TIFF + JPEG parsers, structure-aware recipes (CVE-2025-43300 mismatch, AppleJPEG OOB-write families), TSV manifest | `python3 imageio_mutate.py <seed> <outdir> [--strategy dng\|jpeg\|generic\|all]` |
 | `gen_jpeg_seed.py` | Bootstrap JPEG corpus (Pillow): baseline 420/444, grayscale, progressive, optimized, EXIF | `python3 gen_jpeg_seed.py [outdir]` |
 

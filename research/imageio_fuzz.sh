@@ -15,6 +15,7 @@
 #    list      — corpus + manifest summary
 #    push      — scp the corpus to the phone
 #    run       — open each sample on the phone, attribute crashes
+#    probe     — headless ImageIO decode via imgio_probe (no UI/respring)
 #    collect   — pull FilzaTweak.log + CrashReporter .ips to results/
 #    report    — dedupe crash signatures, flag unique panics
 #    (no args) — prepare → push → run → collect → report
@@ -29,6 +30,7 @@ cd "$PROJECT_DIR"
 
 HUNTERS="$PROJECT_DIR/referenceforAI/projects/CVE-2025-43300-hunters"
 MUTATOR="$PROJECT_DIR/research/imageio_mutate.py"
+PROBE_DIR="$PROJECT_DIR/pocs/imgio_probe"
 FUZZ_DIR="$PROJECT_DIR/.w0lfsword/fuzz"
 CORPUS="$FUZZ_DIR/corpus"
 RESULTS="$FUZZ_DIR/results"
@@ -46,12 +48,15 @@ stage(){ printf "  ${C_EYE}[%s]${NC} %s\n" "$1" "$2"; }
 hint() { printf "  ${C_DIM}  → %s${NC}\n" "$1"; }
 
 ssh_safe() {
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+    # -n: never read stdin — otherwise ssh eats a while-loop's process
+    # substitution stream (loop dies after iteration 1). All uses here
+    # are non-interactive; BatchMode already forbids password prompts.
+    ssh -n -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
         -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$@" 2>/dev/null
 }
 scp_safe() {
     scp -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        "$@" 2>/dev/null
+        < /dev/null "$@" 2>/dev/null
 }
 
 DEVICE=""; COUNT=24; STRATEGY="all"; SEEDS=""; WAIT=4; YES_MODE=false
@@ -238,6 +243,77 @@ cmd_collect() {
     ok "$n crash report(s) pulled into $RESULTS"
 }
 
+# ── probe (headless on-device ImageIO decode) ──────────────────
+# New entry point: imgio_probe (pocs/imgio_probe) decodes samples in a
+# bare CLI process — no SpringBoard/Filza, no resprings, unambiguous
+# crash attribution. Requires: Theos build, Procursus ldid (vendored at
+# scripts/ldid), and a Dopamine trust-cache registration via jbctl.
+deploy_probe() {
+    local ip="$1"
+    local bin="$PROBE_DIR/.theos/obj/debug/arm64/imgio_probe"
+    if [ ! -f "$bin" ]; then
+        stage "probe" "building imgio_probe (Theos)..."
+        ( cd "$PROBE_DIR" && make >/dev/null 2>&1 ) || { err "imgio_probe build failed — THEOS not set?"; return 1; }
+    fi
+    local ldid=""
+    [ -x "$PROJECT_DIR/scripts/ldid" ] && ldid="$PROJECT_DIR/scripts/ldid"
+    command -v ldid >/dev/null 2>&1 && ldid="$(command -v ldid)"
+    if [ -z "$ldid" ]; then
+        err "ldid not found — vendor Procursus ldid at scripts/ldid (see ROADMAP K4.13)"
+        return 1
+    fi
+    "$ldid" -S "$bin" 2>/dev/null
+    local hash; hash=$("$ldid" -h "$bin" 2>/dev/null | grep -oE "CandidateCDHash sha256=[a-f0-9]+" | awk -F= '{print $2}')
+    [ -n "$hash" ] || { err "cdhash extraction failed from ldid -h"; return 1; }
+    stage "probe" "uploading imgio_probe (cdhash $hash)"
+    scp_safe "$bin" "root@$ip:/tmp/imgio_probe" || { err "imgio_probe upload failed"; return 1; }
+    ssh_safe "root@$ip" "chmod 755 /tmp/imgio_probe" || true
+    if ssh_safe "root@$ip" "[ -x /var/jb/usr/bin/jbctl ]"; then
+        ssh_safe "root@$ip" "/var/jb/usr/bin/jbctl trustcache add $hash" \
+            || warn "trustcache add failed — binary may not exec (Dopamine AMFI)"
+    else
+        warn "jbctl not found on device — imgio_probe may not exec (rootless trust cache)"
+    fi
+    ok "imgio_probe deployed to /tmp on $ip"
+}
+
+cmd_probe() {
+    local ip; ip=$(require_device) || return 1
+    [ -f "$MANIFEST" ] || { err "No corpus yet — run prepare first"; return 1; }
+    local n; n=$(wc -l < "$MANIFEST")
+    confirm "Decode all $n samples headless via imgio_probe? (no UI, no respring — crash = SIGSEGV in the probe)" || { err "Aborted"; return 1; }
+    deploy_probe "$ip" || return 1
+
+    stage "probe" "decoding $n samples in one batch"
+    local flist=""
+    while IFS= read -r f; do flist="$flist '$DEVICE_DIR/$f'"; done < <(cut -f2 "$MANIFEST")
+    local before; before=$(ssh_safe "root@$ip" "ls -t /var/mobile/Library/Logs/CrashReporter/*.ips 2>/dev/null | head -1" 2>/dev/null || echo "")
+    local out; out=$(mktemp)
+    local rc=0
+    ssh_safe "root@$ip" "/tmp/imgio_probe $flist" > "$out" 2>&1 || rc=$?
+
+    local ok_n nod_n; ok_n=$(grep -c "\[OK\]" "$out" 2>/dev/null || echo 0)
+    nod_n=$(grep -cE "\[NODEC\]|\[NOPIX\]" "$out" 2>/dev/null || echo 0)
+    ok "$ok_n decoded, $nod_n rejected gracefully"
+
+    local after; after=$(ssh_safe "root@$ip" "ls -t /var/mobile/Library/Logs/CrashReporter/*.ips 2>/dev/null | head -1" 2>/dev/null || echo "")
+    mkdir -p "$RESULTS"
+    local logf="$RESULTS/probe_$(date +%Y%m%d_%H%M%S).log"
+    cp "$out" "$logf"; rm -f "$out"
+
+    rm -f "$MAPFILE"; : > "$MAPFILE"
+    if [ $rc -ge 128 ] || { [ -n "$after" ] && [ "$after" != "$before" ]; }; then
+        # crash: last [*] line names the sample that was being decoded
+        local crash; crash=$(grep -F "[*] " "$logf" | tail -1 | sed 's/^\[\*\] //' | xargs basename 2>/dev/null || echo "unknown")
+        local rep="${after:-signal-$rc}"
+        err "CRASH detected (exit=$rc, report: $(basename "$rep")) — sample: $crash"
+        printf "%s\t%s\n" "$crash" "$rep" >> "$MAPFILE"
+        hint "Full probe log: $logf — minimize the trigger, then re-run."
+    else
+        ok "no crash — all $n samples survived decode (log: $logf)"
+    fi
+}
+
 # ── report ─────────────────────────────────────────────────────────
 cmd_report() {
     [ -d "$RESULTS" ] || { err "No results yet — run collect first"; return 1; }
@@ -309,6 +385,7 @@ usage() {
     printf "    list      show corpus samples + mutation recipes\n"
     printf "    push      upload corpus to the phone\n"
     printf "    run       open samples on the phone, attribute crashes per sample\n"
+    printf "    probe     headless ImageIO decode via imgio_probe (no UI, no respring)\n"
     printf "    collect   pull FilzaTweak.log + CrashReporter .ips to results/\n"
     printf "    report    dedupe crash signatures, flag unique panics\n"
     printf "    (no args) prepare → push → run → collect → report\n"
@@ -322,8 +399,11 @@ usage() {
 CMD="${1:-}"
 [ "$CMD" = "--help" ] || [ "$CMD" = "-h" ] && { usage; exit 0; }
 if [ "$CMD" = "prepare" ] || [ "$CMD" = "list" ] || [ "$CMD" = "push" ] ||
-   [ "$CMD" = "run" ] || [ "$CMD" = "collect" ] || [ "$CMD" = "report" ]; then
+   [ "$CMD" = "run" ] || [ "$CMD" = "probe" ] || [ "$CMD" = "collect" ] ||
+   [ "$CMD" = "report" ]; then
     shift
+elif [[ "$CMD" == --* ]]; then
+    CMD=""   # option-only invocation (e.g. --yes) → full pipeline
 else
     [ -n "$CMD" ] && { echo "  ${C_RED}unknown command: $CMD${NC}"; usage; exit 1; }
 fi
@@ -334,6 +414,7 @@ case "$CMD" in
     list)     cmd_list;;
     push)     cmd_push;;
     run)      cmd_run;;
+    probe)    cmd_probe;;
     collect)  cmd_collect;;
     report)   cmd_report;;
     "")       cmd_prepare && cmd_push && cmd_run && cmd_collect && cmd_report;;

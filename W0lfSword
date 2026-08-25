@@ -1269,7 +1269,18 @@ cmd_fuzz() {
         hint "Expected at research/imageio_fuzz.sh — re-clone or restore the repo."
         return 1
     fi
-    "$script" "$@"
+    # main() consumes -y/--yes as its own flag; re-inject so the harness
+    # sees it too (its confirm() gates push/run). Options go AFTER the
+    # subcommand; bare --yes means the full pipeline non-interactively.
+    if $YES_MODE; then
+        if [ $# -gt 0 ]; then
+            "$script" "$@" --yes
+        else
+            "$script" --yes
+        fi
+    else
+        "$script" "$@"
+    fi
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -3125,6 +3136,12 @@ fuzz — the ImageIO fuzzing harness (K4.2).
   run      — opens each sample via uiopen/QuickLook (or stage for Filza),
              snapshots CrashReporter before/after each open to attribute
              crashes to the exact sample.
+  probe    — headless on-device decode via imgio_probe (pocs/imgio_probe):
+             full decode + thumbnail + metadata paths in a bare CLI
+             process. No SpringBoard/Filza involvement → no resprings,
+             unambiguous attribution, one batch call for the whole corpus.
+             Auto: Theos build → ldid sign (scripts/ldid) → Dopamine
+             trustcache add (jbctl) → run. Crash = SIGSEGV in probe.
   collect  — pulls /tmp/FilzaTweak.log + fresh .ips crash reports.
   report   — dedupes crash signatures, flags UNIQUE (1x) ones, and
              lists sample→crash attribution.
@@ -3132,6 +3149,8 @@ fuzz — the ImageIO fuzzing harness (K4.2).
            --seeds <dir> --wait <sec> --yes
   CVE-2025-43300 (patched 18.6.2) and CVE-2026-28990 (patched 26.5)
   are the reference targets; 26.1–26.4.x is the live window.
+  2026-08-25 campaign on 18.4.1 (SE2/A13): JPEG full+thumb, EXR trigger
+  — zero crashes, ImageIO hardened. See ROADMAP K4.13.
 EOF
             ;;
         mha)
