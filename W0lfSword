@@ -1203,6 +1203,23 @@ poc_sep_panic() {
     ok "Built $(basename "$bin") ($(du -h "$bin" | cut -f1))"
 
     stage "2/3" "Uploading to root@$ip..."
+    # Dopamine rootless kills unsigned/adhoc Theos binaries at exec
+    # (SIGKILL, no .ips) — sign with ldid + register cdhash via jbctl.
+    # Proven recipe: pocs/imgio_probe + `fuzz probe` (K4.13).
+    local ldid=""; [ -x "$PROJECT_DIR/scripts/ldid" ] && ldid="$PROJECT_DIR/scripts/ldid"
+    command -v ldid >/dev/null 2>&1 && ldid="$(command -v ldid)"
+    if [ -n "$ldid" ]; then
+        "$ldid" -S "$bin" 2>/dev/null
+        local ch; ch=$("$ldid" -h "$bin" 2>/dev/null | grep -oE "CandidateCDHash sha256=[a-f0-9]+" | awk -F= '{print $2}')
+        if [ -n "$ch" ]; then
+            ssh_safe "root@$ip" "[ -x /var/jb/usr/bin/jbctl ] && /var/jb/usr/bin/jbctl trustcache add $ch" 2>/dev/null \
+                && ok "signed + trustcache added ($ch)" || warn "sign ok but trustcache add failed — exec may be killed"
+        else
+            warn "cdhash extraction failed — binary may not exec"
+        fi
+    else
+        warn "ldid not found (scripts/ldid) — binary may not exec on rootless"
+    fi
     retry 3 1 "scp_safe '$bin' 'root@$ip:/tmp/sep_panic'" || { err "SCP failed after 3 retries"; return 1; }
 
     stage "3/3" "Arming crash-monitor + firing..."
