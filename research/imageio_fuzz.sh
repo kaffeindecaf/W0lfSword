@@ -116,11 +116,13 @@ resolve_seeds() {
         ok "using saved seed dir: $FUZZ_DIR/seeds" >&2
         echo "$FUZZ_DIR/seeds"; return 0
     fi
-    stage "seeds" "no seed corpus found — bootstrapping JPEG seeds (gen_jpeg_seed.py)" >&2
+    stage "seeds" "no seed corpus found — bootstrapping JPEG + raster seeds" >&2
     if ! python3 "$PROJECT_DIR/research/gen_jpeg_seed.py" "$FUZZ_DIR/seeds" >/dev/null 2>&1; then
-        err "Seed bootstrap failed (Pillow missing?) — pip install Pillow or pass --seeds <dir>" >&2
+        err "JPEG seed bootstrap failed (Pillow missing?) — pip install Pillow or pass --seeds <dir>" >&2
         return 1
     fi
+    python3 "$PROJECT_DIR/research/gen_raster_seed.py" "$FUZZ_DIR/seeds" >/dev/null 2>&1 \
+        || warn "raster seed bootstrap failed — PNG/GIF/BMP/WebP coverage unavailable" >&2
     ok "bootstrapped seed corpus into $FUZZ_DIR/seeds" >&2
     echo "$FUZZ_DIR/seeds"
 }
