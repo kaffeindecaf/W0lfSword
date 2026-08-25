@@ -54,7 +54,7 @@ scp_safe() {
         "$@" 2>/dev/null
 }
 
-DEVICE=""; COUNT=24; STRATEGY="all"; SEEDS="$HUNTERS/dng_images"; WAIT=4; YES_MODE=false
+DEVICE=""; COUNT=24; STRATEGY="all"; SEEDS=""; WAIT=4; YES_MODE=false
 
 parse_args() {
     while [ $# -gt 0 ]; do
@@ -96,24 +96,49 @@ require_device() {
     echo "$ip"
 }
 
-# ── prepare ────────────────────────────────────────────────────────
+# ── seed resolution ────────────────────────────────────────────
+# Order: explicit --seeds > hunters corpus (referenceforAI KB) >
+# saved seeds/ dir from a previous run > bootstrap JPEG corpus.
+resolve_seeds() {
+    if [ -n "$SEEDS" ]; then
+        [ -d "$SEEDS" ] || [ -f "$SEEDS" ] || { err "Seed path missing: $SEEDS" >&2; return 1; }
+        echo "$SEEDS"; return 0
+    fi
+    if [ -d "$HUNTERS/dng_images" ]; then
+        echo "$HUNTERS/dng_images"; return 0
+    fi
+    if [ -d "$FUZZ_DIR/seeds" ] && ls "$FUZZ_DIR"/seeds/*.* >/dev/null 2>&1; then
+        ok "using saved seed dir: $FUZZ_DIR/seeds" >&2
+        echo "$FUZZ_DIR/seeds"; return 0
+    fi
+    stage "seeds" "no seed corpus found — bootstrapping JPEG seeds (gen_jpeg_seed.py)" >&2
+    if ! python3 "$PROJECT_DIR/research/gen_jpeg_seed.py" "$FUZZ_DIR/seeds" >/dev/null 2>&1; then
+        err "Seed bootstrap failed (Pillow missing?) — pip install Pillow or pass --seeds <dir>" >&2
+        return 1
+    fi
+    ok "bootstrapped seed corpus into $FUZZ_DIR/seeds" >&2
+    echo "$FUZZ_DIR/seeds"
+}
+
+# ── prepare ────────────────────────────────────────────────────
 cmd_prepare() {
     stage "corpus" "generating mutations into $CORPUS"
     mkdir -p "$CORPUS"
     rm -f "$MANIFEST"
     local seeds=()
-    if [ -d "$SEEDS" ]; then
-        for f in "$SEEDS"/*; do
+    local seeddir; seeddir=$(resolve_seeds) || return 1
+    if [ -d "$seeddir" ]; then
+        for f in "$seeddir"/*; do
             [ -f "$f" ] && case "$f" in
                 *.DNG|*.dng|*.HEIF|*.heif|*.HEIC|*.heic|*.TIF|*.tif|*.TIFF|*.tiff|*.jpg|*.jpeg|*.exr) seeds+=("$f");;
             esac
         done
-    elif [ -n "$SEEDS" ] && [ -f "$SEEDS" ]; then
-        seeds+=("$SEEDS")
+    elif [ -f "$seeddir" ]; then
+        seeds+=("$seeddir")
     fi
     if [ ${#seeds[@]} -eq 0 ]; then
-        err "No seed files found in $SEEDS"
-        hint "Drop DNG/HEIF/TIFF files in a dir and pass --seeds <dir>, or point at the hunters corpus."
+        err "No seed files found in $seeddir"
+        hint "Drop DNG/HEIF/TIFF files in a dir and pass --seeds <dir>."
         return 1
     fi
     ok "${#seeds[@]} seed(s): $(basename "${seeds[0]}")${seeds[1]:+ …}"
