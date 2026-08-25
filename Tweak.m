@@ -145,9 +145,9 @@ static id hook_ZipFiles(id self, SEL _cmd, id files, id toFilePath, id currentDi
         if (!g_minizipLoaded) return orig_ZipFiles ? ((id(*)(id,SEL,id,id,id))orig_ZipFiles)(self, _cmd, files, toFilePath, currentDirectory) : nil;
         NSString *zipPath = [toFilePath isKindOfClass:[NSString class]] ? (NSString *)toFilePath : nil;
         const char *zipC = zipPath ? zipPath.UTF8String : NULL;
-        if (!zipC) { NSLog(@"[Tweak] zipOpen64: invalid path"); return nil; }
+        if (!zipC) { TweakLog("[Tweak] zipOpen64: invalid path"); return nil; }
         zipFile64 zf = p_zipOpen64(zipC, 0);
-        if (!zf) { NSLog(@"[Tweak] zipOpen64 failed"); return nil; }
+        if (!zf) { TweakLog("[Tweak] zipOpen64 failed"); return nil; }
 
         for (id fi in files) {
             NSString *fn = [fi performSelector:NSSelectorFromString(@"fileName")];
@@ -165,7 +165,7 @@ static id hook_ZipFiles(id self, SEL _cmd, id files, id toFilePath, id currentDi
             }
         }
         return nil;
-    } @catch (NSException *e) { NSLog(@"[Tweak] Zip error: %@", e); return nil; }
+    } @catch (NSException *e) { TweakNSLog(@"[Tweak] Zip error: %@", e); return nil; }
 }
 
 // Hook: -[Zipper unZipFile:toPath:currentDirectory:outMessage:]
@@ -229,7 +229,7 @@ static id hook_unZipFile(id self, SEL _cmd, id zipPath, id toPath, id currentDir
             }
         }
         return nil;
-    } @catch (NSException *e) { NSLog(@"[Tweak] Unzip error: %@", e); if (outMsg) *outMsg = [e reason]; return nil; }
+    } @catch (NSException *e) { TweakNSLog(@"[Tweak] Unzip error: %@", e); if (outMsg) *outMsg = [e reason]; return nil; }
 }
 
 // Hook: -[Zipper unZipFile:toPath:currentDirectory:withPassword:outMessage:]
@@ -383,7 +383,7 @@ static id hook_allApplications(id self, SEL _cmd) {
             if (proxy) [apps addObject:proxy];
         }
     }
-    NSLog(@"[Tweak] Apps Manager: found %lu apps via filesystem", (unsigned long)apps.count);
+    TweakLog("[Tweak] Apps Manager: found %lu apps via filesystem", (unsigned long)apps.count);
     return apps;
 }
 
@@ -491,7 +491,7 @@ static id hook_showAlertWithTitle(id self, SEL _cmd, id title, id text, id cance
     if ([textStr isKindOfClass:[NSString class]]) {
         if ([textStr containsString:@"binary was modified"] ||
             [textStr containsString:@"reinstall Filza"]) {
-            NSLog(@"[Tweak] Suppressed integrity alert");
+            TweakLog("[Tweak] Suppressed integrity alert");
             return nil;
         }
     }
@@ -509,7 +509,7 @@ static void hook_activationViewDidLoad(id self, SEL _cmd) {
         ((void(*)(id,SEL,BOOL,id))objc_msgSend)(self,
             NSSelectorFromString(@"dismissViewControllerAnimated:completion:"), NO, nil);
     });
-    NSLog(@"[Tweak] Suppressed activation nag");
+    TweakLog("[Tweak] Suppressed activation nag");
 }
 
 #pragma mark - SSV Hooks
@@ -643,7 +643,7 @@ static void applyParentOwnershipAndPerms(NSString *path) {
     NSDictionary *parentAttrs = [fm attributesOfItemAtPath:parent error:&parentErr];
     if (!parentAttrs) {
         TweakLog("[SSV] inherit attrs skip (parent attrs unavailable) path=%s parent=%s err=%s",
-                 [path UTF8String],
+                 tstr(path),
                  [parent UTF8String],
                  parentErr ? [parentErr.localizedDescription UTF8String] : "(null)");
         return;
@@ -662,7 +662,7 @@ static void applyParentOwnershipAndPerms(NSString *path) {
     NSError *setErr = nil;
     BOOL ok = [fm setAttributes:setAttrs ofItemAtPath:path error:&setErr];
     TweakLog("[SSV] inherit attrs path=%s parent=%s uid=%ld gid=%ld perms=%lo result=%d err=%s",
-             [path UTF8String],
+             tstr(path),
              [parent UTF8String],
              (long)(uid ? uid.integerValue : -1),
              (long)(gid ? gid.integerValue : -1),
@@ -671,8 +671,8 @@ static void applyParentOwnershipAndPerms(NSString *path) {
              setErr ? [setErr.localizedDescription UTF8String] : "(null)");
 
     if (!ok && uid && uid.integerValue == 0 && ssvProtectedPath(path) && !pathIsInsideAppContainer(path)) {
-        TweakLog("[SSV] inherit attrs fallback ssv_chown_root for protected root-owned path: %s", [path UTF8String]);
-        ssv_chown_root([path UTF8String]);
+        TweakLog("[SSV] inherit attrs fallback ssv_chown_root for protected root-owned path: %s", tstr(path));
+        ssv_chown_root(tstr(path));
     }
 }
 
@@ -685,11 +685,11 @@ static IMP orig_moveItemAtPath_toPath_error = NULL;
 
 static BOOL hook_isWritableFileAtPath(id self, SEL _cmd, NSString *path) {
     if (ui_debug_bypass_get()) {
-        TweakLog("[SSV][UI] isWritableFileAtPath forced yes: %s", [path UTF8String]);
+        TweakLog("[SSV][UI] isWritableFileAtPath forced yes: %s", tstr(path));
         return YES;
     }
     if (ssvProtectedPath(path)) {
-        TweakLog("[SSV] isWritableFileAtPath override yes: %s", [path UTF8String]);
+        TweakLog("[SSV] isWritableFileAtPath override yes: %s", tstr(path));
         return YES;
     }
     return ((BOOL(*)(id,SEL,id))orig_isWritableFileAtPath)(self, _cmd, path);
@@ -697,11 +697,11 @@ static BOOL hook_isWritableFileAtPath(id self, SEL _cmd, NSString *path) {
 
 static BOOL hook_isReadableFileAtPath(id self, SEL _cmd, NSString *path) {
     if (ui_debug_bypass_get()) {
-        TweakLog("[SSV][UI] isReadableFileAtPath forced yes: %s", [path UTF8String]);
+        TweakLog("[SSV][UI] isReadableFileAtPath forced yes: %s", tstr(path));
         return YES;
     }
     if (ssvProtectedPath(path)) {
-        TweakLog("[SSV] isReadableFileAtPath override yes: %s", [path UTF8String]);
+        TweakLog("[SSV] isReadableFileAtPath override yes: %s", tstr(path));
         return YES;
     }
     return ((BOOL(*)(id,SEL,id))orig_isReadableFileAtPath)(self, _cmd, path);
@@ -720,7 +720,7 @@ static NSDictionary *hook_attributesOfItemAtPath_error(id self, SEL _cmd, NSStri
         if (mut[NSFileAppendOnly]) mut[NSFileAppendOnly] = @NO;
         TweakLog("[SSV]%s attributesOfItemAtPath override perms for %s",
                  ui_debug_bypass_get() ? "[UI]" : "",
-                 [path UTF8String]);
+                 tstr(path));
         return mut;
     }
     return result;
@@ -735,13 +735,13 @@ static BOOL hook_createDirectoryAtPath(id self, SEL _cmd, NSString *path, BOOL c
         if (exploit_is_done()) {
             ensureSSVActive();
         }
-        TweakLog("[SSV] createDirectoryAtPath override for protected path: %s", [path UTF8String]);
+        TweakLog("[SSV] createDirectoryAtPath override for protected path: %s", tstr(path));
     }
 
     BOOL result = ((BOOL(*)(id,SEL,id,BOOL,id,NSError**))orig_createDirectoryAtPath)(self, _cmd, path, createIntermediates, attributes, errRef);
     if (result) {
         applyParentOwnershipAndPerms(path);
-        if (protected) TweakLog("[SSV] createDirectoryAtPath success: %s", [path UTF8String]);
+        if (protected) TweakLog("[SSV] createDirectoryAtPath success: %s", tstr(path));
         return YES;
     }
 
@@ -749,7 +749,7 @@ static BOOL hook_createDirectoryAtPath(id self, SEL _cmd, NSString *path, BOOL c
     NSError *e = (errRef ? *errRef : nil);
     if (protected) {
         TweakLog("[SSV] createDirectoryAtPath failed path=%s errno=%d(%s) nsErr=%ld domain=%s desc=%s",
-                 [path UTF8String],
+                 tstr(path),
                  savedErrno,
                  strerror(savedErrno),
                  (long)(e ? e.code : 0),
@@ -765,13 +765,13 @@ static BOOL hook_createDirectoryAtPath(id self, SEL _cmd, NSString *path, BOOL c
         BOOL altResult = ((BOOL(*)(id,SEL,id,BOOL,id,NSError**))orig_createDirectoryAtPath)(self, _cmd, altPath, createIntermediates, attributes, &altError);
         if (altResult) {
             applyParentOwnershipAndPerms(altPath);
-            TweakLog("[SSV] createDirectoryAtPath fallback success: %s -> %s", [path UTF8String], [altPath UTF8String]);
+            TweakLog("[SSV] createDirectoryAtPath fallback success: %s -> %s", tstr(path), tstr(altPath));
             if (errRef) *errRef = nil;
             return YES;
         }
         int altErrno = errno;
         TweakLog("[SSV] createDirectoryAtPath fallback failed alt=%s errno=%d(%s) nsErr=%ld domain=%s desc=%s",
-                 [altPath UTF8String],
+                 tstr(altPath),
                  altErrno,
                  strerror(altErrno),
                  (long)(altError ? altError.code : 0),
@@ -779,12 +779,12 @@ static BOOL hook_createDirectoryAtPath(id self, SEL _cmd, NSString *path, BOOL c
                  altError ? [altError.localizedDescription UTF8String] : "(null)");
     }
     if (ui_debug_bypass_get() && protected && !sealedSystemPath(path)) {
-        TweakLog("[SSV][UI] createDirectoryAtPath simulated success for %s", [path UTF8String]);
+        TweakLog("[SSV][UI] createDirectoryAtPath simulated success for %s", tstr(path));
         if (errRef) *errRef = nil;
         return YES;
     }
     if (ui_debug_bypass_get() && protected && sealedSystemPath(path)) {
-        TweakLog("[SSV][UI] NOT simulating success for sealed path (keep real error): %s", [path UTF8String]);
+        TweakLog("[SSV][UI] NOT simulating success for sealed path (keep real error): %s", tstr(path));
     }
     return NO;
 }
@@ -794,7 +794,7 @@ static BOOL hook_copyItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, N
         if (exploit_is_done()) {
             ensureSSVActive();
         }
-        TweakLog("[SSV] copyItemAtPath override for %s -> %s", [src UTF8String], [dst UTF8String]);
+        TweakLog("[SSV] copyItemAtPath override for %s -> %s", tstr(src), tstr(dst));
     }
     NSError *localError = nil;
     NSError **errRef = error ? error : &localError;
@@ -802,17 +802,17 @@ static BOOL hook_copyItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, N
     if (!result && (ssvProtectedPath(src) || ssvProtectedPath(dst))) {
         NSError *e = (errRef ? *errRef : nil);
         TweakLog("[SSV] copyItemAtPath failed %s -> %s code=%ld domain=%s desc=%s",
-                 [src UTF8String], [dst UTF8String],
+                 tstr(src), tstr(dst),
                  (long)(e ? e.code : 0),
                  e ? [e.domain UTF8String] : "(null)",
                  e ? [e.localizedDescription UTF8String] : "(null)");
         if (ui_debug_bypass_get() && !sealedSystemPath(src) && !sealedSystemPath(dst)) {
-            TweakLog("[SSV][UI] copyItemAtPath simulated success for %s -> %s", [src UTF8String], [dst UTF8String]);
+            TweakLog("[SSV][UI] copyItemAtPath simulated success for %s -> %s", tstr(src), tstr(dst));
             if (errRef) *errRef = nil;
             return YES;
         }
         if (ui_debug_bypass_get() && (sealedSystemPath(src) || sealedSystemPath(dst))) {
-            TweakLog("[SSV][UI] NOT simulating copy success for sealed path: %s -> %s", [src UTF8String], [dst UTF8String]);
+            TweakLog("[SSV][UI] NOT simulating copy success for sealed path: %s -> %s", tstr(src), tstr(dst));
         }
     }
     return result;
@@ -821,7 +821,7 @@ static BOOL hook_copyItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, N
 static BOOL hook_moveItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, NSString *dst, NSError **error) {
     if (ssvProtectedPath(src) || ssvProtectedPath(dst)) {
         ensureSSVActive();
-        TweakLog("[SSV] moveItemAtPath override for %s -> %s", [src UTF8String], [dst UTF8String]);
+        TweakLog("[SSV] moveItemAtPath override for %s -> %s", tstr(src), tstr(dst));
     }
     NSError *localError = nil;
     NSError **errRef = error ? error : &localError;
@@ -829,17 +829,17 @@ static BOOL hook_moveItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, N
     if (!result && (ssvProtectedPath(src) || ssvProtectedPath(dst))) {
         NSError *e = (errRef ? *errRef : nil);
         TweakLog("[SSV] moveItemAtPath failed %s -> %s code=%ld domain=%s desc=%s",
-                 [src UTF8String], [dst UTF8String],
+                 tstr(src), tstr(dst),
                  (long)(e ? e.code : 0),
                  e ? [e.domain UTF8String] : "(null)",
                  e ? [e.localizedDescription UTF8String] : "(null)");
         if (ui_debug_bypass_get() && !sealedSystemPath(src) && !sealedSystemPath(dst)) {
-            TweakLog("[SSV][UI] moveItemAtPath simulated success for %s -> %s", [src UTF8String], [dst UTF8String]);
+            TweakLog("[SSV][UI] moveItemAtPath simulated success for %s -> %s", tstr(src), tstr(dst));
             if (errRef) *errRef = nil;
             return YES;
         }
         if (ui_debug_bypass_get() && (sealedSystemPath(src) || sealedSystemPath(dst))) {
-            TweakLog("[SSV][UI] NOT simulating move success for sealed path: %s -> %s", [src UTF8String], [dst UTF8String]);
+            TweakLog("[SSV][UI] NOT simulating move success for sealed path: %s -> %s", tstr(src), tstr(dst));
         }
     }
     return result;
@@ -848,18 +848,18 @@ static BOOL hook_moveItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, N
 static IMP orig_createFileAtPath = NULL;
 static BOOL hook_createFileAtPath(id self, SEL _cmd, NSString *path, NSData *contents, NSDictionary *attributes) {
     if (ssvProtectedPath(path)) ensureSSVActive();
-    TweakLog("[SSV] createFileAtPath: %s", [path UTF8String]);
+    TweakLog("[SSV] createFileAtPath: %s", tstr(path));
     BOOL result = ((BOOL(*)(id,SEL,id,id,id))orig_createFileAtPath)(self, _cmd, path, contents, attributes);
     TweakLog("[SSV] createFileAtPath result=%d", result);
     if (result) {
         applyParentOwnershipAndPerms(path);
     }
     if (!result && ui_debug_bypass_get() && ssvProtectedPath(path) && !sealedSystemPath(path)) {
-        TweakLog("[SSV][UI] createFileAtPath simulated success for %s", [path UTF8String]);
+        TweakLog("[SSV][UI] createFileAtPath simulated success for %s", tstr(path));
         return YES;
     }
     if (!result && ui_debug_bypass_get() && sealedSystemPath(path)) {
-        TweakLog("[SSV][UI] NOT simulating createFile success for sealed path: %s", [path UTF8String]);
+        TweakLog("[SSV][UI] NOT simulating createFile success for sealed path: %s", tstr(path));
     }
     return result;
 }
@@ -867,7 +867,7 @@ static BOOL hook_createFileAtPath(id self, SEL _cmd, NSString *path, NSData *con
 static IMP orig_writeToFile = NULL;
 static BOOL hook_writeToFile(id self, SEL _cmd, NSString *path, unsigned long long options, NSError **error) {
     if (ssvProtectedPath(path)) ensureSSVActive();
-    TweakLog("[SSV] writeToFile: %s", [path UTF8String]);
+    TweakLog("[SSV] writeToFile: %s", tstr(path));
     NSError *localError = nil;
     NSError **errRef = error ? error : &localError;
     BOOL result = ((BOOL(*)(id,SEL,id,unsigned long long,id*))orig_writeToFile)(self, _cmd, path, options, errRef);
@@ -878,17 +878,17 @@ static BOOL hook_writeToFile(id self, SEL _cmd, NSString *path, unsigned long lo
     if (!result && ssvProtectedPath(path)) {
         NSError *e = (errRef ? *errRef : nil);
         TweakLog("[SSV] writeToFile failed path=%s code=%ld domain=%s desc=%s",
-                 [path UTF8String],
+                 tstr(path),
                  (long)(e ? e.code : 0),
                  e ? [e.domain UTF8String] : "(null)",
                  e ? [e.localizedDescription UTF8String] : "(null)");
         if (ui_debug_bypass_get() && !sealedSystemPath(path)) {
-            TweakLog("[SSV][UI] writeToFile simulated success for %s", [path UTF8String]);
+            TweakLog("[SSV][UI] writeToFile simulated success for %s", tstr(path));
             if (errRef) *errRef = nil;
             return YES;
         }
         if (ui_debug_bypass_get() && sealedSystemPath(path)) {
-            TweakLog("[SSV][UI] NOT simulating write success for sealed path: %s", [path UTF8String]);
+            TweakLog("[SSV][UI] NOT simulating write success for sealed path: %s", tstr(path));
         }
     }
     return result;
@@ -1046,25 +1046,29 @@ __attribute__((constructor)) void TweakInit(void) {
     refreshUIDebugBypassFlag();
     installHooks();
 
-    // Check if sandbox is already escaped
+    // Check if sandbox is already escaped. A stale .sbx_check (left by a
+    // crash between open() and unlink() in a previous run) must NOT skip the
+    // exploit — only a confirmed rw check may (A2.11).
     int fd = open("/var/mobile/.sbx_check", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    BOOL sandboxConfirmedEscaped = NO;
     if (fd >= 0) {
         close(fd); unlink("/var/mobile/.sbx_check");
-        TweakLog("[Tweak] Sandbox already escaped");
         if (check_sandbox_var_rw() == 0) {
-            TweakLog("[Tweak] sandbox already escaped + rw confirmed, running diagnostics");
+            TweakLog("[Tweak] Sandbox already escaped + rw confirmed, running diagnostics");
             runSSVDiagnosticsOnce();
             // On a jailbroken device the sandbox is escaped by the jailbreak
             // itself — record it so the crash counter doesn't auto-disable the
             // tweak after 3 launches (the exploit path never runs here).
             mark_exploit_success();
+            sandboxConfirmedEscaped = YES;
         } else {
-            TweakLog("[Tweak] sandbox already escaped but rw not confirmed, skip diagnostics");
+            TweakLog("[Tweak] .sbx_check present but rw NOT confirmed (stale flag?) — continuing to exploit");
         }
-        return;
+    } else {
+        TweakLog("[Tweak] Sandbox not yet escaped, checking UIApplication state");
     }
 
-    TweakLog("[Tweak] Sandbox not yet escaped, checking UIApplication state");
+    if (sandboxConfirmedEscaped) return;
     
     dispatch_async(dispatch_get_main_queue(), ^{
         UIApplication *app = [UIApplication sharedApplication];

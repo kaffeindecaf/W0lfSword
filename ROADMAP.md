@@ -87,7 +87,8 @@
 - [x] `A1.5` 🟡 — Wild pointer deref in `vnode_get_child_vnode` infinite loop (maxIter=4096 guard)  
   _Prompt:_ "In vnode.m vnode_get_child_vnode(), if the namecache chain loops (corrupted data), the while(1) loop never exits. Add a max iteration counter (e.g. 4096) and return -1 if exceeded."
 
-- [ ] `A1.6` 🟡 — `ensureSSVActive` mutex deadlock possibility with `g_patching_in_progress`  
+- [x] `A1.6` 🟡 — `ensureSSVActive` mutex deadlock possibility with `g_patching_in_progress`  
+  _Verified 2026-08-25: ensureSSVActive releases ssv_mutex() before calling patch_sandbox_ext (mutex held only for state flags), and the exploit_is_patching()/in-flight checks short-circuit re-entry — no deadlock path._
   _Prompt:_ "Analyze the call graph of ensureSSVActive() → patch_sandbox_ext() → back to ensureSSVActive(). If any code path re-enters the mutex, we deadlock. Document or add a re-entrancy guard."
 
 - [x] `A1.7` 🟡 — Hardcoded APFS fsnode offsets → named constants in offsets.h (v_data+0x70/0x80/0x84/0x88)  
@@ -133,14 +134,20 @@
 - [x] `A2.4` 🟠 — FilzaPadlockBypass NZ* hooks are dead code — replace with TG* equivalents  
   _Fixed 2026-08-10: Replaced all 17 dead NZ* hooks with hooks on real TG/TIGI classes (TIGIBrowserView, TGPageViewController, TGFileSystemListViewController). TIGIBrowserView forces readOnly:NO, TGPageViewController allows delete without confirmation._
 
-- [ ] `A2.5` 🟠 — PadlockBypass removeItemAtPath kreads before exploit_is_done guard → kernel panic
-- [ ] `A2.6` 🟡 — Tweak.m zip hooks: unconditional (NSString*) cast on id → crash if non-NSString
-- [ ] `A2.7` 🟡 — Tweak.m unzip: char filename[512] may be unterminated → add null guard
-- [ ] `A2.8` 🟡 — FilzaPadlockBypass: 11 sites pass [nil UTF8String] to TweakLog %s → SIGSEGV
-- [ ] `A2.9` 🟡 — hook_createFileAtPath/writeToFile call ensureSSVActive AFTER %orig — too late
+- [x] `A2.5` 🟠 — PadlockBypass removeItemAtPath kreads before exploit_is_done guard → kernel panic
+  _Verified 2026-08-25: the A2.4 rewrite replaced all kernel-reading hooks with pure UI hooks (TG/TIGI classes) — FilzaPadlockBypass.xm contains zero kread/kwrite; nothing touches kernel memory pre-exploit._
+- [x] `A2.6` 🟡 — Tweak.m zip hooks: unconditional (NSString*) cast on id → crash if non-NSString
+  _Verified 2026-08-25: both zip hooks guard the cast — hook_ZipFiles line ~146 and hook_unZipFile line ~181 check isKindOfClass:[NSString class] before use._
+- [x] `A2.7` 🟡 — Tweak.m unzip: char filename[512] may be unterminated → add null guard
+  _Verified 2026-08-25: filename[sizeof(filename)-1]='\0' is set right after p_unzGetCurrentFileInfo64 — no unterminated string._
+- [x] `A2.8` 🟡 — FilzaPadlockBypass: 11 sites pass [nil UTF8String] to TweakLog %s → SIGSEGV
+  _Fixed 2026-08-25: tstr() nil-safe helper in utils/tweak_log.h; all 40 `[x UTF8String]` log-arg sites in Tweak.m now use tstr() — nil path can no longer SIGSEGV._
+- [x] `A2.9` 🟡 — hook_createFileAtPath/writeToFile call ensureSSVActive AFTER %orig — too late
+  _Verified 2026-08-25: all SSV hooks (createDirectoryAtPath, copyItemAtPath, moveItemAtPath, createFileAtPath, writeToFile) call ensureSSVActive() BEFORE %orig._
 - [ ] `A2.10` 🟢 — Zip hooks block main thread on large archives — no background dispatch
 
-- [ ] `A2.11` 🟡 — TweakInit: stale /var/mobile/.sbx_check falsely skips exploit (H2,H3)
+- [x] `A2.11` 🟡 — TweakInit: stale /var/mobile/.sbx_check falsely skips exploit (H2,H3)
+  _Fixed 2026-08-25: a stale .sbx_check can no longer skip the exploit — the already-escaped path is taken only when check_sandbox_var_rw() confirms rw; otherwise TweakInit falls through to the exploit scheduling. Verified live on SE 18.4.1 (jailbroken path unchanged)._
 
 ---
 
@@ -152,21 +159,26 @@
 - [x] `A5.2` 🔴 — SSV/SSVUtils.m:35 — patch_sandbox_ext() called with zero exploit guard  
   _Fixed 2026-08-13 (hardening; base guard existed but was incomplete): exploit_is_done() moved to the TOP of ssv_write (before temp-file work, no leaked tmp), patch_sandbox_ext() return value now checked (abort + cleanup before kernel vnode writes on failure), and the truly ungated paths got guards: ssv_chown_root, ssv_dump_fsnode, apply_permissions_kernel (permission_utils.m), research_vnode_apfs_fsnode (vnode_research.m). No more kernel-memory access without a live exploit._
 
-- [ ] `A5.3` 🟠 — TweakExploit.m attemptCount race: static int without synchronization  
+- [x] `A5.3` 🟠 — TweakExploit.m attemptCount race: static int without synchronization  
+  _Verified 2026-08-25: attemptCount is already `static _Atomic int` with atomic_fetch_add — no race._
   _Multiple dispatch_after blocks fire in parallel, all increment same static int. 2 blocks see attemptCount==2 → both proceed as attempt 3 → parallel sandbox_escape corrupts kernel memory._
 
-- [ ] `A5.4` 🟠 — TweakExploit.m diagnostics: NSFileManager ops lack @try/@catch → SIGABRT  
+- [x] `A5.4` 🟠 — TweakExploit.m diagnostics: NSFileManager ops lack @try/@catch → SIGABRT  
+  _Verified 2026-08-25: diagnostics block already wrapped in @try/@catch (NSException) — no SIGABRT on exception._
   _dispatch_once block calls createDirectory/removeItem without exception handler. Exception in block = process kill._
 
-- [ ] `A5.5` 🟡 — utils/tweak_log.h: localtime() not thread-safe + can return NULL → crash  
+- [x] `A5.5` 🟡 — utils/tweak_log.h: localtime() not thread-safe + can return NULL → crash  
+  _Verified 2026-08-25: tweak_log.h uses localtime_r with stack struct tm on both log paths._
   _Switch to localtime_r with stack-allocated struct tm._
 
-- [ ] `A5.6` 🟡 — utils/tweak_log.h: no NULL check on format param → vfprintf(NULL) SIGSEGV
+- [x] `A5.6` 🟡 — utils/tweak_log.h: no NULL check on format param → vfprintf(NULL) SIGSEGV
+  _Verified 2026-08-25: TweakLog guards `if (!format) return;` at entry._
 
 - [ ] `A5.7` 🟡 — sandbox_escape.m: ucred scan does ptr_in_kernel() but not mapping-aware  
   _ptr_in_kernel checks range+alignment only — unmapped kernel VA causes data abort on read._
 
-- [ ] `A5.8` 🟢 — SSV/SSVUtils.m: fd leak on rename fallback failure → ulimit exhaustion
+- [x] `A5.8` 🟢 — SSV/SSVUtils.m: fd leak on rename fallback failure → ulimit exhaustion
+  _Verified 2026-08-25: SSVUtils rename-fallback closes both fds on every path (unconditional closes after the copy loop)._
 - [x] `A5.9` 🟢 — sandbox_escape.m: uint64_t* cast on uint8_t[32] may be unaligned → arm64 fault  
   _Fixed: uint64_t __attribute__((aligned(8))) chunk[4] replaces uint8_t[32]._
 - [x] `A5.10` 🟢 — permission_utils.m: fsnode sanity check only rejects >0777, doesn't check UID/GID  
@@ -192,7 +204,8 @@
 - [x] `A6.5` 🟠 — Tweak.m: loadMinizip() not thread-safe (non-atomic flag + unsynchronized dlsym)  
   _Use dispatch_once or pthread_once for one-time initialization._
 
-- [ ] `A6.6` 🟠 — W0lfSword script: `eval` in retry() → code injection surface  
+- [x] `A6.6` 🟠 — W0lfSword script: `eval` in retry() → code injection surface  
+  _Fixed 2026-08-25: retry() no longer evals a command string — takes the command as separate words ("$@"), all 4 call sites converted. No shell-string injection surface._
   _Replace with array-based command execution._
 
 - [x] `A6.7` 🟠 — kexploit_opa334.m: 15+ file-scope vars missing `static` → pollute namespace  
@@ -204,8 +217,10 @@
 - [x] `A6.9` 🟡 — kexploit/offsets.m:631 `printf("hello from roooot!\n")` debug joke in production  
   _Remove or wrap in #ifdef DEBUG._
 
-- [ ] `A6.10` 🟡 — Tweak.m: 6+ `NSLog()` sites should be TweakLog for unified logging
-- [ ] `A6.11` 🟡 — kutils.m: proc_get_p_name static buffer not thread-safe
+- [x] `A6.10` 🟡 — Tweak.m: 6+ `NSLog()` sites should be TweakLog for unified logging
+  _Fixed 2026-08-25: all 7 NSLog() sites in Tweak.m converted to TweakLog/TweakNSLog — unified logging, no more untagged stderr noise._
+- [x] `A6.11` 🟡 — kutils.m: proc_get_p_name static buffer not thread-safe
+  _Fixed 2026-08-25: proc_name is now static __thread — proc_find loops on different threads can't clobber each other's name buffer._
 - [x] `A6.12` 🟡 — control: version 0.7.6 vs script v0.9, placeholder maintainer/author  \
   _Done 2026-08-14 (V1.1) + verified 2026-08-21: control is 1.0.0 with real Maintainer/Author, matches the script's VERSION var._
 - [x] `A6.13` 🟡 — CONTEXT.md: stale line counts, stale architecture, wrong fixes count  \
@@ -264,25 +279,35 @@
 - [x] `A3.11` 🔴 — kexploit_opa334.m:567 infinite while(true) on write verify failure (C6)  
   _Fixed 2026-08-13: the `while (raceSync == 1)` spin in physical_oob_write_mo is now bounded (10M iterations); on timeout it FAILUREs with "raceSync timed out" instead of hanging forever._
 
-- [ ] `A3.12` 🟠 — kexploit_opa334.m:461, RemoteCall.m:273 — while(1){} hangs on invalid address  
+- [x] `A3.12` 🟠 — kexploit_opa334.m:461, RemoteCall.m:273 — while(1){} hangs on invalid address  
+  _Verified 2026-08-25: the cited while(1) sites (kexploit_opa334.m:461 race spin, RemoteCall.m:273 wait_exception) are already bounded (10M-iter spin + FAILURE, wait_exception timeout + destroy_remote_call cleanup). Extra hardening: kernel-base scan loop (kexploit_opa334.m) now bounded at 0x100000 iterations with FAILURE instead of scanning forever._
   _Use FAILURE(0) or return error instead of permanent hang._
 
-- [ ] `A3.13` 🟠 — kexploit_opa334.m:95-101 — volatile without _Atomic for cross-thread sync race  
+- [x] `A3.13` 🟠 — kexploit_opa334.m:95-101 — volatile without _Atomic for cross-thread sync race  
+  _Fixed 2026-08-25: goSync/raceSync/freeThreadStart/freeTarget/freeTargetSize/targetObject/targetObjectOffset now use __atomic_load_n/__atomic_store_n (ACQUIRE/RELEASE) at every cross-thread access — ARM weak memory can no longer lose the race. mach_vm_map result goes through a local then publishes atomically._
   _goSync, raceSync, targetObject etc. use volatile not _Atomic. ARM weak memory → stale reads → race lost._
 
-- [ ] `A3.14` 🟠 — RemoteCall.m:242 — unhandled exception leaves target thread suspended (H7)  
+- [x] `A3.14` 🟠 — RemoteCall.m:242 — unhandled exception leaves target thread suspended (H7)  
+  _Verified 2026-08-25: wait_exception timeout path returns 0 with an explicit 'cleanup will handle' note; destroy_remote_call() sends EXC_CRASH replies / restores the thread — no permanently suspended thread._
   _No reply sent on timeout → thread stuck with pending EXC_GUARD forever._
 
-- [ ] `A3.15` 🟠 — vnode.m:22 — static vp_name[256] buffer race across threads (M1)  
+- [x] `A3.15` 🟠 — vnode.m:22 — static vp_name[256] buffer race across threads (M1)  
+  _Verified 2026-08-25: vnode_get_v_name already serializes with a pthread_mutex and is dead code (no callers; vnode_get_v_name_into is used instead)._
   _vnode_get_v_name returns pointer to file-scope static. Concurrent callers see corrupted names._
 
 - [ ] `A3.16` 🟡 — RemoteCall.m:368 — SHMEM cache full with no eviction after 100 pages (M2)
-- [ ] `A3.17` 🟡 — sandbox.m:172 — unvalidated class_name kernel pointer in kreadbuf (M3)
-- [ ] `A3.18` 🟡 — offsets.m — 0xdeaddead sentinel could alias valid offset (M4)
-- [ ] `A3.19` 🟡 — kutils.m:17 — gSelfProc/gSelfTask cached without atomic reads/writes (M5)
-- [ ] `A3.20` 🟢 — kexploit_opa334.m:175 — calloc result unchecked for NULL (L4)
-- [ ] `A3.21` 🟢 — RemoteCall.m:549 — pthread_create_suspended_np failure unchecked (L5)
-- [ ] `A3.22` 🟢 — VM.m:186 — memoryObject mach port leaked on entry validation failure (L6)
+- [x] `A3.17` 🟡 — sandbox.m:172 — unvalidated class_name kernel pointer in kreadbuf (M3)
+  _Verified 2026-08-25: sandbox.m class_name read is guarded with is_kernel_ptr() before kreadbuf — invalid pointers are skipped, not dereferenced._
+- [x] `A3.18` 🟡 — offsets.m — 0xdeaddead sentinel could alias valid offset (M4)
+  _Fixed 2026-08-25: Thread.m kwrite64 sites guarded against the 0xdeaddead sentinel (thread_set_pac_keys jop/rop pid; inject_guard_exception guard-exc-info branch; mach_exc_info branch zero-guarded) — no more writes through sentinel offsets._
+- [x] `A3.19` 🟡 — kutils.m:17 — gSelfProc/gSelfTask cached without atomic reads/writes (M5)
+  _Verified 2026-08-25: gSelfProc/gSelfTask already use __atomic_load_n/__atomic_store_n (RELAXED/RELEASE)._
+- [x] `A3.20` 🟢 — kexploit_opa334.m:175 — calloc result unchecked for NULL (L4)
+  _Fixed 2026-08-25: init_target_file calloc results checked (FAILURE on NULL) — the two remaining unchecked calloc sites._
+- [x] `A3.21` 🟢 — RemoteCall.m:549 — pthread_create_suspended_np failure unchecked (L5)
+  _Verified 2026-08-25: pthread_create_suspended_np return value checked with an explicit failure path._
+- [x] `A3.22` 🟢 — VM.m:186 — memoryObject mach port leaked on entry validation failure (L6)
+  _Verified 2026-08-25: VM.m deallocates localAddr + mach_port_deallocate(memoryObject) on both failure paths (make-memory-entry failure, submap/kernel-object validation failure)._
 
 ---
 

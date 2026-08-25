@@ -75,6 +75,11 @@ static void TweakNSLog(NSString *format, ...) {
     va_end(args);
     TweakLog("%s", [msg UTF8String] ?: "(nil)");
 }
+// A2.8: nil-safe NSString → C-string for TweakLog %s args (nil UTF8String
+// would SIGSEGV). Use tstr(x) instead of [x UTF8String] in log calls.
+static const char *tstr(NSString *s) {
+    return s ? [s UTF8String] : "(nil)";
+}
 #endif
 
 #ifdef __cplusplus
