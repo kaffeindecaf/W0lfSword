@@ -1,6 +1,8 @@
 #!/bin/bash
 # Single-source version — keep this in sync with control (A6.12).
 VERSION="1.1.0"
+# Last used exploit method (set by cmd_adderall; saved/restored by profiles — K1.9)
+EXPLOIT_METHOD="auto"
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                      W0lfSword v$VERSION                      ║
 # ║  iOS Kernel Exploit Toolkit — Interactive Exploit Menu       ║
@@ -1662,6 +1664,7 @@ cmd_profile() {
   "name": "$name",
   "device_ip": "${ip:-}",
   "target": "com.tigisoftware.Filza",
+  "exploit_method": "$EXPLOIT_METHOD",
   "retry_count": 5,
   "ssv_enabled": true,
   "saved_at": "$(date -Iseconds)"
@@ -1678,8 +1681,12 @@ EOF
                 echo "$name" > "$DATA_DIR/active_profile"
                 local saved_ip; saved_ip=$(python3 -c "import json; print(json.load(open('$DATA_DIR/profiles/$name.json')).get('device_ip',''))" 2>/dev/null || echo "")
                 [ -n "$saved_ip" ] && echo "$saved_ip" > "$DATA_DIR/active_device"
+                # K1.9: restore the last-used exploit method from the profile
+                local saved_method; saved_method=$(python3 -c "import json; print(json.load(open('$DATA_DIR/profiles/$name.json')).get('exploit_method',''))" 2>/dev/null || echo "")
+                [ -n "$saved_method" ] && EXPLOIT_METHOD="$saved_method"
                 ok "Loaded: ${C_EYE}$name${NC}"
                 [ -n "$saved_ip" ] && info "Device: $saved_ip"
+                [ -n "$saved_method" ] && info "Exploit: $saved_method"
                 return 0
             else
                 err "Profile '$name' not found"
@@ -1692,10 +1699,11 @@ EOF
                 for f in "$DATA_DIR/profiles/"*.json; do
                     local n; n=$(basename "$f" .json)
                     local dip; dip=$(python3 -c "import json; print(json.load(open('$f')).get('device_ip','-'))" 2>/dev/null || echo "-")
+                    local em; em=$(python3 -c "import json; print(json.load(open('$f')).get('exploit_method','auto'))" 2>/dev/null || echo "auto")
                     local ts; ts=$(python3 -c "import json; print(json.load(open('$f')).get('saved_at','-'))" 2>/dev/null | cut -dT -f1 || echo "-")
                     local marker=" "
                     [ "$active" = "$n" ] && marker="${C_EYE}*${NC}"
-                    printf "  %s ${C_EYE}%-14s${NC} ${C_DIM}ip:${NC} %-18s ${C_DIM}saved:${NC} %s\n" "$marker" "$n" "$dip" "$ts"
+                    printf "  %s ${C_EYE}%-14s${NC} ${C_DIM}ip:${NC} %-18s ${C_DIM}exploit:${NC} %-8s ${C_DIM}saved:${NC} %s\n" "$marker" "$n" "$dip" "$em" "$ts"
                 done
             else
                 echo -e "  ${C_DIM}No profiles yet. Use 'profile save <name>'${NC}"
@@ -2251,7 +2259,7 @@ EOF
         fi
     fi
 
-    local IP="" IOS_VER="" DEV_MODEL="" CPU_FAMILY="" EXPLOIT_METHOD="auto"
+    local IP="" IOS_VER="" DEV_MODEL="" CPU_FAMILY=""
     local DEV_NAME=""
 
     # ── Phase 1: Auto-install dependencies (no prompts) ──────
@@ -3494,6 +3502,15 @@ main() {
     if $EXPLAIN; then
         explain_text "${cmd:-help}"
         exit 0
+    fi
+
+    # J2.3: first-run convenience — auto-load a saved 'default' profile when
+    # no profile is active yet (and the user didn't ask for profile commands).
+    if ! $JSON_MODE && [ "$cmd" != "profile" ] && [ ! -f "$DATA_DIR/active_profile" ] && [ -f "$DATA_DIR/profiles/default.json" ]; then
+        echo "default" > "$DATA_DIR/active_profile"
+        local def_ip; def_ip=$(python3 -c "import json; print(json.load(open('$DATA_DIR/profiles/default.json')).get('device_ip',''))" 2>/dev/null || echo "")
+        [ -n "$def_ip" ] && echo "$def_ip" > "$DATA_DIR/active_device"
+        echo -e "  ${C_DIM}Auto-loaded profile 'default'${NC}"
     fi
 
     case "$cmd" in

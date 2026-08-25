@@ -258,7 +258,8 @@
 - [x] `A3.4` 🟠 — `physical_oob_write_mo` async corruption detection  
   _Fixed 2026-08-10: function returns kern_return_t, read-back verification added._
 
-- [ ] `A3.5` 🟡 — Wired page leak in pe_v2 error path  
+- [x] `A3.5` 🟡 — Wired page leak in pe_v2 error path  
+  _Fixed 2026-08-25: wired_pages_cleanup() helper (munlock + deallocate) now runs on ALL pe_v2 exit paths — alloc-failure fallback, search-mapping alloc failure, mach_make_memory_entry_64 failure, and the success path. No mlock'd wired page leaks in release (NDEBUG) builds where FAILURE returns._
   _Prompt:_ "In pe_v2(), if the exploit succeeds, the cleanup loop `for (NSNumber *addr in wiredAddrs)` deallocates remaining wired pages. But if mach_vm_allocate fails mid-loop or the function returns early due to a failure, wiredAddrs may contain pages that were mlock'd but never freed. Add a cleanup block on all return paths."
 
 - [x] `A3.6` 🟡 — `highestSuccessIdx` grows unbounded across exploit attempts → reset per call  
@@ -295,7 +296,8 @@
   _Verified 2026-08-25: vnode_get_v_name already serializes with a pthread_mutex and is dead code (no callers; vnode_get_v_name_into is used instead)._
   _vnode_get_v_name returns pointer to file-scope static. Concurrent callers see corrupted names._
 
-- [ ] `A3.16` 🟡 — RemoteCall.m:368 — SHMEM cache full with no eviction after 100 pages (M2)
+- [x] `A3.16` 🟡 — RemoteCall.m:368 — SHMEM cache full with no eviction after 100 pages (M2)
+  _Fixed 2026-08-25: put_shmem_in_cache no longer drops the new mapping when the 100-entry cache is full — FIFO-evicts the oldest slot (releases its memory-object port + local PAGE_SIZE mapping first). remote_read/write no longer fail spuriously past 100 distinct pages._
 - [x] `A3.17` 🟡 — sandbox.m:172 — unvalidated class_name kernel pointer in kreadbuf (M3)
   _Verified 2026-08-25: sandbox.m class_name read is guarded with is_kernel_ptr() before kreadbuf — invalid pointers are skipped, not dereferenced._
 - [x] `A3.18` 🟡 — offsets.m — 0xdeaddead sentinel could alias valid offset (M4)
@@ -467,7 +469,8 @@
 - [x] `D1.3` 🟡 — Replace printf()/NSLog() with TweakLog() in sandbox.m borrow + sandbox_escape.m (all 18 calls)  
   _Prompt:_ "Offsets.m, sandbox.m, vnode.m, file.m, kutils.m, krw.m all use printf() for debug output. These go to stdout which in Filza goes nowhere (the app doesn't have a TTY). Replace all with TweakLog() so debug output actually reaches the log file. Add a compile-time flag to disable verbose kernel debug in release builds."
 
-- [ ] `D1.4` 🟢 — Add error code enum for all functions  
+- [x] `D1.4` 🟢 — Add error code enum for all functions  
+  _Done 2026-08-25: utils/errors.h — TWEAK_OK / TWEAK_ERR_EXPLOIT_FAILED / TWEAK_ERR_SANDBOX_ESCAPE_FAILED / TWEAK_ERR_SSV_ACTIVATION_FAILED / TWEAK_ERR_KERNEL_PTR_INVALID / TWEAK_ERR_INVALID_ARG. sandbox_escape.m converted (10 return sites; all callers check ==0/!=0 so semantics unchanged). Remaining functions convert incrementally._
   _Prompt:_ "Right now functions return 0, -1, or a magic number. Create an error code enum: TWEAK_OK, TWEAK_ERR_EXPLOIT_FAILED, TWEAK_ERR_SANDBOX_ESCAPE_FAILED, TWEAK_ERR_SSV_ACTIVATION_FAILED, TWEAK_ERR_KERNEL_PTR_INVALID, etc. Use consistently."
 
 - [x] `D1.5` 🟢 — Add `__attribute__((cleanup))` for fd/port cleanup  
@@ -477,10 +480,12 @@
 
 ## D2 — Testing Infrastructure
 
-- [ ] `D2.1` 🟡 — Unit tests for offset table  
+- [x] `D2.1` 🟡 — Unit tests for offset table  
+  _Done 2026-08-25: scripts/test_offsets.py — parses offsets.m threshold blocks; validates strictly-increasing thresholds, per-threshold cumulative resolution of 4 critical offsets, and XPF-verified itk_space mapping (17.x=0x300/18.x=0x318/26.x=0x310). 0xdeaddead sentinels reported as notes (writes guarded since A3.18). PASSING. Wired into regression.sh._
   _Prompt:_ "Write a test script (Python or Swift) that reads /var/mobile/Documents/kernel_offsets.json (from B4.2) and validates: all offsets are non-zero, ptr fields are within VM_MIN/VM_MAX, sizeof fields are reasonable (<4096), no duplicates. Run after each iOS version bump."
 
-- [ ] `D2.2` 🟡 — Regression test script  
+- [x] `D2.2` 🟡 — Regression test script  
+  _Done 2026-08-25: scripts/regression.sh — bash -n + py_compile + test_offsets.py + audit + doctor + make package + live-device smoke (SSH, status, tweak log pull). 8/8 green on SE. Uses grep -c not grep -q (grep -q + pipefail = false failure via SIGPIPE)._
   _Prompt:_ "Write a shell script that runs inside Filza (via the command runner from B3.1 if implemented, or via a standalone test dylib). Tests: write to /var/tmp, write to /System/Library/.test, create dir in /usr/lib/.test, chmod a file, delete a file, stat a vnode. All should pass. Output pass/fail to /tmp/filza_tests.log."
 
 - [ ] `D2.3` 🟢 — Fuzzing harness for vnode operations  
@@ -760,7 +765,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `J2.2` 🟡 — Profile list with colored status  
   _Done: table with * active marker, device IP, saved date._
 
-- [ ] `J2.3` 🟢 — Auto-detect profile on startup  
+- [x] `J2.3` 🟢 — Auto-detect profile on startup  
+  _Done 2026-08-25: main() auto-loads .w0lfsword/profiles/default.json on startup when no active profile exists (skipped for profile commands and --json)._
   _Prompt:_ "On launch, check .w0lfsword/profiles/ for a 'default' profile. If found, auto-load it."
 
 ## J3 — Device Manager
@@ -867,7 +873,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [ ] `K1.8` 🟡 — Menu shows compatibility per exploit and greys out unsupported choices  
   _Prompt: "In the interactive exploit picker, dim options that don't support the connected device's iOS/SoC instead of letting the user pick a guaranteed-to-fail combo."_
 
-- [ ] `K1.9` 🟢 — Expose exploit method in `profile save/load`  
+- [x] `K1.9` 🟢 — Expose exploit method in `profile save/load`  
+  _Done 2026-08-25: EXPLOIT_METHOD is now a global (set by cmd_adderall); profile save writes it, load restores it (global + info line), list shows it._
   _Prompt: "cmd_profile save currently hardcodes retry_count 5 and no exploit_method. Add an optional `profile save <name> --exploit pe_v2 --retries 7` flag set and show the values in `profile list`."_
 
 - [ ] `K1.10` ⚪ — Research: checkm8/palera1n bootchain entry as separate menu branch (A11 and below)  
