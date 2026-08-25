@@ -16,6 +16,7 @@ Subcommands:
                   the values kexploit/offsets.m would set for that version
   index           render the cumulative multi-board feed (kernel-deltas.md)
   atom            render an Atom feed (atom.xml) from the report files
+  html            render a self-contained HTML dashboard (docs/index.html)
 
 Options:  --board t8030|t8103|t8110   --version <ver> (backfill)
           --dry-run   --json   (env: KCWATCH_DIR, KCWATCH_FEED_URL)   --yes
@@ -296,17 +297,24 @@ def cmd_index(args):
             rows.append((
                 h.get("date", ""), board, h.get("version"), h.get("buildid"),
                 h.get("xnu", "?"), h.get("identical", "?"), h.get("changed", "?"),
-                h.get("verdict", "?")))
+                h.get("degraded", 0), h.get("verdict", "?")))
     rows.sort()
     lines = [
         "# kernel-deltas feed", "",
         "Latest entries across all watched boards. Full reports:",
-        "reports/<board>-<version>-<buildid>.md", "",
-        "| date | board | release | build | xnu | identical | changed | verdict |",
-        "|------|-------|---------|-------|-----|-----------|---------|---------|",
+        "`reports/<board>-<version>-<buildid>.md`",
+        "",
+        "| date | board | release | build | xnu | same | changed | degraded | verdict |",
+        "|------|-------|---------|-------|-----|------|---------|----------|---------|",
     ]
-    for r in rows[-25:]:
-        lines.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % r)
+    for r in rows[-30:]:
+        verdict = r[8]
+        vshort = "YES" if verdict.startswith("YES") else ("NO" if verdict.startswith("NO") else "?")
+        lines.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+            r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], vshort))
+    lines.append("")
+    lines.append("_same = struct/constant offsets identical to previous build · "
+                 "changed = symbol addresses shifted · degraded = item went resolved→UNRESOLVED_")
     lines.append("")
     with open("kernel-deltas.md", "w") as fh:
         fh.write("\n".join(lines))
@@ -357,6 +365,144 @@ def cmd_atom(args):
     return 0
 
 
+def cmd_html(args):
+    """Render a self-contained dashboard (docs/index.html) from state history.
+
+    No external assets — inline CSS only, so the file works from GitHub
+    Pages, file:// and any static host. Served at
+    https://<owner>.github.io/kernel-deltas/ when Pages is enabled on main.
+    """
+    import html as _html
+    base = kc_base()
+    rows = []
+    boards = []
+    for board in sorted(os.listdir(base)):
+        sf = os.path.join(base, board, "state.json")
+        if not os.path.isfile(sf):
+            continue
+        try:
+            st = json.load(open(sf))
+        except (OSError, ValueError):
+            continue
+        bcfg = BOARDS.get(board, {})
+        boards.append({
+            "id": board,
+            "label": bcfg.get("label", board),
+            "soc": bcfg.get("soc", "?"),
+            "device": bcfg.get("device", "?"),
+            "last": st.get("last") or {},
+        })
+        for h in st.get("history", []):
+            rows.append({
+                "date": h.get("date", ""), "board": board,
+                "version": h.get("version"), "buildid": h.get("buildid"),
+                "xnu": h.get("xnu", "?"),
+                "identical": h.get("identical", "?"), "changed": h.get("changed", "?"),
+                "degraded": h.get("degraded", 0), "verdict": h.get("verdict", "?"),
+            })
+    rows.sort(key=lambda r: r["date"], reverse=True)
+    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    esc = _html.escape
+
+    def badge(v):
+        if v.startswith("YES"):
+            return '<span class="badge ok">YES</span>'
+        if v.startswith("NO"):
+            return '<span class="badge bad">NO</span>'
+        return '<span class="badge warn">?</span>'
+
+    board_cards = []
+    for b in boards:
+        last = b["last"]
+        lst = "baseline pending"
+        if last.get("version"):
+            lst = "iOS %s (%s)" % (last.get("version"), last.get("buildid"))
+        board_cards.append(
+            '<div class="card">'
+            '<h3>%s</h3>'
+            '<p class="dim">%s · %s</p>'
+            '<p class="big">%s</p>'
+            '<p class="dim">xnu %s</p>'
+            "</div>" % (
+                esc(b["label"]), esc(b["device"]), esc(b["soc"]), esc(lst),
+                esc(last.get("xnu") or "—")))
+
+    trs = []
+    for r in rows[:40]:
+        trs.append(
+            "<tr><td>%s</td><td><code>%s</code></td><td>iOS %s</td>"
+            "<td><code>%s</code></td><td class='dim'>%s</td>"
+            "<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+                esc(r["date"]), esc(r["board"]), esc(r["version"]), esc(r["buildid"]),
+                esc(r["xnu"]), esc(str(r["identical"])), esc(str(r["changed"])),
+                esc(str(r["degraded"])),
+                badge(r["verdict"])))
+
+    page = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kernel-deltas — iOS kernel delta feed</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: #0d1117; color: #e6edf3; }
+  header { padding: 3rem 1.5rem 2rem; text-align: center;
+           background: radial-gradient(1200px 300px at top, #1f2937, #0d1117); }
+  header h1 { margin: 0; font-size: 2.2rem; letter-spacing: .5px; }
+  header p { color: #8b949e; max-width: 640px; margin: .6rem auto 0; }
+  .links { margin-top: 1rem; }
+  .links a { color: #58a6ff; text-decoration: none; margin: 0 .6rem; font-size: .9rem; }
+  .links a:hover { text-decoration: underline; }
+  main { max-width: 1000px; margin: 0 auto; padding: 1rem 1.5rem 4rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+           gap: 1rem; margin: 1.5rem 0 2.5rem; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 1rem 1.2rem; }
+  .card h3 { margin: 0 0 .2rem; font-size: 1.05rem; }
+  .card .big { font-size: 1.25rem; font-weight: 600; margin: .4rem 0; }
+  .dim { color: #8b949e; font-size: .85rem; margin: .15rem 0; }
+  table { width: 100%%; border-collapse: collapse; background: #161b22;
+          border: 1px solid #30363d; border-radius: 10px; overflow: hidden; }
+  th, td { padding: .55rem .8rem; text-align: left; border-bottom: 1px solid #21262d; }
+  th { color: #8b949e; font-weight: 600; font-size: .8rem; text-transform: uppercase;
+       letter-spacing: .4px; }
+  tr:last-child td { border-bottom: none; }
+  code { background: #21262d; padding: 1px 5px; border-radius: 4px; font-size: .85em; }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 700; }
+  .ok { background: #12291c; color: #3fb950; border: 1px solid #238636; }
+  .bad { background: #2d1215; color: #f85149; border: 1px solid #da3633; }
+  .warn { background: #2d2411; color: #d29922; border: 1px solid #9e6a03; }
+  footer { text-align: center; color: #484f58; font-size: .8rem; padding: 2rem 0 3rem; }
+  footer a { color: #58a6ff; text-decoration: none; }
+</style></head><body>
+<header>
+  <h1>🐺 kernel-deltas</h1>
+  <p>What changed in the iOS kernel between builds — resolved offsets and symbols,
+     diffed per release, published automatically.</p>
+  <div class="links">
+    <a href="https://github.com/kaffeindecaf/kernel-deltas">GitHub</a>
+    <a href="https://github.com/kaffeindecaf/kernel-deltas/blob/main/kernel-deltas.md">Markdown feed</a>
+    <a href="https://github.com/kaffeindecaf/kernel-deltas/raw/main/atom.xml">Atom / RSS</a>
+  </div>
+</header>
+<main>
+  <div class="cards">%s</div>
+  <table>
+    <thead><tr><th>date</th><th>board</th><th>release</th><th>build</th>
+    <th>xnu</th><th>same</th><th>changed</th><th>degraded</th><th>verdict</th></tr></thead>
+    <tbody>%s</tbody>
+  </table>
+</main>
+<footer>generated by <a href="https://github.com/kaffeindecaf/W0lfSword">W0lfSword</a> kcwatch · %s</footer>
+</body></html>""" % ("\n".join(board_cards), "\n".join(trs), now)
+
+    os.makedirs("docs", exist_ok=True)
+    with open(os.path.join("docs", "index.html"), "w") as fh:
+        fh.write(page)
+    print("wrote docs/index.html (%d entries, %d boards)" % (len(rows), len(boards)))
+    return 0
+
+
 def offsets_verdict(version, diff):
     """Which offsets.m block applies to `version`, and do the struct offsets
     still match the previous build? Struct items are kernelStruct.* /
@@ -385,8 +531,9 @@ def render_report(board_cfg, rel, prev, diff, verdict):
         rel["version"], rel["buildid"], board_cfg["label"], _dt.date.today().isoformat()))
     lines.append("")
     lines.append("xnu: %s -> %s" % (d["xnu_a"] or "?", d["xnu_b"] or "?"))
-    lines.append("resolved: A=%d  B=%d   identical: %d   changed: %d"
-                 % (d["resolved_a"], d["resolved_b"], len(d["identical"]), len(d["changed"])))
+    lines.append("resolved: A=%d  B=%d   identical: %d   changed: %d   degraded: %d"
+                 % (d["resolved_a"], d["resolved_b"], len(d["identical"]), len(d["changed"]),
+                    len(d["degraded"])))
     if d["degraded"]:
         lines.append("degraded (resolved <-> UNRESOLVED): %d" % len(d["degraded"]))
     lines.append("")
@@ -528,7 +675,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", nargs="?", default="poll",
-                    choices=["poll", "status", "diff", "verify", "index", "atom"])
+                    choices=["poll", "status", "diff", "verify", "index", "atom", "html"])
     ap.add_argument("--board", default=DEFAULT_BOARD, choices=sorted(BOARDS))
     ap.add_argument("--version", help="process a specific release version instead of the newest (backfill)")
     ap.add_argument("--dry-run", action="store_true")
@@ -553,6 +700,8 @@ def main():
         return cmd_index(args)
     if args.cmd == "atom":
         return cmd_atom(args)
+    if args.cmd == "html":
+        return cmd_html(args)
     return 0
 
 
