@@ -237,6 +237,7 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `poc sep-panic [ip]` | build + deploy + fire the SEP panic PoC | `./W0lfSword poc sep-panic` |
 | `poc exr [ip]` | deploy the CVE-2026-28990 EXR ImageIO trigger | `./W0lfSword poc exr` |
 | `fuzz [cmd]` | ImageIO fuzz harness: mutate → push → open/probe → crash capture (K4.2, K4.13) | `./W0lfSword fuzz probe --device 192.168.1.5` |
+| `kcwatch` | auto kernel-delta watcher: poll → ranged-fetch → XPF → report + offsets.m verdict | `./W0lfSword kcwatch poll --board t8030` |
 | `mha <ipa>` | Re-sign Filza as MobileHouseArrest → pre-exploit container access (K4.12) | `./W0lfSword mha Filza.ipa` |
 | `tweaks [install <id>]` | SpringBoard tweak catalog + installer | `./W0lfSword tweaks install five_icon_dock` |
 | `device add\|list\|switch\|info` | manage multiple phones | `./W0lfSword device add 192.168.1.5` |

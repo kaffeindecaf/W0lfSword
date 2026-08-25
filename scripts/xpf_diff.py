@@ -53,6 +53,9 @@ def main():
     same = [n for n in names if ia.get(n) == ib.get(n) and ia.get(n) is not None]
     changed = [n for n in names
                if ia.get(n) is not None and ib.get(n) is not None and ia.get(n) != ib.get(n)]
+    # resolved in one dump but UNRESOLVED in the other = structural change
+    degraded = [n for n in names
+                if (ia.get(n) is None) != (ib.get(n) is None)]
     only_a = [n for n in names if n not in ib]
     only_b = [n for n in names if n not in ia]
 
@@ -64,8 +67,10 @@ def main():
             "resolved_a": sum(1 for v in ia.values() if v is not None),
             "resolved_b": sum(1 for v in ib.values() if v is not None),
             "identical": len(same), "changed": len(changed),
+            "degraded": len(degraded),
             "only_in_a": len(only_a), "only_in_b": len(only_b),
             "changed_items": {n: [ia[n], ib[n]] for n in changed},
+            "degraded_items": degraded,
             "only_in_a_items": only_a, "only_in_b_items": only_b,
         }, indent=2))
         return 0
@@ -80,12 +85,18 @@ def main():
     print(f"resolved:  A={sum(1 for v in ia.values() if v is not None)}  "
           f"B={sum(1 for v in ib.values() if v is not None)}")
     print(f"identical: {len(same)}   changed: {len(changed)}   "
+          f"degraded: {len(degraded)}   "
           f"only-in-A: {len(only_a)}   only-in-B: {len(only_b)}")
     if changed:
         print("")
         print("CHANGED:")
         for n in changed:
             print(f"  {n}: 0x{ia[n]:016x} -> 0x{ib[n]:016x}")
+    if degraded:
+        print("")
+        print("DEGRADED (resolved in one dump, UNRESOLVED in the other):")
+        for n in degraded:
+            print(f"  {n}: {'only in A' if ia.get(n) is not None else 'only in B'}")
     if only_a or only_b:
         print("")
         print("ONE-SIDED / UNRESOLVED:")

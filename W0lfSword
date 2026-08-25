@@ -572,6 +572,43 @@ kernelcache — offline XPF offset research, no device needed.
   IMG4 kernelcache from an IPSW (A12+ are unencrypted; XPF handles
   IMG4 + LZFSE decompression). IPSWs: https://ipsw.me
 EOF
+                        ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  KCWATCH — automated kernel-delta watcher (research/kcwatch.md)
+# ═══════════════════════════════════════════════════════════════
+
+cmd_kcwatch() {
+    local script="$PROJECT_DIR/scripts/kcwatch.py"
+    if [ ! -f "$script" ]; then
+        err "kcwatch.py missing — expected at scripts/kcwatch.py"
+        return 1
+    fi
+    local sub="${1:-poll}"
+    case "$sub" in
+        help|-h|--help)
+            cat <<'EOF'
+kcwatch — automated kernel-delta watcher (research/kcwatch.md).
+  poll              check ipsw.me for a new build; if found: ranged-fetch
+                    the kernelcache (no full IPSW), XPF-resolve it, diff
+                    vs the previous build, render a report + verdict.
+  status            show the last-seen build and cached history.
+  diff              diff the two most recent cached builds for the board.
+  Options: --board t8030|t8103|t8110 (default t8030)  --dry-run  --json
+  State + cache: .w0lfsword/kcwatch/<board>/ (gitignored)
+  Feed reports: .w0lfsword/kcwatch/<board>/reports/kernel-deltas.md
+EOF
+            ;;
+        poll|status|diff)
+            shift
+            python3 "$script" "$sub" "$@"
+            ;;
+        *)
+            err "Unknown kcwatch subcommand: $sub"
+            hint "Usage: ./W0lfSword kcwatch [poll|status|diff] [--board t8030] [--dry-run]"
+            return 1
             ;;
     esac
 }
@@ -1922,11 +1959,12 @@ draw_menu() {
     menu_opt 0 "Panic-PoC Lab"    "sep-panic / exr / applejpeg / dirtyslide" "${C_RED}[crashes phone]${NC}"
     menu_opt f "ImageIO Fuzzer"   "mutate DNG/HEIF → phone → crash capture (K4.2)"
     menu_opt k "Kernelcache Diff" "offline XPF offset research — resolve/diff kernelcaches"
+    menu_opt w "kcwatch"          "auto kernel-delta watcher — poll → fetch → resolve → report"
     echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
     printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
-    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
+    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
@@ -2016,6 +2054,7 @@ run_menu() {
             0|poc)        cmd_poc || true;;
             panic)        cmd_panic || true;;
             kernelcache)  cmd_kernelcache || true;;
+            kcwatch|kw)   cmd_kcwatch || true;;
             f|fuzz)       cmd_fuzz || true;;
             exploits|e)   cmd_exploits || true;;
             # usbliter8-arctic
@@ -2049,7 +2088,7 @@ run_menu() {
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/poc, or q${NC}";;
+                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/poc, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -3210,6 +3249,19 @@ kernelcache — offline XPF offset research, no device needed.
                       zip (auto board detection). IPSWs: ipsw.me
 EOF
             ;;
+        kcwatch)
+            cat <<'EOF'
+kcwatch — automated kernel-delta watcher (research/kcwatch.md).
+  poll              check ipsw.me for a new build; if found: ranged-fetch
+                    the kernelcache (no full IPSW), XPF-resolve it, diff
+                    vs the previous build, render a report + verdict.
+  status            show the last-seen build and cached history.
+  diff              diff the two most recent cached builds for the board.
+  Options: --board t8030|t8103|t8110 (default t8030)  --dry-run  --json
+  State + cache: .w0lfsword/kcwatch/<board>/ (gitignored)
+  Feed reports: .w0lfsword/kcwatch/<board>/reports/kernel-deltas.md
+EOF
+            ;;
         usbtest)
             cat <<'EOF'
 usbtest — prove the USB link before you deploy anything.
@@ -3309,6 +3361,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "poc applejpeg" "AppleJPEGDriver UAF — macOS/Xcode only (CVE-2026-20687)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "poc dirtyslide" "dyld slide OOB — macOS/Xcode only (CVE-2026-43724)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "fuzz (f)"      "ImageIO fuzz harness: mutate → push → open → crash capture (K4.2)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "kcwatch (w)"   "auto kernel-delta watcher: poll → ranged-fetch → XPF → report"
     printf "  ${C_EYE}%-14s${NC} %s\n" "mha <ipa>"    "Re-sign Filza as MobileHouseArrest → pre-exploit container access (K4.12)"
     echo ""
     section "Exploit Workflow"
@@ -3377,6 +3430,7 @@ main() {
         exploits)  cmd_exploits "${args[@]}";;
         poc)       cmd_poc "${args[@]}";;
         fuzz)      cmd_fuzz "${args[@]}";;
+        kcwatch)   cmd_kcwatch "${args[@]}";;
         mha)       cmd_mha "${args[@]}";;
         tweaks)    cmd_tweaks "${args[@]}";;
         clean)     cmd_clean "${args[@]}";;

@@ -9,8 +9,15 @@
 > follow. It builds reputation, acts as a changelog for `offsets.m` users, and
 > feeds bounty targeting.
 >
-> **Status:** Plan. All pipeline pieces already exist in the W0lfSword repo;
-> the only new code is a zip64 remote range reader.
+> **Status: M1 done 2026-08-25.** `scripts/kczip.py` (zip64 remote range
+> reader: EOCD/zip64 locator, entry lookup, retries, CRC-32 of the
+> UNCOMPRESSED data, auto raw-deflate), `scripts/kcwatch.py` orchestrator
+> (poll → fetch → xpf-cli resolve → diff → render + offsets.m verdict),
+> wired into the CLI as `./W0lfSword kcwatch` (menu `w`). Validated live on
+> t8030: iOS 26.6 → 26.6.1 (xnu-12377.162.13~2 → 12377.162.14~4), 51
+> identical / 12 symbol shifts / 0 struct moves, verdict YES. M2 (public
+> feed repo + GitHub Actions) is staged: `scripts/kcwatch.feed-workflow.yml`
+> template ready.
 
 ---
 
@@ -75,8 +82,11 @@ END of the file. Therefore:
 
 **Gotcha:** modern IPSWs are >4GB → **zip64**. The directory is not in the
 classic EOCD record; the parser must follow the zip64 EOCD locator. This is
-the ~150-line Python module that does not exist yet (`scripts/kczip.py` or
-`tools/kczip/`). Everything after it already exists.
+`scripts/kczip.py` (done 2026-08-25): EOCD/zip64 locator, entry lookup,
+retries + backoff, CRC-32 verification over the UNCOMPRESSED data (zip
+spec — Apple IPSW kernelcache entries are deflate + data-descriptor
+flagged), auto raw-deflate to the IMG4. `scripts/fetch_kernelcache.py` is
+a thin CLI over it.
 
 ### Step 3 — Resolve (exists)
 
@@ -213,8 +223,11 @@ Complementary (optional, non-blocking):
 | Piece | Where |
 |-------|-------|
 | XPF host resolver (IMG4 + LZFSE decode) | `tools/xpf-cli/` (built binary present) |
-| Offset diff (identical/changed/one-sided, --json) | `scripts/xpf_diff.py` |
+| Offset diff (identical/changed/degraded/one-sided, --json) | `scripts/xpf_diff.py` |
+| zip64 remote range reader (retries + CRC + decompress) | `scripts/kczip.py` |
+| Poll→fetch→resolve→diff→render orchestrator + verdict | `scripts/kcwatch.py` |
 | IPSW kernelcache extraction (local zip) | `W0lfSword` `kernelcache extract` |
+| CLI wiring | `./W0lfSword kcwatch [poll\|status\|diff]` (menu `w`) |
 | Ranged-download proof | K4.1 notes (ROADMAP, tools/xpf-cli README) |
 | Board/SoC knowledge (t8030 etc.) | referenceforAI/RESEARCH.md, ios-firmware-offset-research skill |
 | Release feed data | api.ipsw.me/v4 (free, no auth) |

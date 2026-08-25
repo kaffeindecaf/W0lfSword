@@ -1,0 +1,48 @@
+# kcwatch GitHub Actions feed workflow — TEMPLATE for the public
+# kernel-deltas repo (research/kcwatch.md, M2). Copy into the feed
+# repo as .github/workflows/watch.yml together with:
+#   scripts/       (kczip.py, kcwatch.py, xpf_diff.py from W0lfSword)
+#   tools/xpf-cli/ (prebuilt binary; needs liblzfse1)
+#   state/         (committed last-seen.json baseline)
+#   reports/ + kernel-deltas.md  (the feed, auto-committed)
+name: kcwatch
+
+on:
+  schedule:
+    - cron: '0 6 * * *'        # once a day — polite to ipsw.me + Apple CDN
+  workflow_dispatch: {}
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 liblzfse1
+
+      - name: Watch boards (add --board lines for t8103/t8110/etc.)
+        run: |
+          python3 scripts/kcwatch.py poll --board t8030
+          # python3 scripts/kcwatch.py poll --board t8103
+          # python3 scripts/kcwatch.py poll --board t8110
+
+      - name: Commit feed update
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "kcwatch: kernel-delta feed update"
+          file_pattern: "kernel-deltas.md reports/ state/"
+
+      - name: Notify on new build
+        if: ${{ steps.watch.outputs.new_build == 'yes' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'new kernel build detected',
+              body: 'Run the kcwatch workflow log for details.'
+            })
