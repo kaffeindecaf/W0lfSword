@@ -135,7 +135,7 @@ cmd_prepare() {
     if [ -d "$seeddir" ]; then
         for f in "$seeddir"/*; do
             [ -f "$f" ] && case "$f" in
-                *.DNG|*.dng|*.HEIF|*.heif|*.HEIC|*.heic|*.TIF|*.tif|*.TIFF|*.tiff|*.jpg|*.jpeg|*.exr) seeds+=("$f");;
+                *.DNG|*.dng|*.HEIF|*.heif|*.HEIC|*.heic|*.TIF|*.tif|*.TIFF|*.tiff|*.jpg|*.jpeg|*.exr|*.png|*.PNG|*.gif|*.GIF|*.bmp|*.BMP|*.webp|*.WEBP) seeds+=("$f");;
             esac
         done
     elif [ -f "$seeddir" ]; then

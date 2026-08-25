@@ -240,7 +240,11 @@ def cmd_verify(args):
         print("no cached build for %s - run poll first" % args.board)
         return 1
     dump_rel = (st.get("last") or {}).get("dump", "")
-    dump = os.path.join(kc_base(), dump_rel)
+    # local state stores absolute paths; the feed repo stores paths
+    # relative to the repo root. accept both.
+    dump = dump_rel
+    if not os.path.isabs(dump) and not os.path.isfile(dump):
+        dump = os.path.join(kc_base(), dump_rel)
     if not os.path.isfile(dump):
         print("dump missing: %s" % dump)
         return 1
