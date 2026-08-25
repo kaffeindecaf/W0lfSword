@@ -9,15 +9,19 @@
 > follow. It builds reputation, acts as a changelog for `offsets.m` users, and
 > feeds bounty targeting.
 >
-> **Status: M1 done 2026-08-25.** `scripts/kczip.py` (zip64 remote range
+> **Status: M1 + M2 done 2026-08-25.** `scripts/kczip.py` (zip64 remote range
 > reader: EOCD/zip64 locator, entry lookup, retries, CRC-32 of the
 > UNCOMPRESSED data, auto raw-deflate), `scripts/kcwatch.py` orchestrator
-> (poll → fetch → xpf-cli resolve → diff → render + offsets.m verdict),
-> wired into the CLI as `./W0lfSword kcwatch` (menu `w`). Validated live on
-> t8030: iOS 26.6 → 26.6.1 (xnu-12377.162.13~2 → 12377.162.14~4), 51
-> identical / 12 symbol shifts / 0 struct moves, verdict YES. M2 (public
-> feed repo + GitHub Actions) is staged: `scripts/kcwatch.feed-workflow.yml`
-> template ready.
+> (poll → fetch → xpf-cli resolve → diff → render + offsets.m verdict;
+> `KCWATCH_DIR` env override for feed deployments), wired into the CLI as
+> `./W0lfSword kcwatch` (menu `w`). Validated live on t8030: iOS 26.6 →
+> 26.6.1 (xnu-12377.162.13~2 → 12377.162.14~4), 51 identical / 12 symbol
+> shifts / 0 struct moves, verdict YES.
+> **M2 live: [kaffeindecaf/kernel-deltas](https://github.com/kaffeindecaf/kernel-deltas)**
+> — public feed repo with README, kernel-deltas.md index, vendored scripts
+> + xpf-cli, committed state baseline, and the GitHub Actions cron
+> (`scripts/kcwatch.feed-workflow.yml` template; workflow validated: run #2
+> green). First report: reports/t8030-26.6.1-23G83.md.
 
 ---
 

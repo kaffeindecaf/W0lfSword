@@ -48,8 +48,14 @@ KC_NAME = "kernelcache.release."          # prefix in the IPSW zip
 
 
 # ── state / cache layout ──────────────────────────────────────────
+# KCWATCH_DIR overrides the base (default: <repo>/.w0lfsword/kcwatch)
+# so the public feed repo can keep everything under state/.
+def kc_base():
+    return os.environ.get("KCWATCH_DIR") or os.path.join(REPO_DIR, ".w0lfsword", "kcwatch")
+
+
 def kc_dir(board):
-    return os.path.join(REPO_DIR, ".w0lfsword", "kcwatch", board)
+    return os.path.join(kc_base(), board)
 
 
 def state_file(board):
@@ -135,7 +141,7 @@ def resolve_kc(kc_file, board, dry_run=False):
     with open(dump, "w") as fh:
         fh.write(r.stdout)
     hdr, _ = parse_dump(dump)
-    print("  [xpf]   %s — %s" % (hdr.get("kernel", "?").split(";")[0],
+    print("  [xpf]   %s - %s" % (hdr.get("kernel", "?").split(";")[0],
                                  hdr.get("xnu", "?")))
     return dump
 
@@ -192,25 +198,25 @@ def offsets_verdict(version, diff):
     kernelConstant.* — symbol addresses shift every build and are noise."""
     thr = offsets_thresholds()
     if not thr:
-        return "offsets.m not found — verdict unavailable"
+        return "offsets.m not found: verdict unavailable"
     applicable = [t for t in thr if tuple(int(x) for x in t.split("."))
                   <= tuple(int(x) for x in version.split("."))]
     if not applicable:
-        return "NO — version %s is BELOW the lowest offsets.m block (>= %s)" % (version, thr[0])
+        return "NO: version %s is BELOW the lowest offsets.m block (>= %s)" % (version, thr[0])
     block = applicable[-1]
     structs = [n for n in diff["changed"] + diff["degraded"] + diff["only_in_a"] + diff["only_in_b"]
                if n.startswith(("kernelStruct.", "kernelConstant."))]
     if structs:
-        return ("NO — offsets.m block '>= %s' does NOT cover %s: struct/constant "
+        return ("NO: offsets.m block '>= %s' does NOT cover %s: struct/constant "
                 "items moved (%s)" % (block, version, ", ".join(structs[:4])))
-    return ("YES — offsets.m block '>= %s' applies to %s (all struct/constant "
+    return ("YES: offsets.m block '>= %s' applies to %s (all struct/constant "
             "offsets identical to previous build)" % (block, version))
 
 
 def render_report(board_cfg, rel, prev, diff, verdict):
     d = diff
     lines = []
-    lines.append("## iOS %s (%s) — %s — %s" % (
+    lines.append("## iOS %s (%s) - %s - %s" % (
         rel["version"], rel["buildid"], board_cfg["label"], _dt.date.today().isoformat()))
     lines.append("")
     lines.append("xnu: %s -> %s" % (d["xnu_a"] or "?", d["xnu_b"] or "?"))
@@ -226,7 +232,7 @@ def render_report(board_cfg, rel, prev, diff, verdict):
             lines.append("  %s: 0x%016x -> 0x%016x" % (n, va, vb))
     if d["degraded"]:
         lines.append("")
-        lines.append("DEGRADED (structural change — investigate):")
+        lines.append("DEGRADED (structural change, investigate):")
         for n in d["degraded"]:
             lines.append("  %s" % n)
     if d["only_in_a"] or d["only_in_b"]:
@@ -240,7 +246,6 @@ def render_report(board_cfg, rel, prev, diff, verdict):
     lines.append("VERDICT: %s" % verdict)
     lines.append("")
     return "\n".join(lines)
-
 
 # ── subcommands ───────────────────────────────────────────────────
 def cmd_poll(args):
@@ -263,7 +268,7 @@ def cmd_poll(args):
     print("board: %s   newest: iOS %s (%s)  signed=%s  date=%s" % (
         args.board, rel["version"], rel["buildid"], rel["signed"], rel["date"]))
     if same:
-        print("no new build since %s — nothing to do" % last.get("version"))
+        print("no new build since %s, nothing to do" % last.get("version"))
         return 0
     if args.dry_run:
         print("dry-run: would fetch+resolve+diff iOS %s (%s)" % (rel["version"], rel["buildid"]))
@@ -290,7 +295,7 @@ def cmd_poll(args):
         print("baseline build (no previous dump to diff against)")
         thr = offsets_thresholds()
         top = thr[-1] if thr else "?"
-        print("VERDICT: %s — offsets.m block '>= %s' is the highest applicable; "
+        print("VERDICT: %s, offsets.m block '>= %s' is the highest applicable; "
               "structural identity unverified (no previous build cached)" % (args.board, top))
     st["last"] = {"version": rel["version"], "buildid": rel["buildid"],
                   "date": rel["date"], "signed": rel["signed"], "dump": dump}

@@ -51,8 +51,8 @@
   _Done 2026-08-21: `make mha IPA=Filza.ipa` (Makefile MHA_IDENTITY=1 CFLAG + target) → scripts/re-sign_mha.sh (inject tweak dylib via scripts/add-load-dylib.py Mach-O LC_LOAD_DYLIB patch, CFBundleIdentifier + CodeDirectory → com.apple.mobile.MobileHouseArrest, ldid re-sign, repackage). Tweak logs MHA mode at init. CLI: `./W0lfSword mha <ipa> [out]`. Injector verified on a real arm64 Mach-O; prereq gates tested._
 - [x] `K3.2` 🟠 — Tweak installer backend (build dylib from templates/catalog, deploy via existing pipeline) — unlocks the tweak menu
   _Done 2026-08-14: see K3.2 in Section K3 — build_tweak.sh + 3 templates + `tweaks install <id>`._
-- [x] `K4.14` 🟡 — **kcwatch kernel-delta watcher M1** (research/kcwatch.md)  \
-  _Done 2026-08-25: scripts/kczip.py (zip64 remote range reader: EOCD/zip64 locator, retries, CRC-32 over UNCOMPRESSED data, auto raw-deflate), scripts/kcwatch.py (poll → fetch → resolve → diff → render + offsets.m verdict; --board/--version/--dry-run/--json), CLI `./W0lfSword kcwatch` (menu `w`, 5-place wiring). Validated live on t8030: 26.6 → 26.6.1 (xnu-12377.162.13~2 → .14~4) = 51 identical / 12 symbol shifts / 0 struct moves, verdict YES. xpf_diff.py gained the degraded (resolved↔UNRESOLVED) category. M2 staged: scripts/kcwatch.feed-workflow.yml for the public kernel-deltas feed repo._
+- [x] `K4.14` 🟡 — **kcwatch kernel-delta watcher M1 + M2** (research/kcwatch.md)  \
+  _Done 2026-08-25: scripts/kczip.py (zip64 remote range reader: EOCD/zip64 locator, retries, CRC-32 over UNCOMPRESSED data, auto raw-deflate), scripts/kcwatch.py (poll → fetch → resolve → diff → render + offsets.m verdict; --board/--version/--dry-run/--json; KCWATCH_DIR env for feed deployments), CLI `./W0lfSword kcwatch` (menu `w`, 5-place wiring). Validated live on t8030: 26.6 → 26.6.1 (xnu-12377.162.13~2 → .14~4) = 51 identical / 12 symbol shifts / 0 struct moves, verdict YES. xpf_diff.py gained the degraded (resolved↔UNRESOLVED) category. M2: public feed repo **kaffeindecaf/kernel-deltas** live — README, kernel-deltas.md feed, vendored pipeline, committed state, GitHub Actions cron (run validated green)._
 
 ---
 
