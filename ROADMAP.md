@@ -1087,10 +1087,102 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | K2 — Beginner-Friendly Reform | 10 | 9 | 1 |
 | K3 — Tweak Menu | 9 | 4 | 5 |
 | K4 — iOS 26.1 Sandbox Escape Research | 13 | 2 | 11 |
-| K5 — Exploit Chains | 9 | 2 | 7 |
-| V1 — v1.0 Release | 3 | 3 | 0 |
-| **TOTAL** | **236** | **91** | **145** |
+| K — Exploit Menu & Beginner-Friendly Reform (added 2026-08-13) | 54 | 29 | 25 |
+| **TOTAL** | **290** | **150** | **140** |
 
 ---
 
 *Last updated: 2026-08-14 — K4.1 closed: XPF offline diff of 26.0.1 vs 26.1 kernelcaches (tools/xpf-cli) — structs identical, offsets.m 26.0.x block applies; task.itk_space 0x310-vs-0x318 discrepancy flagged for on-device check*
+
+---
+
+# SECTION L: W0lfSword .ipa — Exploit Hub App (added 2026-08-25)
+
+> **Goal:** a standalone iOS app (sideload/TrollStore installable) that is an
+> exploit hub: sandbox escape testing, privilege escalation verification,
+> SSV bypass, kernel-status dashboard, and log/crash views — reusing the
+> W0lfSword kexploit engine instead of reimplementing anything.
+>
+> **Why:** the tweak today lives inside Filza. A hub app gives the same
+> capability set a first-class home: tap-to-run tests, clear pass/fail
+> results, and no dependency on Filza's UI. Also the natural delivery
+> vehicle for B1.4/F3.1 (standalone .ipa, no jailbreak required).
+>
+> **Architecture decision (L2.1) drives everything below.** Reuse rule:
+> kexploit/, sandbox_escape.m, SSV/, utils/ get compiled into ONE shared
+> engine (static lib `libw0lfengine`), and the app is a thin UI over it.
+
+## L1 — Concept & Scope
+
+- [ ] `L1.1` 🟠 — Define the app: name, icon, target iOS 15.0+, arm64/arm64e universal. Name suggestion: **W0lfSword Hub**.
+- [ ] `L1.2` 🟠 — Decide delivery: TrollStore .ipa (no dev account) primary; adhoc sideload secondary. Document both in README.
+- [ ] `L1.3` 🟡 — Write the feature list in the app README: sandbox escape tests, privilege escalation (root creds), SSV bypass toggle, kernel status, log viewer, panic/crash viewer.
+- [ ] `L1.4` 🟢 — Scope guard: v1 is a TEST HARNESS app, NOT a persistent jailbreak. No boot-time injection, no daemons. Everything runs when the app runs.
+
+## L2 — App Shell & Packaging
+
+- [ ] `L2.1` 🔴 — **Pick the build path and prove it**: Theos application target (`iphone:clang:latest` + `application.mk`) with ObjC/UIKit UI is the only Linux-buildable option (no Swift toolchain on Linux). Spike: `pocs/hub_shell/` minimal app that launches and shows a label.
+- [ ] `L2.2` 🔴 — Engine extraction: makefile target that compiles `kexploit/*.m`, `sandbox_escape.m`, `SSV/*.m`, `utils/*.m`, `kpf/*.m`, `XPF/src/*.c` into `libw0lfengine.a` (no tweak-only files: Tweak.m, FilzaPadlockBypass.xm excluded). Must build standalone with the same CFLAGS as the tweak (A2/A3/A5 fixes included).
+- [ ] `L2.3` 🟠 — Entitlements: base `get-task-allow` (debug) + `platform-application` only for the TrollStore build (TrollStore grants it); document why the plain sideload build omits it.
+- [ ] `L2.4` 🟠 — Codesign: Procursus `ldid -S` (vendored scripts/ldid) + `jbctl trustcache add` recipe from the tweak chain (skill: w0lfsword-toolkit-dev) — the dylib-in-app must be signed or dyld refuses it.
+- [ ] `L2.5` 🟠 — `scripts/build_hub_ipa.sh`: Theos build → ldid sign → .ipa assemble (Payload/W0lfSwordHub.app) → optional version bump. Verify with `unzip -l` + `ldid -h`.
+- [ ] `L2.6` 🟡 — App icons + LaunchScreen (asset catalog or plain PNGs; no Xcode needed).
+
+## L3 — Reuse the W0lfSword Engine
+
+- [ ] `L3.1` 🔴 — Boot path in-app: on launch, resolve offsets for the running iOS version (port the offsets.m threshold logic — reuse `scripts/test_offsets.py`'s parse output at build time to generate a compact `offsets.json`).
+- [ ] `L3.2` 🟠 — XPF integration: embed the XPF-verified offset table (kcwatch data; export via `kcwatch index --json` when available). If the running version has no table entry → show "unsupported iOS" and disable kernel paths.
+- [ ] `L3.3` 🟠 — Engine entry: `kexploit_opa334()` + `sandbox_escape()` + `patch_sandbox_ext()` callable from the app with the same error codes (utils/errors.h — TWEAK_ERR_*).
+- [ ] `L3.4` 🟡 — Keep the crash-safety from the tweak: port the A3.1 crash counter + auto-disable flag + success flag into the engine (app-scoped paths: Library/Application Support/ instead of /var/mobile/Documents).
+- [ ] `L3.5` 🟡 — Log plumbing: route TweakLog (utils/tweak_log.h) to BOTH the app log store and (optionally) a file export. `tstr()` + mutex already in place.
+
+## L4 — Sandbox Escape Testing
+
+- [ ] `L4.1` 🔴 — Test suite (the hub's core): the same probes the tweak/readiness use, as in-app tests with per-test result rows:
+  - write/read/delete in `/var/tmp` (sandbox-free baseline)
+  - write/read/delete in app Documents (sandboxed — should already work)
+  - write to `/System/Library/.w0lf_probe` (SSV-protected — fails without bypass)
+  - read `/etc/master.passwd` / system container paths (permission probe)
+  - `check_sandbox_var_rw()` summary (kernel-level R+W)
+- [ ] `L4.2` 🟠 — Test runner: run tests in a worker thread, one at a time, with a per-test timeout; attribute each result to the probe (no whole-app hang on a stuck test).
+- [ ] `L4.3` 🟠 — Safe mode: in-app toggle that writes the safe-mode flag (tweak semantics) and re-runs the suite with kernel paths disabled — proves the UI-hooks vs kernel boundary.
+- [ ] `L4.4` 🟡 — Result export: share sheet / file export of the test report (JSON + human-readable) — feeds back into host-side campaign logs.
+
+## L5 — Privilege Escalation
+
+- [ ] `L5.1` 🔴 — Root credentials check: after a successful escape, read back uid/gid/groups[0] (the set_root_credentials read-back path) and show "root:wheel active" in the UI.
+- [ ] `L5.2` 🔴 — Kernel R/W status: `kread64` smoke test on a known-safe address (own proc chain) → show "kernel r/w: live" or "not acquired".
+- [ ] `L5.3` 🟠 — SSV bypass panel: run `patch_sandbox_ext()` + `check_sandbox_var_rw()`; show SSV-protected-write test result before/after.
+- [ ] `L5.4` 🟠 — Privilege escalation test suite: ucred patch verify, container access via MCM bridge (`container_access.m`) and bad_query traversal (`bad_query_escape.m`) — port the probes from safe mode.
+- [ ] `L5.5` 🟡 — Escalation report: one-screen summary (sandbox: escaped/failed, creds: root/user, kernel: r/w or none, SSV: on/off) with the raw log behind it.
+
+## L6 — Exploit Hub Features
+
+- [ ] `L6.1` 🟠 — Exploit runner UI: Run/Stop DarkSword pe_v1/pe_v2 with the retry ladder (A3.2) + live status ("spraying…", "racing…", "escaped").
+- [ ] `L6.2` 🟡 — Kernel info panel: slide/base/version string after resolution (KPRINTF-gated values are debug-only — show only in debug builds, matching A6.2).
+- [ ] `L6.3` 🟡 — Log viewer: scrollable TweakLog stream with severity colors; export button.
+- [ ] `L6.4` 🟢 — Crash/panic viewer: parse `.ips` from the app's own crash dir (host-side panic_analyzer.py logic ported or a "send to host" export).
+
+## L7 — Safety & Persistence
+
+- [ ] `L7.1` 🔴 — Non-persistent by default: nothing auto-runs at boot; exploit state lives only while the app is foreground. Document in-app.
+- [ ] `L7.2` 🔴 — Panic guard: crash counter + auto-disable after 3 crashes without success (port A3.1 exactly) — app-scoped flag files.
+- [ ] `L7.3` 🟠 — Confirm gates: every destructive action (run exploit, SSV patch, escalate) requires an in-app confirm dialog with plain-English explanation (mirror the CLI's disclaimer pattern).
+- [ ] `L7.4` 🟡 — "What could go wrong" screen: worst case = kernel panic → reboot; nothing persists (mirror the CLI disclaimer text).
+
+## L8 — Testing & Release
+
+- [ ] `L8.1` 🟠 — Test matrix: SE2/A13 18.4.1 (jailbroken — escape path skipped, SSV + hub UI verified), any 26.x device when available (full kernel path), plus iOS 17.x if reachable.
+- [ ] `L8.2` 🟡 — Wire the engine build into `scripts/regression.sh` (build libw0lfengine + hub app as a check step).
+- [ ] `L8.3` 🟢 — Release build: FINALPACKAGE=1-equivalent (NDEBUG, KPRINTF stripped — A6.2/V1.3 pattern), version bump, `build_hub_ipa.sh` produces the final .ipa.
+- [ ] `L8.4` 🟢 — README for the app: install (TrollStore), screenshots, feature list, "what it can't do" (no persistence, no boot injection).
+
+## L9 — Stretch (post-v1)
+
+- [ ] `L9.1` ⚪ — Non-jailbroken path (B1.4): the hub app carries the full exploit chain and escapes from a plain sideload — requires the 26.1-era kernel bug to be reachable from an app context; hardware-gated research.
+- [ ] `L9.2` ⚪ — Host pairing: hub app talks to the host CLI over USB/SSH (share results, trigger runs from `./W0lfSword`).
+- [ ] `L9.3` ⚪ — ShareSheet/extension: run a single sandbox test on a shared file from any app.
+
+---
+
+*Last updated: 2026-08-25 — SECTION L added (Exploit Hub App checklist); readiness command shipped (SSH/root/jailbreak/Filza/tweak probes, live R/W tests, offset coverage, kcwatch verdict)*

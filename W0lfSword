@@ -1117,6 +1117,116 @@ print(json.dumps({"version_blocks": blocks, "soc_coverage": socs, "total_blocks"
     fi
 }
 
+# ═══════════════════════════════════════════════════════════════
+#  READINESS — device capability / exploit-readiness report
+# ═══════════════════════════════════════════════════════════════
+
+cmd_readiness() {
+    local ip; ip=$(get_device_ip "${1:-}")
+    [ -z "$ip" ] && { err "No device IP"; hint "Connect via USB or: ./W0lfSword device add <ip>"; return 1; }
+
+    section "Readiness Report — $ip"
+    echo ""
+    local missing=""
+
+    # ── SSH + identity ──
+    if ! ssh_safe "root@$ip" "echo ok" >/dev/null 2>&1; then
+        err "SSH unreachable — is OpenSSH installed/running on the phone?"
+        hint "Fix connectivity first: ./W0lfSword usbtest  or  ./W0lfSword device add <ip>"
+        return 1
+    fi
+    ok "SSH key auth"
+    local ios_ver arch uid jb
+    ios_ver=$(ssh_safe "root@$ip" "sw_vers -productVersion" 2>/dev/null)
+    arch=$(ssh_safe "root@$ip" "uname -m" 2>/dev/null)
+    uid=$(ssh_safe "root@$ip" "id -u" 2>/dev/null)
+    jb=$(ssh_safe "root@$ip" "[ -d /var/jb ] && echo yes || echo no" 2>/dev/null)
+    printf "  ${C_GREY}%-22s${NC} %s\n" "device" "iOS $ios_ver ($arch)"
+    if [ "$uid" = "0" ]; then
+        ok "root shell (uid=0)"
+    else
+        warn "SSH user is not root (uid=$uid)"
+        missing="$missing root-shell"
+    fi
+    if [ "$jb" = "yes" ]; then
+        ok "jailbroken (rootless /var/jb)"
+    else
+        info "not jailbroken — DarkSword kernel exploit path applies"
+    fi
+
+    # ── on-device checks ──
+    local filza tweak sucflag
+    filza=$(ssh_safe "root@$ip" "ls -d /var/jb/Applications/Filza.app 2>/dev/null; ls -d /var/containers/Bundle/Application/*/Filza.app 2>/dev/null" 2>/dev/null)
+    if [ -n "$filza" ]; then
+        ok "Filza present"
+    else
+        warn "Filza not found — install it first (TrollStore/Sileo)"
+        missing="$missing filza"
+    fi
+    tweak=$(ssh_safe "root@$ip" "dpkg -l com.kaffeindecaf.w0lfsword 2>/dev/null | tail -1 | tr -s ' ' | cut -d' ' -f3" 2>/dev/null)
+    if [ -n "$tweak" ]; then
+        ok "W0lfSword tweak installed ($tweak)"
+    else
+        warn "tweak not installed — run: ./W0lfSword adderall"
+        missing="$missing tweak"
+    fi
+    sucflag=$(ssh_safe "root@$ip" "cat /var/mobile/Documents/.filza_last_success 2>/dev/null" 2>/dev/null)
+    if [ -n "$sucflag" ]; then
+        ok "exploit success recorded on device"
+    else
+        info "no success flag yet — exploit hasn't run on this device"
+    fi
+
+    # ── live capability probes ──
+    if ssh_safe "root@$ip" "touch /var/tmp/.w0lf_probe 2>/dev/null && rm -f /var/tmp/.w0lf_probe" >/dev/null 2>&1; then
+        ok "sandbox-free write: /var/tmp"
+    else
+        warn "/var/tmp write failed"
+        missing="$missing tmp-write"
+    fi
+    if ssh_safe "root@$ip" "touch /System/Library/.w0lf_probe 2>/dev/null && rm -f /System/Library/.w0lf_probe" >/dev/null 2>&1; then
+        ok "SSV-protected write: /System/Library (bypass active)"
+    else
+        info "SSV-protected write blocked (expected) — Filza + tweak's SSV bypass enables it"
+    fi
+
+    # ── host-side: offset coverage for this iOS version ──
+    local highest_th="" th
+    while IFS= read -r th; do
+        [ -z "$th" ] && continue
+        if [ "$(version_sort_first "$th" "$ios_ver")" = "$th" ]; then
+            highest_th="$th"
+        fi
+    done < <(grep -oE 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO\(@"[0-9.]+"\)' kexploit/offsets.m \
+             | sed 's/.*(@"\([0-9.]*\)").*/\1/' | sort -u -t. -k1,1n -k2,2n -k3,3n)
+    if [ -n "$highest_th" ]; then
+        ok "offset coverage: iOS $ios_ver covered (threshold >= $highest_th)"
+    else
+        warn "NO offset coverage for iOS $ios_ver — DarkSword will refuse to run"
+        missing="$missing offsets"
+    fi
+
+    # ── host-side: kcwatch live verification (if local state exists) ──
+    local kc_state="$DATA_DIR/kcwatch" kcb="" kver="" kverdict=""
+    [ -f "$kc_state/t8030/state.json" ] && kcb=t8030
+    [ -f "$kc_state/t8110/state.json" ] && kcb=t8110
+    if [ -n "$kcb" ]; then
+        kver=$(python3 -c "import json;print(json.load(open('$kc_state/$kcb/state.json'))['last']['version'])" 2>/dev/null || echo "?")
+        kverdict=$(python3 "$PROJECT_DIR/scripts/kcwatch.py" verify --board "$kcb" 2>/dev/null | grep -oE "VERDICT: .*" | head -1)
+        printf "  ${C_FROST}%-22s${NC} %s\n" "kcwatch" "last verified iOS $kver ($kcb) — ${kverdict:-no verdict}"
+    else
+        info "no local kcwatch state — run: ./W0lfSword kcwatch poll"
+    fi
+
+    echo ""
+    if [ -z "$missing" ]; then
+        echo -e "  ${C_GRN}${B}VERDICT: READY — device is set up for W0lfSword${NC}"
+    else
+        echo -e "  ${C_AMB}${B}VERDICT: PARTIAL${NC} — missing:${C_RED}${missing}${NC}"
+        echo -e "  ${C_DIM}Fix the missing pieces, then re-run readiness.${NC}"
+    fi
+}
+
 cmd_targets() {
     show_header
     echo ""
@@ -1990,11 +2100,12 @@ draw_menu() {
     menu_opt f "ImageIO Fuzzer"   "mutate DNG/HEIF → phone → crash capture (K4.2)"
     menu_opt k "Kernelcache Diff" "offline XPF offset research — resolve/diff kernelcaches"
     menu_opt w "kcwatch"          "auto kernel-delta watcher — poll → fetch → resolve → report"
+    menu_opt r "readiness"        "device capability + exploit-readiness report (live probes)"
     echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
     printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
-    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
+    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}r${NC} readiness  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
     echo ""
     echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
@@ -2085,6 +2196,7 @@ run_menu() {
             panic)        cmd_panic || true;;
             kernelcache)  cmd_kernelcache || true;;
             kcwatch|kw)   cmd_kcwatch || true;;
+            readiness|r)  cmd_readiness || true;;
             f|fuzz)       cmd_fuzz || true;;
             exploits|e)   cmd_exploits || true;;
             # usbliter8-arctic
@@ -2407,7 +2519,9 @@ EOF
                     warn "SSH key install to $IP failed — WiFi deploys may not work"
                 fi
                 IOS_VER=$(ssh_safe "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
-                DEV_MODEL=$(ssh_safe "root@$IP" "sysctl -n hw.machine" 2>/dev/null || echo "")
+                # sysctl isn't in PATH on rootless Dopamine — uname -m is the
+                # reliable model source ("iPhone12,8" etc.)
+                DEV_MODEL=$(ssh_safe "root@$IP" "sysctl -n hw.machine 2>/dev/null || uname -m" 2>/dev/null || echo "")
             else
                 echo -e "  ${C_RED}✗${NC} Device offline — use USB or add device IP"
             fi
@@ -3350,6 +3464,19 @@ kcwatch — automated kernel-delta watcher (research/kcwatch.md).
   Feed reports: .w0lfsword/kcwatch/<board>/reports/kernel-deltas.md
 EOF
             ;;
+        readiness)
+            cat <<'EOF'
+readiness — device capability + exploit-readiness report (live probes).
+  Runs over SSH against the saved device (or an IP you pass) and checks:
+    • SSH key auth, root shell, jailbreak state (rootless /var/jb)
+    • Filza present, W0lfSword tweak installed, success flag recorded
+    • live R/W probes: /var/tmp (sandbox-free) and /System/Library (SSV)
+    • host-side: offset coverage for the device's iOS version, and the
+      kcwatch verification verdict if local state exists
+  Prints VERDICT: READY / PARTIAL (with the missing pieces listed).
+  Usage: ./W0lfSword readiness [ip]
+EOF
+            ;;
         usbtest)
             cat <<'EOF'
 usbtest — prove the USB link before you deploy anything.
@@ -3450,6 +3577,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "poc dirtyslide" "dyld slide OOB — macOS/Xcode only (CVE-2026-43724)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "fuzz (f)"      "ImageIO fuzz harness: mutate → push → open → crash capture (K4.2)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "kcwatch (w)"   "auto kernel-delta watcher: poll → ranged-fetch → XPF → report"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "readiness (r)" "device capability + exploit-readiness report: SSH/root/jailbreak, Filza + tweak state, live R/W probes, offset coverage, kcwatch verdict"
     printf "  ${C_EYE}%-14s${NC} %s\n" "mha <ipa>"    "Re-sign Filza as MobileHouseArrest → pre-exploit container access (K4.12)"
     echo ""
     section "Exploit Workflow"
@@ -3528,6 +3656,7 @@ main() {
         poc)       cmd_poc "${args[@]}";;
         fuzz)      cmd_fuzz "${args[@]}";;
         kcwatch)   cmd_kcwatch "${args[@]}";;
+        readiness) cmd_readiness "${args[@]}";;
         mha)       cmd_mha "${args[@]}";;
         tweaks)    cmd_tweaks "${args[@]}";;
         clean)     cmd_clean "${args[@]}";;
