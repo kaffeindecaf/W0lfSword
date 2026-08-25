@@ -18,10 +18,12 @@
 > 26.6.1 (xnu-12377.162.13~2 → 12377.162.14~4), 51 identical / 12 symbol
 > shifts / 0 struct moves, verdict YES.
 > **M2 live: [kaffeindecaf/kernel-deltas](https://github.com/kaffeindecaf/kernel-deltas)**
-> — public feed repo with README, kernel-deltas.md index, vendored scripts
-> + xpf-cli, committed state baseline, and the GitHub Actions cron
-> (`scripts/kcwatch.feed-workflow.yml` template; workflow validated: run #2
-> green). First report: reports/t8030-26.6.1-23G83.md.
+> — public feed repo with README, cumulative multi-board kernel-deltas.md
+> index (t8030 + t8110), Atom feed (atom.xml, RSS-subscribable), vendored
+> scripts + xpf-cli, committed state baseline, and the GitHub Actions cron
+> (workflow validated green end-to-end including auto-commit). First
+> reports: t8030 26.6 → 26.6.1 (itk_space 0x310 live-verified by `verify`),
+> t8110 26.6.1 baseline.
 
 ---
 
