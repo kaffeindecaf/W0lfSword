@@ -353,6 +353,9 @@ cmd_usbtest() {
         err "No device on USB"
         hint "Plug the phone in with its Lightning cable (SE/8/X/11 era — not USB-C)"
         hint "Straight into the computer, no hub. Charging-but-invisible = cable or port."
+        if lsusb 2>/dev/null | grep -qi "05ac"; then
+            hint "USB sees an Apple device but usbmuxd doesn't — restart: sudo systemctl restart usbmuxd"
+        fi
         return 1
     fi
     echo -e "  ${C_GRN}✓${NC} Device visible on USB: ${C_EYE}$uuid${NC}"
@@ -705,6 +708,9 @@ scan_devices() {
     # USB devices via libimobiledevice
     if command -v idevice_id &>/dev/null; then
         local uuids; uuids=$(idevice_id -l 2>/dev/null || echo "")
+        if [ -z "$uuids" ] && lsusb 2>/dev/null | grep -qi "05ac"; then
+            warn "Apple device on USB but usbmuxd can't see it — restart: sudo systemctl restart usbmuxd"
+        fi
         if [ -n "$uuids" ]; then
             while IFS= read -r uuid; do
                 [ -z "$uuid" ] && continue
