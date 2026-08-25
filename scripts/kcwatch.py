@@ -16,7 +16,6 @@ Subcommands:
                   the values kexploit/offsets.m would set for that version
   index           render the cumulative multi-board feed (kernel-deltas.md)
   atom            render an Atom feed (atom.xml) from the report files
-  html            render a self-contained HTML dashboard (docs/index.html)
 
 Options:  --board t8030|t8103|t8110   --version <ver> (backfill)
           --dry-run   --json   (env: KCWATCH_DIR, KCWATCH_FEED_URL)   --yes
@@ -365,172 +364,6 @@ def cmd_atom(args):
     return 0
 
 
-def cmd_html(args):
-    """Render a self-contained dashboard (docs/index.html) from state history.
-
-    No external assets — inline CSS only, so the file works from GitHub
-    Pages, file:// and any static host. Served at
-    https://<owner>.github.io/kernel-deltas/ when Pages is enabled on main.
-    """
-    import html as _html
-    base = kc_base()
-    rows = []
-    boards = []
-    for board in sorted(os.listdir(base)):
-        sf = os.path.join(base, board, "state.json")
-        if not os.path.isfile(sf):
-            continue
-        try:
-            st = json.load(open(sf))
-        except (OSError, ValueError):
-            continue
-        bcfg = BOARDS.get(board, {})
-        boards.append({
-            "id": board,
-            "label": bcfg.get("label", board),
-            "soc": bcfg.get("soc", "?"),
-            "device": bcfg.get("device", "?"),
-            "last": st.get("last") or {},
-        })
-        for h in st.get("history", []):
-            rows.append({
-                "date": h.get("date", ""), "board": board,
-                "version": h.get("version"), "buildid": h.get("buildid"),
-                "xnu": h.get("xnu", "?"),
-                "identical": h.get("identical", "?"), "changed": h.get("changed", "?"),
-                "degraded": h.get("degraded", 0), "verdict": h.get("verdict", "?"),
-            })
-    rows.sort(key=lambda r: r["date"], reverse=True)
-    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    esc = _html.escape
-
-    def badge(v):
-        if v.startswith("YES"):
-            return '<span class="badge ok">YES</span>'
-        if v.startswith("NO"):
-            return '<span class="badge bad">NO</span>'
-        return '<span class="badge warn">?</span>'
-
-    board_cards = []
-    for b in boards:
-        last = b["last"]
-        lst = "baseline pending"
-        if last.get("version"):
-            lst = "iOS %s (%s)" % (last.get("version"), last.get("buildid"))
-        board_cards.append(
-            '<div class="card">'
-            '<h3>%s</h3>'
-            '<p class="dim">%s · %s</p>'
-            '<p class="big">%s</p>'
-            '<p class="dim">xnu %s</p>'
-            "</div>" % (
-                esc(b["label"]), esc(b["device"]), esc(b["soc"]), esc(lst),
-                esc(last.get("xnu") or "—")))
-
-    trs = []
-    for r in rows[:40]:
-        trs.append(
-            "<tr><td>%s</td><td><code>%s</code></td><td>iOS %s</td>"
-            "<td><code>%s</code></td><td class='dim'>%s</td>"
-            "<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
-                esc(r["date"]), esc(r["board"]), esc(r["version"]), esc(r["buildid"]),
-                esc(r["xnu"]), esc(str(r["identical"])), esc(str(r["changed"])),
-                esc(str(r["degraded"])),
-                badge(r["verdict"])))
-
-    page = """<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>kernel-deltas — iOS kernel delta feed</title>
-<style>
-  /* machine-room printout: cream paper, ink, rubber stamps */
-  * { box-sizing: border-box; }
-  body { margin: 0; background: #efe9d8; color: #201d17;
-         font: 14px/1.6 ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace; }
-  .paper { max-width: 980px; margin: 2rem auto; background: #f6f3e9;
-           border: 1px solid #c8c1ac; box-shadow: 0 1px 2px rgba(60,50,20,.08), 0 8px 30px rgba(60,50,20,.12);
-           position: relative; }
-  .paper::before { content: ""; position: absolute; inset: 0;
-                   background: repeating-linear-gradient(0deg, transparent 0 27px, rgba(80,70,40,.025) 27px 28px);
-                   pointer-events: none; }
-  header { padding: 2.2rem 2.5rem 1.4rem; border-bottom: 2px solid #201d17; }
-  .pre { margin: 0; white-space: pre; letter-spacing: .5px; }
-  .stampbox { border: 1px solid #b3261e; color: #b3261e; display: inline-block;
-              padding: .15rem .6rem; font-weight: 700; letter-spacing: 2px;
-              transform: rotate(-2deg); text-transform: uppercase; }
-  .sub { color: #6b6353; margin: .6rem 0 0; font-size: .85rem; }
-  main { padding: 1.6rem 2.5rem 2.5rem; }
-  h2 { font-size: .95rem; text-transform: uppercase; letter-spacing: 2px;
-       border-bottom: 1px solid #201d17; padding-bottom: .35rem; margin: 1.8rem 0 1rem; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-           gap: 1rem; margin-bottom: .5rem; }
-  .card { border: 1px solid #b9b29c; padding: .9rem 1.1rem; background: #faf8f1;
-          position: relative; }
-  .card::before { content: "+"; position: absolute; top: -8px; left: -7px; color: #b3261e;
-                  font-weight: 700; font-size: 1rem; }
-  .card h3 { margin: 0 0 .2rem; font-size: .95rem; letter-spacing: 1px; }
-  .card .meta { color: #6b6353; font-size: .8rem; margin: 0 0 .5rem; }
-  .card .big { font-size: 1.1rem; font-weight: 700; margin: 0 0 .3rem; }
-  .card .dim { color: #6b6353; font-size: .8rem; margin: 0; }
-  table { width: 100%%; border-collapse: collapse; margin-top: .4rem; }
-  th { text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: 1.5px;
-       color: #6b6353; border-bottom: 2px solid #201d17; padding: .5rem .6rem; }
-  td { padding: .55rem .6rem; border-bottom: 1px dotted #c8c1ac; vertical-align: top; }
-  tbody tr:nth-child(even) { background: rgba(80,70,40,.04); }
-  code { background: #ece6d3; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
-  .badge { display: inline-block; padding: 1px 9px; border: 2px solid #b3261e; color: #b3261e;
-           font-weight: 700; letter-spacing: 2px; font-size: .72rem; text-transform: uppercase;
-           transform: rotate(-2deg); }
-  .badge.ok { border-color: #1f6d3a; color: #1f6d3a; }
-  .badge.warn { border-color: #9a6b00; color: #9a6b00; }
-  .badge.bad { border-color: #b3261e; color: #b3261e; }
-  footer { padding: 1rem 2.5rem 2rem; border-top: 2px dashed #c8c1ac; color: #6b6353;
-           font-size: .8rem; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-  footer a { color: #1f4e8c; text-decoration: none; border-bottom: 1px dotted #1f4e8c; }
-  a { color: #1f4e8c; }
-  .links { margin-top: .9rem; font-size: .85rem; }
-  .links a { margin-right: 1.2rem; }
-</style></head><body>
-<div class="paper">
-<header>
-  <div class="pre">+--------------------------------------------------------------+
-|  &#x1F43A;  KERNEL-DELTAS  //  iOS KERNEL DELTA FEED               |
-|  PRINTED %s                                            |
-+--------------------------------------------------------------+</div>
-  <p class="sub">What changed in the iOS kernel between builds — resolved offsets
-  and symbols, diffed per release, published automatically. No devices, no
-  jailbreaks, no 8 GB downloads.</p>
-  <div class="links">
-    <a href="https://github.com/kaffeindecaf/kernel-deltas">GITHUB</a>
-    <a href="https://github.com/kaffeindecaf/kernel-deltas/blob/main/kernel-deltas.md">MARKDOWN FEED</a>
-    <a href="https://github.com/kaffeindecaf/kernel-deltas/raw/main/atom.xml">ATOM/RSS</a>
-  </div>
-</header>
-<main>
-  <h2>&#x25B8; watched boards</h2>
-  <div class="cards">%s</div>
-
-  <h2>&#x25B8; history</h2>
-  <table>
-    <thead><tr><th>date</th><th>board</th><th>release</th><th>build</th>
-    <th>xnu</th><th>same</th><th>changed</th><th>degraded</th><th>verdict</th></tr></thead>
-    <tbody>%s</tbody>
-  </table>
-</main>
-<footer>
-  <span>generated by W0lfSword kcwatch — github.com/kaffeindecaf/W0lfSword</span>
-  <span>same = struct offsets identical &middot; changed = symbol addresses &middot; degraded = resolved&#x2192;unresolved</span>
-</footer>
-</div>
-</body></html>""" % (now, "\n".join(board_cards), "\n".join(trs))
-
-    os.makedirs("docs", exist_ok=True)
-    with open(os.path.join("docs", "index.html"), "w") as fh:
-        fh.write(page)
-    print("wrote docs/index.html (%d entries, %d boards)" % (len(rows), len(boards)))
-    return 0
-
-
 def offsets_verdict(version, diff):
     """Which offsets.m block applies to `version`, and do the struct offsets
     still match the previous build? Struct items are kernelStruct.* /
@@ -703,7 +536,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", nargs="?", default="poll",
-                    choices=["poll", "status", "diff", "verify", "index", "atom", "html"])
+                    choices=["poll", "status", "diff", "verify", "index", "atom"])
     ap.add_argument("--board", default=DEFAULT_BOARD, choices=sorted(BOARDS))
     ap.add_argument("--version", help="process a specific release version instead of the newest (backfill)")
     ap.add_argument("--dry-run", action="store_true")
@@ -728,8 +561,6 @@ def main():
         return cmd_index(args)
     if args.cmd == "atom":
         return cmd_atom(args)
-    if args.cmd == "html":
-        return cmd_html(args)
     return 0
 
 

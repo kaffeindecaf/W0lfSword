@@ -607,20 +607,19 @@ kcwatch — automated kernel-delta watcher (research/kcwatch.md).
                     version. exit 1 on mismatch (CI-friendly).
   index             render the cumulative multi-board feed index.
   atom              render an Atom feed (atom.xml) from the reports.
-  html              render the self-contained web dashboard (docs/index.html).
   Options: --board t8030|t8103|t8110 (default t8030)  --version <ver>
            --dry-run  --json   (env: KCWATCH_DIR, KCWATCH_FEED_URL)
   State + cache: .w0lfsword/kcwatch/<board>/ (gitignored)
   Feed reports: .w0lfsword/kcwatch/<board>/reports/kernel-deltas.md
 EOF
             ;;
-        poll|status|diff|verify|index|atom|html)
+        poll|status|diff|verify|index|atom)
             shift
             python3 "$script" "$sub" "$@"
             ;;
         *)
             err "Unknown kcwatch subcommand: $sub"
-            hint "Usage: ./W0lfSword kcwatch [poll|status|diff|verify|index|atom|html] [--board t8030] [--dry-run]"
+            hint "Usage: ./W0lfSword kcwatch [poll|status|diff|verify|index|atom] [--board t8030] [--dry-run]"
             return 1
             ;;
     esac
@@ -3459,7 +3458,6 @@ kcwatch — automated kernel-delta watcher (research/kcwatch.md).
                     version. exit 1 on mismatch (CI-friendly).
   index             render the cumulative multi-board feed index.
   atom              render an Atom feed (atom.xml) from the reports.
-  html              render the self-contained web dashboard (docs/index.html).
   Options: --board t8030|t8103|t8110 (default t8030)  --version <ver>
            --dry-run  --json   (env: KCWATCH_DIR, KCWATCH_FEED_URL)
   State + cache: .w0lfsword/kcwatch/<board>/ (gitignored)
