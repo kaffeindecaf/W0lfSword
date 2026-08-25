@@ -79,6 +79,22 @@ static void probe_file(const char *path_c) {
         printf("[NOTH]  %s (thumbnail NULL)\n", path_c);
     }
 
+    /* orientation-transform thumbnail — the Photos preview path: applies
+     * EXIF orientation (rotate/flip) + float decode during thumbnail gen */
+    CFDictionaryRef xform_opts = (__bridge CFDictionaryRef)@{
+        (__bridge NSString *)kCGImageSourceCreateThumbnailFromImageIfAbsent: @YES,
+        (__bridge NSString *)kCGImageSourceCreateThumbnailWithTransform: @YES,
+        (__bridge NSString *)kCGImageSourceShouldAllowFloat: @YES,
+        (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize: @1024,
+    };
+    CGImageRef xthumb = CGImageSourceCreateThumbnailAtIndex(src, 0, xform_opts);
+    if (xthumb) {
+        printf("[XTHUMB] %s (%zux%zu)\n", path_c, CGImageGetWidth(xthumb), CGImageGetHeight(xthumb));
+        CGImageRelease(xthumb);
+    } else {
+        printf("[NOX]   %s (transform thumbnail NULL)\n", path_c);
+    }
+
     CFRelease(src);
 }
 
