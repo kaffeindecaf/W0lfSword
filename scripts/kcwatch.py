@@ -11,11 +11,14 @@ Watches a board's release feed (ipsw.me), and for every new build:
 Subcommands:
   poll            check for a new build; fetch+resolve+diff+render if found
   status          show watched state for a board
-  report [ver]    re-render a report from cached resolution dumps
-  diff <vA> <vB>  diff two cached resolution dumps for the board
-  init            seed state with an existing local kernelcache+dump
+  diff            diff the two most recent cached builds for the board
+  verify          compare the cached build's XPF struct offsets against
+                  the values kexploit/offsets.m would set for that version
+  index           render the cumulative multi-board feed (kernel-deltas.md)
+  atom            render an Atom feed (atom.xml) from the report files
 
-Options:  --board t8030|t8103|t8110   --dry-run   --json   --yes
+Options:  --board t8030|t8103|t8110   --version <ver> (backfill)
+          --dry-run   --json   (env: KCWATCH_DIR, KCWATCH_FEED_URL)   --yes
 
 State/cache lives in <repo>/.w0lfsword/kcwatch/<board>/ (gitignored).
 """
@@ -192,6 +195,164 @@ def offsets_thresholds():
     return sorted(set(vers), key=lambda v: tuple(int(x) for x in v.split(".")))
 
 
+OFF_VAR_RE = re.compile(
+    r"^\s*(?:uint(?:32|64)_t\s+)?(off_\w+)\s*=\s*(0x[0-9a-fA-F]+|\d+)\s*;")
+
+
+def parse_offsets_m():
+    """{version_threshold: {var: value}} — last-wins per block."""
+    blocks = {}
+    cur = None
+    try:
+        lines = open(OFFSETS_M).read().splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        m = VERSION_RE.search(line)
+        if m:
+            cur = m.group(1)
+            blocks.setdefault(cur, {})
+            continue
+        m = OFF_VAR_RE.match(line)
+        if m and cur:
+            blocks[cur][m.group(1)] = int(m.group(2), 0)
+    return blocks
+
+
+def effective_offsets(version):
+    """offsets.m values that apply for `version`: cumulative over every
+    block whose threshold is <= version (later blocks override earlier)."""
+    blocks = parse_offsets_m()
+    key = tuple(int(x) for x in version.split("."))
+    eff = {}
+    for thr in sorted(blocks, key=lambda v: tuple(int(x) for x in v.split("."))):
+        if tuple(int(x) for x in thr.split(".")) <= key:
+            eff.update(blocks[thr])
+    return eff
+
+
+def cmd_verify(args):
+    """Compare the XPF-resolved struct offsets of a cached build against
+    the values kexploit/offsets.m would set for that version."""
+    st = load_state(args.board)
+    version = args.version or (st.get("last") or {}).get("version")
+    if not version:
+        print("no cached build for %s - run poll first" % args.board)
+        return 1
+    dump_rel = (st.get("last") or {}).get("dump", "")
+    dump = os.path.join(kc_base(), dump_rel)
+    if not os.path.isfile(dump):
+        print("dump missing: %s" % dump)
+        return 1
+    _, items = parse_dump(dump)
+    eff = effective_offsets(version)
+    rows, skipped = [], []
+    for name, xv in sorted(items.items()):
+        if not name.startswith("kernelStruct."):
+            continue
+        var = "off_" + name[len("kernelStruct."):].replace(".", "_")
+        if var not in eff:
+            continue
+        if xv == 0:
+            # XPF prints 0x0 for patchfinder misses (thread.machine_* on
+            # fileset builds) - not a real value, not a mismatch
+            skipped.append(var)
+            continue
+        rows.append((var, eff[var], xv, "OK" if eff[var] == xv else "MISMATCH"))
+    print("offsets.m vs XPF - iOS %s, board %s, dump %s" % (
+        version, args.board, os.path.basename(dump)))
+    if not rows and not skipped:
+        print("no overlap between offsets.m variables and XPF struct items")
+        return 0
+    bad = 0
+    for var, om, xv, sts in rows:
+        print("  %s %-38s offsets.m=0x%x  xpf=0x%x" % (sts, var, om, xv))
+        if sts != "OK":
+            bad += 1
+    for var in skipped:
+        print("  SKIP %-38s (xpf unresolved 0x0 - per-SoC value, not verifiable)" % var)
+    print("VERDICT: %s (%d/%d matched, %d skipped)" % (
+        "ALL MATCH" if bad == 0 else "MISMATCH", len(rows) - bad, len(rows), len(skipped)))
+    return 1 if bad else 0
+
+
+def cmd_index(args):
+    """Render the cumulative multi-board feed index (kernel-deltas.md)."""
+    base = kc_base()
+    rows = []
+    for board in sorted(os.listdir(base)):
+        sf = os.path.join(base, board, "state.json")
+        if not os.path.isfile(sf):
+            continue
+        try:
+            st = json.load(open(sf))
+        except (OSError, ValueError):
+            continue
+        for h in st.get("history", []):
+            rows.append((
+                h.get("date", ""), board, h.get("version"), h.get("buildid"),
+                h.get("xnu", "?"), h.get("identical", "?"), h.get("changed", "?"),
+                h.get("verdict", "?")))
+    rows.sort()
+    lines = [
+        "# kernel-deltas feed", "",
+        "Latest entries across all watched boards. Full reports:",
+        "reports/<board>-<version>-<buildid>.md", "",
+        "| date | board | release | build | xnu | identical | changed | verdict |",
+        "|------|-------|---------|-------|-----|-----------|---------|---------|",
+    ]
+    for r in rows[-25:]:
+        lines.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % r)
+    lines.append("")
+    with open("kernel-deltas.md", "w") as fh:
+        fh.write("\n".join(lines))
+    print("wrote kernel-deltas.md (%d entries)" % len(rows))
+    return 0
+
+
+def cmd_atom(args):
+    """Render an Atom feed (atom.xml) from the report files."""
+    import datetime
+    base = kc_base()
+    feed_url = os.environ.get("KCWATCH_FEED_URL",
+                              "https://github.com/kaffeindecaf/kernel-deltas")
+    entries = []
+    for board in sorted(os.listdir(base)):
+        rdir = os.path.join(base, board, "reports")
+        if not os.path.isdir(rdir):
+            continue
+        for fn in sorted(os.listdir(rdir)):
+            if not fn.endswith(".md") or fn == "kernel-deltas.md":
+                continue
+            p = os.path.join(rdir, fn)
+            mtime = datetime.datetime.fromtimestamp(
+                os.path.getmtime(p)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            body = open(p).read()
+            summary = body.split("VERDICT")[0].strip().replace("\n", " ")
+            entries.append((mtime, fn[:-3], feed_url + "/reports/" + fn, summary))
+    entries.sort(reverse=True)
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    xml = ['<?xml version="1.0" encoding="utf-8"?>',
+           '<feed xmlns="http://www.w3.org/2005/Atom">',
+           "  <title>kernel-deltas</title>",
+           "  <id>%s</id>" % feed_url,
+           "  <updated>%s</updated>" % now,
+           "  <link rel=\"self\" href=\"%s/atom.xml\"/>" % feed_url]
+    for mtime, title, url, summary in entries[:25]:
+        xml += ["  <entry>",
+                "    <title>%s</title>" % title,
+                "    <id>%s</id>" % url,
+                "    <updated>%s</updated>" % mtime,
+                "    <summary>%s</summary>" % summary,
+                "    <link href=\"%s\"/>" % url,
+                "  </entry>"]
+    xml.append("</feed>")
+    with open("atom.xml", "w") as fh:
+        fh.write("\n".join(xml))
+    print("wrote atom.xml (%d entries)" % len(entries))
+    return 0
+
+
 def offsets_verdict(version, diff):
     """Which offsets.m block applies to `version`, and do the struct offsets
     still match the previous build? Struct items are kernelStruct.* /
@@ -230,6 +391,12 @@ def render_report(board_cfg, rel, prev, diff, verdict):
         for n in d["changed"]:
             va, vb = d.get("changed_values", {}).get(n, ["?", "?"])
             lines.append("  %s: 0x%016x -> 0x%016x" % (n, va, vb))
+    for surf in ("kernelConstant.nsysent", "kernelConstant.mach_trap_count"):
+        if surf in d.get("changed_values", {}):
+            va, vb = d["changed_values"][surf]
+            lines.append("")
+            lines.append("SURFACE: %s 0x%x -> 0x%x - syscall table changed, "
+                         "new attack surface" % (surf, va, vb))
     if d["degraded"]:
         lines.append("")
         lines.append("DEGRADED (structural change, investigate):")
@@ -275,6 +442,7 @@ def cmd_poll(args):
         return 0
     kc = fetch_kc(board_cfg, rel, args.board)
     dump = resolve_kc(kc, args.board)
+    diff = verdict = None
     if st.get("last") and st["last"].get("dump"):
         prev_dump = st["last"]["dump"]
         diff = summarize_diff(prev_dump, dump)
@@ -299,6 +467,15 @@ def cmd_poll(args):
               "structural identity unverified (no previous build cached)" % (args.board, top))
     st["last"] = {"version": rel["version"], "buildid": rel["buildid"],
                   "date": rel["date"], "signed": rel["signed"], "dump": dump}
+    # carry the diff summary into history so `index` can render the table
+    if diff is not None:
+        st["last"].update({
+            "xnu": diff.get("xnu_b", "?"),
+            "identical": len(diff.get("identical", [])),
+            "changed": len(diff.get("changed", [])),
+            "degraded": len(diff.get("degraded", [])),
+            "verdict": verdict or "?",
+        })
     st["history"] = [h for h in st.get("history", [])
                      if h.get("buildid") != rel["buildid"]]
     st["history"].append(st["last"])
@@ -347,7 +524,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", nargs="?", default="poll",
-                    choices=["poll", "status", "diff"])
+                    choices=["poll", "status", "diff", "verify", "index", "atom"])
     ap.add_argument("--board", default=DEFAULT_BOARD, choices=sorted(BOARDS))
     ap.add_argument("--version", help="process a specific release version instead of the newest (backfill)")
     ap.add_argument("--dry-run", action="store_true")
@@ -366,6 +543,12 @@ def main():
         return cmd_status(args)
     if args.cmd == "diff":
         return cmd_diff(args)
+    if args.cmd == "verify":
+        return cmd_verify(args)
+    if args.cmd == "index":
+        return cmd_index(args)
+    if args.cmd == "atom":
+        return cmd_atom(args)
     return 0
 
 

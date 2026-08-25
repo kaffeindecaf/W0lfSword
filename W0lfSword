@@ -596,12 +596,18 @@ kcwatch — automated kernel-delta watcher (research/kcwatch.md).
                     vs the previous build, render a report + verdict.
   status            show the last-seen build and cached history.
   diff              diff the two most recent cached builds for the board.
-  Options: --board t8030|t8103|t8110 (default t8030)  --dry-run  --json
+  verify            compare the cached build's XPF struct offsets against
+                    the values kexploit/offsets.m would set for that
+                    version. exit 1 on mismatch (CI-friendly).
+  index             render the cumulative multi-board feed index.
+  atom              render an Atom feed (atom.xml) from the reports.
+  Options: --board t8030|t8103|t8110 (default t8030)  --version <ver>
+           --dry-run  --json   (env: KCWATCH_DIR, KCWATCH_FEED_URL)
   State + cache: .w0lfsword/kcwatch/<board>/ (gitignored)
   Feed reports: .w0lfsword/kcwatch/<board>/reports/kernel-deltas.md
 EOF
             ;;
-        poll|status|diff)
+        poll|status|diff|verify|index|atom)
             shift
             python3 "$script" "$sub" "$@"
             ;;
@@ -1091,6 +1097,18 @@ print(json.dumps({"version_blocks": blocks, "soc_coverage": socs, "total_blocks"
         printf "  %s  %-12s  ${C_EYE}%s${NC} blocks\n" "$sym" "$cpu" "$c"
     done
     echo ""
+    # kcwatch integration: show the live verification status for the
+    # most recently cached build (if kcwatch state exists locally)
+    local kc_state="$DATA_DIR/kcwatch"
+    if [ -f "$kc_state/t8030/state.json" ] || [ -f "$kc_state/t8110/state.json" ]; then
+        section "kcwatch live verification"
+        local kcb=""; [ -f "$kc_state/t8030/state.json" ] && kcb=t8030 || kcb=t8110
+        local kver; kver=$(python3 -c "import json;print(json.load(open('$kc_state/$kcb/state.json'))['last']['version'])" 2>/dev/null || echo "?")
+        printf "  ${C_FROST}%-14s${NC} %s\n" "board" "$kcb"
+        printf "  ${C_FROST}%-14s${NC} %s\n" "last build" "iOS $kver"
+        python3 "$PROJECT_DIR/scripts/kcwatch.py" verify --board "$kcb" 2>/dev/null | tail -4 || true
+        echo ""
+    fi
 }
 
 cmd_targets() {
@@ -3257,7 +3275,13 @@ kcwatch — automated kernel-delta watcher (research/kcwatch.md).
                     vs the previous build, render a report + verdict.
   status            show the last-seen build and cached history.
   diff              diff the two most recent cached builds for the board.
-  Options: --board t8030|t8103|t8110 (default t8030)  --dry-run  --json
+  verify            compare the cached build's XPF struct offsets against
+                    the values kexploit/offsets.m would set for that
+                    version. exit 1 on mismatch (CI-friendly).
+  index             render the cumulative multi-board feed index.
+  atom              render an Atom feed (atom.xml) from the reports.
+  Options: --board t8030|t8103|t8110 (default t8030)  --version <ver>
+           --dry-run  --json   (env: KCWATCH_DIR, KCWATCH_FEED_URL)
   State + cache: .w0lfsword/kcwatch/<board>/ (gitignored)
   Feed reports: .w0lfsword/kcwatch/<board>/reports/kernel-deltas.md
 EOF
