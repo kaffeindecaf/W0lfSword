@@ -18,7 +18,7 @@ EXPLOIT_METHOD="auto"
 
 set -uo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$PROJECT_DIR"
+cd "$PROJECT_DIR" || { echo "cannot cd to $PROJECT_DIR" >&2; exit 1; }
 
 # ── Sudo check ───────────────────────────────────────────────
 SUDO_NEEDED_COMMANDS="adderall setup usbliter8"
@@ -180,14 +180,12 @@ C_SNOW='\033[38;5;255m'
 C_GREY='\033[38;5;245m'
 C_DIM='\033[38;5;240m'
 C_STEEL='\033[38;5;109m'
-C_MOON='\033[38;5;188m'
 C_EYE='\033[1;38;5;39m'
 C_RED='\033[0;31m'
 C_GRN='\033[0;32m'
 C_AMB='\033[1;33m'
 NC='\033[0m'
 B='\033[1m'
-D='\033[2m'
 
 # ═══════════════════════════════════════════════════════════════
 #  GLOBAL FLAGS
@@ -214,19 +212,6 @@ spinner() {
         done
     done
     printf "\r\033[K"
-}
-
-# ── Progress bar ──────────────────────────────────────────────
-progress_bar() {
-    local current="${1:-0}" total="${2:-100}" width="${3:-20}"
-    local pct=0; [ "$total" -gt 0 ] && pct=$((current * 100 / total))
-    local filled=$((pct * width / 100))
-    local empty=$((width - filled))
-    printf "${C_GRN}"
-    for ((i=0; i<filled; i++)); do printf "▓"; done
-    printf "${C_DIM}"
-    for ((i=0; i<empty; i++)); do printf "░"; done
-    printf "${NC} %d%%" "$pct"
 }
 
 # ── Platform detection (Linux / macOS) ────────────────────────
@@ -266,11 +251,12 @@ version_sort_first() {
 select_exploit() {
     case "$1" in
         iPhone8,*|iPhone9,*|iPhone10,*) echo "puaf";;  # A9-A11 — must precede iPhone1[1-6]
-        iPhone1[1-6],*)  echo "pe_v1";;   # A12-A16 (incl. A17 Pro)
-        iPhone17,*)      echo "pe_v1";;   # A17 (per project device table)
-        iPhone18,*)      echo "pe_v2";;   # A18
-        iPad1[1-9],*)    echo "pe_v1";;   # A12X/Z + M1-M4 iPads
-        *)               echo "unknown";;
+        iPhone1[1-5],*|iPhone16,*)      echo "pe_v1";; # A12-A16 + A17 (pe_v1 path)
+        iPhone17,*)                     echo "pe_v2";; # A18 (pe_v2 path)
+        iPhone18,*)                     echo "mte";;   # A19 — MTE kills this exploit class
+        iPad8,*|iPad11,*|iPad1[3-6],*)  echo "pe_v1";; # A12X/Z + M1-M4 iPads
+        iPad17,*)                       echo "mte";;   # M5 — MTE
+        *)                              echo "unknown";;
     esac
 }
 
@@ -318,6 +304,67 @@ select_best_chain() {
         return
     fi
     echo "|no chain||DarkSword needs A12+ ≤26.0.1; kfd port (K5.3) would cover 16.x + A10/A11"
+}
+
+# ── Exploit compatibility matrix (A6.x / K5.9) ─────────────────
+# THE internal list: what phones + iOS versions support what exploit or
+# chain. Rows: min|max|soc|id|name|status|note. "*" = any.
+#   min/max: iOS range the row applies to
+#   soc:     model pattern (A12+, A18, A19, A9-A11, A10+, A12-A13, M5, *)
+#   status:  implemented | pending | research | blocked
+exploit_matrix() {
+    cat <<'EOF'
+17.0|26.0.1|A12+|darksword|DarkSword kernel R/W (pe_v1)|implemented|
+17.0|26.0.1|A18|darksword-v2|DarkSword kernel R/W (pe_v2)|implemented|
+26.0|26.6.1|*|bad_query|bad_query read-escape|implemented|
+18.0|27.0b4|*|mcm|MCM container access (mha)|implemented|
+26.1|*|A12+|kernel-gate|kernel R/W closed|blocked|DarkSword patched in 26.1 — userspace only
+16.0|16.9|A10+|kfd|kfd PUAF fallback|pending|port not done (ROADMAP K5.3)
+15.6|27.0b|A9-A11|checkm8|checkm8 bootchain|research|usbliter8-fun2 wiring
+*|*|A12-A13|usbliter8|usbliter8 tethered|implemented|needs RP2350 board
+*|*|A19|mte|kernel R/W|blocked|Memory Tagging Extension kills this exploit class
+*|*|M5|mte-m|kernel R/W|blocked|Memory Tagging Extension kills this exploit class
+EOF
+}
+
+# version comparisons on top of version_sort_first (returns the smaller)
+ver_ge() { [ "$(version_sort_first "$1" "$2")" = "$2" ]; }  # $1 >= $2
+ver_le() { [ "$(version_sort_first "$1" "$2")" = "$1" ]; }  # $1 <= $2
+
+soc_match() {
+    local model="$1" pat="$2"
+    case "$pat" in
+        A12+)     case "$model" in iPhone1[1-8],*|iPad8,*|iPad11,*|iPad1[3-6],*) return 0;; esac;;
+        A18)      case "$model" in iPhone17,*) return 0;; esac;;
+        A19)      case "$model" in iPhone18,*) return 0;; esac;;
+        M5)       case "$model" in iPad17,*) return 0;; esac;;
+        A9-A11)   case "$model" in iPhone8,*|iPhone9,*|iPhone10,*) return 0;; esac;;
+        A10+)     case "$model" in iPhone[89],*|iPhone10,*|iPhone1[1-8],*|iPad8,*|iPad11,*|iPad1[3-6],*) return 0;; esac;;
+        A12-A13)  case "$model" in iPhone1[1-2],*) return 0;; esac;;
+        *)        [ "$pat" = "*" ] && return 0;;
+    esac
+    return 1
+}
+
+# Print the per-device compatibility picture: green = supported here,
+# amber = pending/research, red = blocked (the "don't use this exploit
+# here" warnings). Used by adderall right after device detection.
+exploit_compat_check() {
+    local ios="$1" model="$2"
+    [ -n "$ios" ] || return 0
+    while IFS='|' read -r lo hi soc id name status note; do
+        [ -n "$id" ] || continue
+        [ "$lo" = "*" ] || ver_ge "$ios" "$lo" || continue
+        [ "$hi" = "*" ] || ver_le "$ios" "$hi" || continue
+        soc_match "$model" "$soc" || continue
+        case "$status" in
+            implemented) echo -e "  ${C_GRN}✓${NC} ${name}"; [ -n "$note" ] && echo -e "    ${C_DIM}note: ${note}${NC}";;
+            pending)     echo -e "  ${C_AMB}◌${NC} ${name} — ${note:-not ported yet}";;
+            research)    echo -e "  ${C_AMB}◌${NC} ${name} — ${note:-research only}";;
+            blocked)     echo -e "  ${C_RED}✗${NC} ${name} — ${note:-blocked on this device}";;
+        esac
+    done < <(exploit_matrix)
+    return 0
 }
 
 soc_family() {
@@ -674,7 +721,6 @@ EOF
 # ── Drawing helpers ───────────────────────────────────────────
 
 line()  { printf "${C_DIM}%s${NC}\n" "$(repeat_char '─' "$1")"; }
-hline() { line 58; }
 
 section() {
     echo ""
@@ -895,7 +941,7 @@ EOF
     local deb; deb=$(find_deb)
     [ -z "$deb" ] && { err "No .deb — build first: ./W0lfSword build"; hint "Deploy needs a compiled package. 'build' compiles it on this computer."; return 1; }
 
-    local rp="/tmp/$(basename "$deb")"
+    local rp; rp="/tmp/$(basename "$deb")"
     vlog "Uploading $deb → root@$ip:$rp"
     retry 3 1 scp_safe "$deb" "root@$ip:$rp" || { err "SCP failed after 3 retries"; hint "Check the phone is on the same WiFi network and OpenSSH is running."; return 1; }
     local out; out=$(ssh_safe "root@$ip" "dpkg -i '$rp' 2>&1; rm -f '$rp'")
@@ -1028,7 +1074,9 @@ print(b,p)
         local b; b=$(echo "$r" | awk '{print $1}')
         local p; p=$(echo "$r" | awk '{print $2}')
         if [ "$b" = "0" ] && [ "$p" = "0" ]; then
-            $JSON_MODE || { $VERBOSE && ok "$f (braces=$b parens=$p)" || ok "$f"; }
+            if ! $JSON_MODE; then
+                if $VERBOSE; then ok "$f (braces=$b parens=$p)"; else ok "$f"; fi
+            fi
         else
             $JSON_MODE || echo -e "  ${C_RED}✗${NC} $f ${C_RED}(braces=$b parens=$p)${NC}"
             ((issues++)) || true
@@ -1621,6 +1669,119 @@ cmd_poclab() {
 }
 
 # ═══════════════════════════════════════════════════════════════
+#  EXPERIMENTAL — developer section (red theme, verbose)
+# ═══════════════════════════════════════════════════════════════
+
+# experimental exploit catalog: found-but-unimplemented, research-grade.
+# id|name|status|why (status: poc-only | design | needs-device | negative)
+experimental_rows() {
+    cat <<'EOF'
+dirtyslide|DirtySlide kernel OOB R/W (CVE-2026-43724)|poc-only|macOS PoC; iOS needs sandbox bypass + SPTM-free silicon
+cve-46285|xnu timestamp int overflow LPE (CVE-2025-46285)|needs-device|live on 26.1 + 18.4.1; fix site narrowed, not located
+cve-64747|AVEVideoEncoder kernel code exec (CVE-2026-64747)|needs-device|26.1-26.5.x, no public PoC; 26.6 diff recovers the fix
+cve-20687|AppleJPEGDriver UAF (CVE-2026-20687)|poc-only|public trigger, A19 only; 26.4 fix diff available
+bl_sbx|itunesstored/bookassetd write-escape (BB-041)|poc-only|public PoC, alive through 26.2b1; needs AFC + 3 reboots
+gestaltforge|Chain F: no-kernel write-escape to Gestalt spoof|design|bad_query create + MCM; ~40% implemented
+fontstrike|Chain G: font RCE to kernel to TCC+SSV|design|all stages exist except the 43400 weaponization; ~25%
+apac-hunt|APAC spatial-audio OOB sibling hunt|design|CVE-2025-31200 pattern; patched at 18.4.1, hunt siblings
+alac-probe|ALAC decoder overflow probe (BB-038/039)|poc-only|ASAN verified (poclab test alac); production binary unconfirmed
+fontparser-diff|FontParser fix recovery (CVE-2025-43400)|needs-cache|18.4.1 vs 18.7.1 libFontParser diff; no device attached
+sandbox-diff|Sandbox escape fix recovery (CVE-2025-43329)|needs-cache|18.7.10 vs 26.0 sandbox diff; live on all 18.x
+libxml2-diff|libxml2 fork-diff (Apple vs upstream)|negative|tested: no exploitable divergence (poclab test libxml2-diff)
+EOF
+}
+
+cmd_experimental() {
+    local sub="${1:-list}"
+    echo ""
+    echo -e "  ${C_RED}${B}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "  ${C_RED}${B}║                   W0lfSword EXPERIMENTAL                  ║${NC}"
+    echo -e "  ${C_RED}${B}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo -e "  ${C_RED}developer section — unfinished exploits, novel chains, verbose output${NC}"
+    echo -e "  ${C_RED}nothing here is guaranteed. device-crashing tests stay under 'poc'.${NC}"
+    echo ""
+    case "$sub" in
+        list|ls)
+            printf "  ${C_RED}%-16s${NC} %-52s %-14s %s\n" "ID" "Experimental exploit" "Status" "Why"
+            printf "  ${C_RED}%s${NC}\n" "$(repeat_char '─' 112)"
+            while IFS='|' read -r id name status why; do
+                [ -z "$id" ] && continue
+                case "$status" in
+                    poc-only)     sc="$C_RED"; st="poc-only";;
+                    design)       sc="$C_AMB"; st="design";;
+                    needs-device) sc="$C_RED"; st="needs-device";;
+                    needs-cache)  sc="$C_AMB"; st="needs-cache";;
+                    negative)     sc="$C_EYE"; st="tested-neg";;
+                    *) sc="$C_DIM"; st="$status";;
+                esac
+                printf "  ${C_RED}%-16s${NC} %-52s ${sc}%-14s${NC} %s\n" "$id" "$name" "$st" "$why"
+            done < <(experimental_rows)
+            echo ""
+            echo -e "  ${C_RED}subcommands: list · chains (novel chain stages, verbose) · device (verbose device dump)${NC}"
+            echo -e "  ${C_RED}run a host-side test: ./W0lfSword poclab test alac | libxml2-diff${NC}"
+            echo -e "  ${C_DIM}docs: research/attack_chains.md · research/poclab.md · research/kernel26_cves.md${NC}"
+            ;;
+        chains)
+            echo -e "  ${C_RED}── NOVEL CHAINS (verbose) ───────────────────────────────${NC}"
+            cat <<'EOF'
+CHAIN F — GestaltForge (no-kernel write-escape to Gestalt spoof)
+  Stage 1: bad_query containermanagerd traversal, create=true variant
+           (kexploit/bad_query_escape.m) — write, not just read
+  Stage 2: MCM container lease (mha identity, kexploit/mcm_bridge.m)
+  Stage 3: overwrite com.apple.MobileGestalt.plist via the escaped
+           path (class-13 SystemGroup handle) — spoof device props
+  Stage 4: reboot persists the spoof (plist is read at boot)
+  Versions: 26.0-26.6.1 for stage 1, 18-27b for stage 2
+  Status: stages 1+2 implemented (~40%); the create=true write path
+          is ported but not verified on hardware. Cross-ref: bl_sbx
+          reaches the same Gestalt cache via daemons instead.
+
+CHAIN G — FontStrike (font RCE to kernel to TCC+SSV, the SE2 chain)
+  Stage 1: CVE-2025-43400 FontParser OOB write — LIVE on 18.4.1,
+           no public PoC; recover the fix by diffing libFontParser
+           18.4.1 vs 18.7.1 (needs the device's dyld cache)
+  Stage 2: RCE in the parsing process (font via Mail/Quick Look/Filza)
+  Stage 3: DarkSword kernel R/W (live on 18.x, CVE-2025-43520)
+  Stage 4: TCC grant (chains b) + SSV implant (chains e)
+  Status: every stage except the 43400 weaponization exists; ~25%.
+          Variant: ALAC audio (BB-038) if the production CoreAudio
+          plugin is disassembly-confirmed.
+EOF
+            ;;
+        device)
+            echo -e "  ${C_RED}── DEVICE DUMP (verbose) ────────────────────────────────${NC}"
+            if command -v idevice_id &>/dev/null; then
+                local uuid; uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
+                if [ -n "$uuid" ]; then
+                    echo -e "  ${C_RED}udid:      ${NC}$uuid"
+                    echo -e "  ${C_RED}model:     ${NC}$(ideviceinfo -k ProductType 2>/dev/null || echo '?')"
+                    echo -e "  ${C_RED}ios:       ${NC}$(ideviceinfo -k ProductVersion 2>/dev/null || echo '?')"
+                    echo -e "  ${C_RED}build:     ${NC}$(ideviceinfo -k BuildVersion 2>/dev/null || echo '?')"
+                    echo -e "  ${C_RED}name:      ${NC}$(ideviceinfo -k DeviceName 2>/dev/null || echo '?')"
+                    echo -e "  ${C_RED}arch:      ${NC}$(ideviceinfo -k CPUArchitecture 2>/dev/null || echo '?')"
+                    local m v; m=$(ideviceinfo -k ProductType 2>/dev/null || echo ""); v=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
+                    echo -e "  ${C_RED}exploit:   ${NC}$(select_exploit "$m")"
+                    echo -e "  ${C_RED}chain:     ${NC}$(select_best_chain "$v" "$m" | cut -d'|' -f1-2 | tr '|' ' ')"
+                    echo ""
+                    echo -e "  ${C_RED}compatibility:${NC}"
+                    exploit_compat_check "$v" "$m"
+                else
+                    echo -e "  ${C_RED}no device on USB${NC}"
+                fi
+            else
+                echo -e "  ${C_RED}idevice tools missing — run ./W0lfSword setup${NC}"
+            fi
+            echo ""
+            echo -e "  ${C_DIM}saved devices: .w0lfsword/devices.json${NC}"
+            ;;
+        *)
+            echo -e "  ${C_RED}usage: experimental [list|chains|device]${NC}"
+            ;;
+    esac
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
 #  POC — panic-PoC lab (research only — crashes the device)
 # ═══════════════════════════════════════════════════════════════
 
@@ -1964,7 +2125,7 @@ PYEOF
     if command -v idevice_id &>/dev/null; then
         local uuid; uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
         if [ -n "$uuid" ]; then
-            DEV_MODEL=$(ideviceinfo -k HardwareModel 2>/dev/null || echo "")
+            DEV_MODEL=$(ideviceinfo -k ProductType 2>/dev/null || ideviceinfo -k HardwareModel 2>/dev/null || echo "")
             IOS_VER=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
             echo -e "  ${C_GRN}✓${NC} USB device: ${C_EYE}$DEV_MODEL${NC} — iOS $IOS_VER"
         fi
@@ -1996,6 +2157,11 @@ PYEOF
     if [ "$METHOD" = "puaf" ]; then
         err "A9-A11 device — PUAF fallback is not ported yet"
         hint "A10-A11 will work once the kfd PhysPuppet/Smith port lands (ROADMAP K1.6). Nothing was installed."
+        return 1
+    fi
+    if [ "$METHOD" = "mte" ]; then
+        err "A19/M5 device — Memory Tagging Extension kills this exploit class"
+        hint "No kernel R/W path exists on MTE hardware. Nothing was installed."
         return 1
     fi
 
@@ -2085,7 +2251,7 @@ PYEOF
     echo ""
     section "Deploy (computer → phone)"
     echo ""
-    local rp="/tmp/$(basename "$DEB")"
+    local rp; rp="/tmp/$(basename "$DEB")"
     retry 3 1 scp_safe "$DEB" "root@$IP:$rp" || { err "SCP failed after 3 retries"; return 1; }
     ssh_safe "root@$IP" "dpkg -i '$rp' 2>&1; rm -f '$rp'" >/dev/null 2>&1
     ok "Installed on $IP"
@@ -2309,7 +2475,7 @@ EOF
     ok "Built $(basename "$deb")"
 
     stage "2/4" "Deploying to $ip... (phone)"
-    local rp="/tmp/$(basename "$deb")"
+    local rp; rp="/tmp/$(basename "$deb")"
     scp_safe "$deb" "root@$ip:$rp" >/dev/null 2>&1
     ssh_safe "root@$ip" "dpkg -i '$rp' >/dev/null 2>&1; rm -f '$rp'" 2>/dev/null
     ssh_safe "root@$ip" "killall -9 Filza 2>/dev/null" 2>/dev/null || true
@@ -2431,6 +2597,7 @@ draw_menu() {
     menu_opt 8 "Targets & Exploits" "supported apps · technique matrix"
     menu_opt n "Chains & CVEs"      "attack chain catalog · CVE tracker (C5)"
     menu_opt o "PoC Lab"            "test found-but-unimplemented bugs (C6)"
+    menu_opt ex "Experimental"      "unfinished exploits · novel chains (dev)"
     menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
     menu_opt u "USB Test"         "cable · pairing · data round-trip (harmless)"
     menu_opt p "Panic Analyzer"   "classify .ips crash logs → known CVEs (BB-032..037)"
@@ -2543,6 +2710,7 @@ run_menu() {
             chains|ch)    cmd_chains || true;;
             cve)          cmd_cve || true;;
             poclab|o)     cmd_poclab || true;;
+            experimental|ex) cmd_experimental || true;;
             # usbliter8-arctic
             9|ul8|usbliter8)
                 if [ "$EUID" -ne 0 ]; then
@@ -2574,7 +2742,7 @@ run_menu() {
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o, or q${NC}";;
+                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/ex, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -2741,7 +2909,12 @@ EOF
     command -v dpkg-deb &>/dev/null || to_install="$to_install dpkg"
     command -v git &>/dev/null      || to_install="$to_install git"
     command -v python3 &>/dev/null  || to_install="$to_install python3"
+    command -v make &>/dev/null     || { [ "$pkg_manager" = "apt" ] && to_install="$to_install make"; [ "$pkg_manager" = "pacman" ] && to_install="$to_install make"; }
+    command -v curl &>/dev/null     || to_install="$to_install curl"
+    command -v unzip &>/dev/null    || to_install="$to_install unzip"
+    command -v zip &>/dev/null      || to_install="$to_install zip"
     command -v ssh &>/dev/null      || { [ "$pkg_manager" = "apt" ] && to_install="$to_install openssh-client"; }
+    command -v scp &>/dev/null      || { [ "$pkg_manager" = "apt" ] && to_install="$to_install openssh-client"; }
     command -v idevice_id &>/dev/null || {
         [ "$pkg_manager" = "apt" ]    && to_install="$to_install libimobiledevice-utils"
         [ "$pkg_manager" = "brew" ]   && to_install="$to_install libimobiledevice"
@@ -2801,7 +2974,7 @@ EOF
                 sleep 1
             fi
             echo -e "  ${C_GRN}✓${NC} USB device detected: ${C_EYE}$usb_uuid${NC}"
-            DEV_MODEL=$(ideviceinfo -k HardwareModel 2>/dev/null || echo "unknown")
+            DEV_MODEL=$(ideviceinfo -k ProductType 2>/dev/null || ideviceinfo -k HardwareModel 2>/dev/null || echo "unknown")
             IOS_VER=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
             DEV_NAME=$(ideviceinfo -k DeviceName 2>/dev/null || echo "iPhone")
             vlog "ideviceinfo: model=$DEV_MODEL ios=$IOS_VER name=$DEV_NAME"
@@ -2890,6 +3063,29 @@ EOF
     echo -e "  ${C_EYE}${B}$DEV_NAME${NC} — ${C_GRN}iOS $IOS_VER${NC} • ${C_EYE}$DEV_MODEL${NC}"
     log_script "device: $DEV_NAME ($DEV_MODEL) iOS $IOS_VER"
     ios_recommendations "$IOS_VER"
+    echo ""
+
+    # A6.x — exploit compatibility gate: refuse before building anything
+    local METHOD_CHK; METHOD_CHK=$(select_exploit "$DEV_MODEL")
+    log_script "compat: model=$DEV_MODEL ios=$IOS_VER method=$METHOD_CHK"
+    if [ "$METHOD_CHK" = "mte" ]; then
+        echo -e "  ${C_RED}✗ MTE device (A19/M5): Memory Tagging Extension kills this exploit class${NC}"
+        echo -e "  ${C_DIM}  No kernel R/W path exists on this hardware. Nothing was deployed.${NC}"
+        return 1
+    fi
+    if [ "$METHOD_CHK" = "unknown" ]; then
+        echo -e "  ${C_RED}✗ Unsupported device: $DEV_MODEL — no exploit path for this SoC${NC}"
+        echo -e "  ${C_DIM}  Nothing was deployed.${NC}"
+        return 1
+    fi
+    echo -e "  ${C_DIM}Exploit compatibility for this device:${NC}"
+    exploit_compat_check "$IOS_VER" "$DEV_MODEL"
+    if [ "$METHOD_CHK" = "puaf" ]; then
+        echo -e "  ${C_RED}✗ A9-A11 device: DarkSword does not run on this SoC and the kfd${NC}"
+        echo -e "  ${C_RED}  PUAF port (ROADMAP K5.3) is not done yet. Nothing was deployed.${NC}"
+        return 1
+    fi
+    echo ""
 
     # Friendly prerequisite check: is Filza actually installed?
     local FILZA_CHECK=""
@@ -3131,7 +3327,7 @@ EOF
         info "Safe mode: setting flag before deploy"
         ssh_safe "root@$IP" "touch /var/mobile/Documents/.filza_safe_mode" 2>/dev/null
     fi
-    local rp="/tmp/$(basename "$deb")"
+    local rp; rp="/tmp/$(basename "$deb")"
     scp_safe "$deb" "root@$IP:$rp" >/dev/null 2>&1 || { err "SCP failed"; hint "Is the phone on the same WiFi? Is OpenSSH installed and running?"; return 1; }
     # Preserve dpkg's real exit code: a bare `; rm -f` chain would let rm's
     # status mask a failed install (silent no-op deploys).
@@ -3735,6 +3931,18 @@ poclab — proof-of-concept lab (C6).
   Docs: research/poclab.md
 EOF
             ;;
+        experimental)
+            cat <<'EOF'
+experimental — the red dev section.
+  Unfinished exploits and novel chains in one place, with verbose
+  output. 'experimental list' catalogs the found-but-unimplemented
+  work (DirtySlide, CVE-2025-46285, AVEVideoEncoder, bl_sbx, the
+  GestaltForge/FontStrike chains, the fix-recovery diffs). 
+  'experimental chains' prints the novel chain stages. 'experimental
+  device' dumps the connected device with the compatibility matrix.
+  Nothing here is guaranteed; device-crashing tests stay under 'poc'.
+EOF
+            ;;
         poc)
             cat <<'EOF'
 poc — the panic-PoC lab (RESEARCH ONLY — crashes the device).
@@ -3884,8 +4092,8 @@ explain — plain-English explanations of commands.
 Usage: ./W0lfSword explain <command>   (e.g. explain adderall)
 Available: adderall, build, deploy, quick, safe, toggle, setup,
            doctor, status, monitor, log, reboot, offsets, tweaks,
-           exploits, chains, cve, poclab, poc, fuzz, usbliter8, usbtest,
-           panic, kernelcache, help
+           exploits, chains, cve, poclab, experimental, poc, fuzz, usbliter8,
+           usbtest, panic, kernelcache, help
 EOF
             ;;
     esac
@@ -3944,6 +4152,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "chains"       "Attack chain catalog + stages (C5.3)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "cve [filter]" "CVE tracker: kernel|userspace|sandbox|tcc|ssv|live (C5.1/C5.2)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "poclab (o)"   "PoC lab: test found-but-unimplemented bugs — list | test <alac|libxml2-diff> (C6)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "experimental" "Dev section: unfinished exploits, novel chains, device dump (red theme)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "toggle on|off" "Enable/disable tweak"
     printf "  ${C_EYE}%-14s${NC} %s\n" "history"      "Exploit stats + chart"
     echo ""
@@ -4020,7 +4229,7 @@ main() {
     fi
 
     case "$cmd" in
-        "") run_menu;;
+        "") run_menu "$@";;
         build)     cmd_build "${args[@]}";;
         extract)   cmd_extract "${args[@]}";;
         deploy)    cmd_deploy "${args[@]}";;
@@ -4034,6 +4243,7 @@ main() {
         chains)    cmd_chains "${args[@]}";;
         cve)       cmd_cve "${args[@]}";;
         poclab)    cmd_poclab "${args[@]}";;
+        experimental|exp) cmd_experimental "${args[@]}";;
         poc)       cmd_poc "${args[@]}";;
         fuzz)      cmd_fuzz "${args[@]}";;
         kcwatch)   cmd_kcwatch "${args[@]}";;

@@ -104,6 +104,20 @@
 - [x] `C6.5` ⚪ — `poclab` CLI tab (list / test / status)
 - [x] `C6.6` ⚪ — research/poclab docs (human style, per-bug explanations)
 
+## 0.7 — Full audit + adderall hardening + experimental (2026-08-29)
+
+> Full detail in the AUDIT section at the bottom. ShellCheck 0.11 pass
+> over W0lfSword: 0 warnings/errors left. Fixed this session: the
+> criticals. Everything else is listed in the AUDIT section for later.
+
+- [x] `AU.1` — ShellCheck pass (0 warnings/errors), bash -n, py_compile all
+- [x] `AU.2` — dead code removed: progress_bar, hline, D, C_MOON
+- [x] `AU.3` — critical fixes: cd||exit, SC2155 x4, SC2015 rewrite, run_menu "$@"
+- [x] `AU.4` — SoC map corrected: iPhone17,x=A18→pe_v2, iPhone18,x=A19→mte, iPad17,x=M5→mte; MTE/puaf gates in adderall + tweak install
+- [x] `AU.5` — adderall: compat matrix + exploit_compat_check warnings, ProductType model detection, env checks (make/curl/unzip/zip/scp)
+- [x] `AU.6` — experimental section (red theme, menu ex)
+- [x] `AU.7` — non-critical findings → AUDIT section (for later)
+
 ---
 
 ## LEGEND
@@ -1390,4 +1404,33 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 ---
 
-*Last updated: 2026-08-25 — SECTION L added (Exploit Hub App checklist); readiness command shipped (SSH/root/jailbreak/Filza/tweak probes, live R/W tests, offset coverage, kcwatch verdict)*
+# SECTION A: AUDIT (full-audit log, added 2026-08-29)
+
+> ShellCheck 0.11.0 + bash -n + py_compile + manual review of the W0lfSword
+> script and scripts/. Fixed this session = the criticals below. The rest
+> is queued here for later; each item says exactly what and where.
+
+## Fixed this session (for the record)
+
+- `cd "$PROJECT_DIR"` had no failure handler (wrong dir = wrong deploys) → `|| exit 1` added (line ~21)
+- SC2155 local+command-substitution masking x4 (deploy paths 882/2072/2296/3118) → declare/assign separated
+- SC2015 fragile `&& ||` chain in cmd_audit's brace check → rewritten if/else (~1015)
+- `run_menu` referenced "$@" but was called bare → `run_menu "$@"` (~4009)
+- dead code removed: `progress_bar`, `hline` (called a nonexistent `line 58`), unused color vars `D`, `C_MOON`
+- SoC map wrong: `iPhone17,x` was labeled A17 (it is A18 → pe_v2), `iPhone18,x` was pe_v2 (it is A19/MTE → now `mte` and refused), `iPad1[1-9],x` claimed all iPads (iPad17,x = M5 → `mte`). MTE/puaf refusal gates added to cmd_adderall and cmd_tweak_install.
+- Device model detection used `HardwareModel` (returns board IDs like D79AP that never match `iPhoneN,x` patterns) → `ProductType` first, HardwareModel fallback, in adderall + tweak install
+- adderall Phase 1 env checks extended: make, curl, unzip, zip, scp
+
+## Queued for later (non-critical)
+
+- `AUD.1` — `apt install -y $to_install` unquoted (word-splitting is intentional for multi-package lists, but an array would be stricter). Lines ~2797/2802 area + cmd_setup equivalent. Low risk (package names never contain spaces).
+- `AUD.2` — `ls -t | head` filename parsing in cmd_panic (~493), cmd_extract (~609), find_deb (~789), tweak deploy (~2072). Use find -print0 style if weird filenames ever matter. Low.
+- `AUD.3` — SC2059 "variable in printf format" hits are BY DESIGN (color escape vars must live in the format string to be interpreted — the repo-wide convention). Do not "fix" without understanding that.
+- `AUD.4` — CVE catalog lives in two places: cmd_cve tables + research/attack_chains.md + kernel26_cves.md. One source of truth (a TSV data file) would stop drift. Medium.
+- `AUD.5` — shellcheck is not wired into `./W0lfSword audit`; the audit runs brace/paren checks only. Add `shellcheck -s bash W0lfSword` as an optional step when installed. Medium.
+- `AUD.6` — `exploit_matrix` rows and `select_best_chain` partially duplicate each other; the selector could be generated from the matrix. Low (both verified correct today).
+- `AUD.7` — cmd_experimental's device dump has no WiFi path (USB only). Add saved-device SSH fallback like the other probes. Low.
+- `AUD.8` — `ios_recommendations` and `exploit_compat_check` overlap; consider merging the gray hint lines into the compat table output. Cosmetic.
+- `AUD.9` — hline/progress_bar removal verified dead by call-graph; re-run the dead-function scan after every big feature round (extract `^name()` defs, count refs).
+
+*Last updated: 2026-08-29 — full audit done (0 shellcheck warnings); adderall hardened (compat matrix, MTE/puaf gates, env checks); experimental section added; criticals fixed, rest queued in AUD.*

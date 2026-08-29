@@ -24,10 +24,11 @@ sudo ./W0lfSword adderall      # everything else
 ```
 
 `adderall` does the whole run: finds the phone over USB or WiFi, installs
-any missing build tools, generates its own SSH key, builds the tweak,
-deploys it, restarts Filza, and reports whether the exploit won. The only
-times it needs you are the TRUST prompt on the phone and the Filza version
-question.
+any missing build tools, checks the device model and iOS version against
+the exploit compatibility matrix (refusing MTE and unsupported SoCs before
+anything is built), generates its own SSH key, builds the tweak, deploys
+it, restarts Filza, and reports whether the exploit won. The only times it
+needs you are the TRUST prompt on the phone and the Filza version question.
 
 Useful variants:
 
@@ -193,6 +194,7 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `cve [filter]` | CVE tracker: kernel / userspace / sandbox / tcc / ssv / live (C5.1/C5.2) | `./W0lfSword cve live` |
 | `poclab list` | PoC lab: found-but-unimplemented bugs with status (tested / blocked / needs-device) | `./W0lfSword poclab list` |
 | `poclab test <id>` | run a host-side PoC: `alac` (ASAN harnesses, BB-038/039), `libxml2-diff` (fork comparison) | `./W0lfSword poclab test alac` |
+| `experimental` | dev section (red theme): unfinished exploits, novel chains, verbose device dump | `./W0lfSword experimental list` |
 | `poc list` | panic-PoC catalog (research only, crashes the phone) | `./W0lfSword poc list` |
 | `poc sep-panic [ip]` | build + deploy + fire the SEP panic PoC | `./W0lfSword poc sep-panic` |
 | `poc exr [ip]` | deploy the CVE-2026-28990 EXR ImageIO trigger | `./W0lfSword poc exr` |
