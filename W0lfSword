@@ -1715,15 +1715,16 @@ EOF
 
 cmd_experimental() {
     local sub="${1:-list}"
+    show_header
     echo ""
-    banner "$C_RED" "W0lfSword EXPERIMENTAL" 44
+    section "Experimental  -  dev section"
     echo -e "  ${C_RED}developer section  -  unfinished exploits, novel chains, verbose output${NC}"
-    echo -e "  ${C_RED}nothing here is guaranteed. device-crashing tests stay under 'poc'.${NC}"
+    echo -e "  ${C_DIM}nothing here is guaranteed. device-crashing tests stay under 'poc'.${NC}"
     echo ""
     case "$sub" in
         list|ls)
-            printf "  ${C_RED}%-16s${NC} %-52s %-14s %s\n" "ID" "Experimental exploit" "Status" "Why"
-            printf "  ${C_RED}%s${NC}\n" "$(repeat_char '─' 112)"
+            printf "  ${C_FROST}%-16s${NC} %-52s %-14s %s\n" "ID" "Experimental exploit" "Status" "Why"
+            printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 112)"
             while IFS='|' read -r id name status why; do
                 [ -z "$id" ] && continue
                 case "$status" in
@@ -1734,15 +1735,15 @@ cmd_experimental() {
                     negative)     sc="$C_EYE"; st="tested-neg";;
                     *) sc="$C_DIM"; st="$status";;
                 esac
-                printf "  ${C_RED}%-16s${NC} %-52s ${sc}%-14s${NC} %s\n" "$id" "$name" "$st" "$why"
+                printf "  ${C_FROST}%-16s${NC} %-52s ${sc}%-14s${NC} %s\n" "$id" "$name" "$st" "$why"
             done < <(experimental_rows)
             echo ""
-            echo -e "  ${C_RED}subcommands: list · chains (novel chain stages, verbose) · device (verbose device dump)${NC}"
-            echo -e "  ${C_RED}run a host-side test: ./W0lfSword poclab test alac | libxml2-diff${NC}"
+            echo -e "  ${C_DIM}subcommands: list · chains (novel chain stages, verbose) · device (verbose device dump)${NC}"
+            echo -e "  ${C_DIM}run a host-side test: ./W0lfSword poclab test alac | libxml2-diff${NC}"
             echo -e "  ${C_DIM}docs: research/attack_chains.md · research/poclab.md · research/kernel26_cves.md${NC}"
             ;;
         chains)
-            echo -e "  ${C_RED}── NOVEL CHAINS (verbose) ───────────────────────────────${NC}"
+            section "Novel chains  -  verbose"
             cat <<'EOF'
 CHAIN F  -  GestaltForge (no-kernel write-escape to Gestalt spoof)
   Stage 1: bad_query containermanagerd traversal, create=true variant
@@ -1769,21 +1770,21 @@ CHAIN G  -  FontStrike (font RCE to kernel to TCC+SSV, the SE2 chain)
 EOF
             ;;
         device)
-            echo -e "  ${C_RED}── DEVICE DUMP (verbose) ────────────────────────────────${NC}"
+            section "Device dump  -  verbose"
             if command -v idevice_id &>/dev/null; then
                 local uuid; uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
                 if [ -n "$uuid" ]; then
-                    echo -e "  ${C_RED}udid:      ${NC}$uuid"
-                    echo -e "  ${C_RED}model:     ${NC}$(ideviceinfo -k ProductType 2>/dev/null || echo '?')"
-                    echo -e "  ${C_RED}ios:       ${NC}$(ideviceinfo -k ProductVersion 2>/dev/null || echo '?')"
-                    echo -e "  ${C_RED}build:     ${NC}$(ideviceinfo -k BuildVersion 2>/dev/null || echo '?')"
-                    echo -e "  ${C_RED}name:      ${NC}$(ideviceinfo -k DeviceName 2>/dev/null || echo '?')"
-                    echo -e "  ${C_RED}arch:      ${NC}$(ideviceinfo -k CPUArchitecture 2>/dev/null || echo '?')"
+                    echo -e "  ${C_DIM}udid:      ${NC}$uuid"
+                    echo -e "  ${C_DIM}model:     ${NC}$(ideviceinfo -k ProductType 2>/dev/null || echo '?')"
+                    echo -e "  ${C_DIM}ios:       ${NC}$(ideviceinfo -k ProductVersion 2>/dev/null || echo '?')"
+                    echo -e "  ${C_DIM}build:     ${NC}$(ideviceinfo -k BuildVersion 2>/dev/null || echo '?')"
+                    echo -e "  ${C_DIM}name:      ${NC}$(ideviceinfo -k DeviceName 2>/dev/null || echo '?')"
+                    echo -e "  ${C_DIM}arch:      ${NC}$(ideviceinfo -k CPUArchitecture 2>/dev/null || echo '?')"
                     local m v; m=$(ideviceinfo -k ProductType 2>/dev/null || echo ""); v=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
-                    echo -e "  ${C_RED}exploit:   ${NC}$(select_exploit "$m")"
-                    echo -e "  ${C_RED}chain:     ${NC}$(select_best_chain "$v" "$m" | cut -d'|' -f1-2 | tr '|' ' ')"
+                    echo -e "  ${C_DIM}exploit:   ${NC}$(select_exploit "$m")"
+                    echo -e "  ${C_DIM}chain:     ${NC}$(select_best_chain "$v" "$m" | cut -d'|' -f1-2 | tr '|' ' ')"
                     echo ""
-                    echo -e "  ${C_RED}compatibility:${NC}"
+                    echo -e "  ${C_FROST}compatibility:${NC}"
                     exploit_compat_check "$v" "$m"
                 else
                     echo -e "  ${C_RED}no device on USB${NC}"
