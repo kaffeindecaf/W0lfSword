@@ -31,8 +31,8 @@
 
 ### 5. Verify
 
-- [ ] `python3 validate_offsets.py` — no zero values, no range violations
-- [ ] `./W0lfSword offsets` — new version shows in list
+- [ ] `python3 validate_offsets.py` - no zero values, no range violations
+- [ ] `./W0lfSword offsets` - new version shows in list
 - [ ] Build: `make package`
 - [ ] Deploy with safe mode first: `sudo ./W0lfSword adderall --safe`
 
@@ -80,7 +80,7 @@ if (isA19) {
 
 - [ ] Determine if `pe_v1` or `pe_v2` is appropriate
 - [ ] Test socket spray behavior (zone exhaustion still works?)
-- [ ] Check for MTE — if enabled, the entire heap spray technique is broken
+- [ ] Check for MTE - if enabled, the entire heap spray technique is broken
 
 ### 6. Test Matrix
 
@@ -121,7 +121,7 @@ offsets: add iOS XX.X + iPhone XX (AXX) support
 - Added SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO block for iOS XX.X
 - Per-SoC overrides for AXX (T1SZ, SMR, thread options)
 - Verified against KDK struct dump build XXXXX
-- Tested on: iPhone XX, X, X — safe mode pass
+- Tested on: iPhone XX, X, X - safe mode pass
 ```
 
 ---

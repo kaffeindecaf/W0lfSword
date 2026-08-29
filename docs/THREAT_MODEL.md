@@ -1,4 +1,4 @@
-# W0lfSword — Threat Model
+# W0lfSword - Threat Model
 
 > **Purpose:** Identify what Apple could change to break each component of the exploit chain.
 > This helps prioritize what to fix when new iOS versions drop.
@@ -7,7 +7,7 @@
 
 ## Component Breakdown
 
-### 1. ICMPv6 Socket Spray (DarkSword — kexploit_opa334.m)
+### 1. ICMPv6 Socket Spray (DarkSword - kexploit_opa334.m)
 
 **What it exploits:** The kernel ICMPv6 `inpcb` zone allocator's deterministic behavior.
 Spraying ~10,000 sockets exhausts the zone and forces predictable physical page layout.
@@ -59,7 +59,7 @@ the corrupted pointer; `setsockopt` writes.
 **Detection difficulty:** Easy. `setsockopt(ICMP6_FILTER)` with a non-standard value
 is unusual. Apple could add a check that the filter address is within expected ranges.
 
-**Survival risk:** HIGH. This is the most fragile component — a single bounds check kills it.
+**Survival risk:** HIGH. This is the most fragile component - a single bounds check kills it.
 
 ---
 
@@ -99,10 +99,10 @@ require significant kernel refactoring.
 
 ---
 
-### 6. RemoteCall — Thread Exception Hijack (RemoteCall.m)
+### 6. RemoteCall - Thread Exception Hijack (RemoteCall.m)
 
 **What it exploits:** Injecting `EXC_GUARD` into a thread's AST, capturing the exception
-message, overwriting thread state (PC, LR, x0-x7), and replying — causing the kernel to
+message, overwriting thread state (PC, LR, x0-x7), and replying - causing the kernel to
 resume the thread at an attacker-chosen kernel function.
 
 **Apple's fix options:**
@@ -127,7 +127,7 @@ iOS release as the kernel is recompiled.
 **Apple's "fix":** Not a vulnerability, just a maintenance burden. Apple naturally changes
 struct layouts with each XNU build.
 
-**Survival risk:** N/A — this is the maintenance cost, not a vulnerability. Each new iOS
+**Survival risk:** N/A - this is the maintenance cost, not a vulnerability. Each new iOS
 version requires running XPF on the kernelcache to find new offsets.
 
 ---
@@ -148,15 +148,15 @@ version requires running XPF on the kernelcache to find new offsets.
 
 ## Apple's Most Likely Response Order
 
-1. **Fix ICMPv6 filter pointer dereference** — smallest change, biggest impact.
+1. **Fix ICMPv6 filter pointer dereference** - smallest change, biggest impact.
    One bounds check in `rip6_ctloutput` kills the entire chain.
 
-2. **Harden zone allocator** — already in progress across iOS 17-26.
+2. **Harden zone allocator** - already in progress across iOS 17-26.
 
-3. **Add sandbox integrity checks** — low-hanging fruit, especially with `borrow_sandbox_ext`
+3. **Add sandbox integrity checks** - low-hanging fruit, especially with `borrow_sandbox_ext`
    patching documented by the community.
 
-4. **SSV vnode hardening** — requires filesystem changes, least likely short-term.
+4. **SSV vnode hardening** - requires filesystem changes, least likely short-term.
 
 ---
 
@@ -164,16 +164,16 @@ version requires running XPF on the kernelcache to find new offsets.
 
 To survive future iOS releases:
 
-1. **Diversify exploit primitives** — add PUAF fallback (kfd-style PhysPuppet/Landa).
+1. **Diversify exploit primitives** - add PUAF fallback (kfd-style PhysPuppet/Landa).
    Socket spray will eventually be killed.
 
-2. **Dynamic offset resolution** — run XPF on-device instead of relying on hardcoded tables.
+2. **Dynamic offset resolution** - run XPF on-device instead of relying on hardcoded tables.
    This survives minor struct layout changes.
 
-3. **Decouple the chain** — make each component work independently so Apple fixing one
+3. **Decouple the chain** - make each component work independently so Apple fixing one
    doesn't kill the entire chain.
 
-4. **Monitor KC releases** — track iOS kernelcache changes via [theapplewiki](https://theapplewiki.com)
+4. **Monitor KC releases** - track iOS kernelcache changes via [theapplewiki](https://theapplewiki.com)
    and update offsets before each release.
 
 ---

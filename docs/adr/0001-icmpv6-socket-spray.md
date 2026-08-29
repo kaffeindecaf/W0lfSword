@@ -1,4 +1,4 @@
-# ADR 0001 — ICMPv6 Socket Spray for Kernel Heap Manipulation
+# ADR 0001 - ICMPv6 Socket Spray for Kernel Heap Manipulation
 
 **Status:** Accepted  
 **Date:** 2025 (inherited from DarkSword)  
@@ -22,9 +22,9 @@ Use ICMPv6 sockets for the spray because:
 
 ## Alternatives Considered
 
-- **TCP socket spray** — larger PCB size, different zone, slower allocation
-- **UDP socket spray** — smaller PCB, but fewer interesting fields to corrupt
-- **Pipe spray** — different allocator, harder to identify in physical scans
+- **TCP socket spray** - larger PCB size, different zone, slower allocation
+- **UDP socket spray** - smaller PCB, but fewer interesting fields to corrupt
+- **Pipe spray** - different allocator, harder to identify in physical scans
 
 ## Consequences
 

@@ -1,4 +1,4 @@
-# Sandbox Extension Patching — Technical Reference
+# Sandbox Extension Patching - Technical Reference
 
 > **Files:** `sandbox_escape.m`, `kexploit/sandbox.m`  
 > **Origin:** Technique by CrazyMind90 (sandbox token acquisition via kernel R/W),
@@ -8,9 +8,9 @@
 
 ## Overview
 
-The iOS sandbox (MACF — Mandatory Access Control Framework) restricts file access per-process
+The iOS sandbox (MACF - Mandatory Access Control Framework) restricts file access per-process
 via a policy stored in kernel memory. Each process has a `sandbox_label` structure containing
-an `extension_set` — a hash table of path prefixes the process is allowed to access.
+an `extension_set` - a hash table of path prefixes the process is allowed to access.
 
 By achieving kernel R/W, we can walk the kernel structures from our process descriptor to the
 sandbox extension table and patch it to grant full filesystem access.
@@ -119,8 +119,8 @@ If >=2 succeed, the escape is considered successful.
 The `ucred` pointer in `proc_ro` is SMR-encoded on newer iOS. The sandbox_escape
 code tries both:
 
-1. **SMR decode:** `kread_smrptr(proc_ro + off)` — decodes the SMR encoding
-2. **PAC strip:** `xpaci(kread64(proc_ro + off))` — strips PAC bits
+1. **SMR decode:** `kread_smrptr(proc_ro + off)` - decodes the SMR encoding
+2. **PAC strip:** `xpaci(kread64(proc_ro + off))` - strips PAC bits
 
 Both paths are validated by reading `cr_label` at `+0x78` and checking it's a valid
 kernel pointer.
@@ -129,11 +129,11 @@ kernel pointer.
 
 ## Limitations
 
-1. **Requires kernel R/W first** — this is an exploit chain component, not standalone.
-2. **Offset-dependent** — wrong `off_proc_ro_p_ucred` = read garbage kernel memory.
-3. **SMR keys change per-boot** — `kread_smrptr()` must use the correct `smr_base`.
-4. **Extension table is live** — concurrent sandbox operations could observe partially patched state.
-5. **Not persistent** — changes are in-memory only, lost on process exit/reboot.
+1. **Requires kernel R/W first** - this is an exploit chain component, not standalone.
+2. **Offset-dependent** - wrong `off_proc_ro_p_ucred` = read garbage kernel memory.
+3. **SMR keys change per-boot** - `kread_smrptr()` must use the correct `smr_base`.
+4. **Extension table is live** - concurrent sandbox operations could observe partially patched state.
+5. **Not persistent** - changes are in-memory only, lost on process exit/reboot.
 
 ---
 

@@ -1,7 +1,7 @@
 # TCC Bypass Research Notes
 
-> **Roadmap:** C2.1 — TCC bypass via kernel-level .db modification  
-> **Status:** Research phase — no PoC. Estimated bounty: up to $100,000
+> **Roadmap:** C2.1 - TCC bypass via kernel-level .db modification  
+> **Status:** Research phase - no PoC. Estimated bounty: up to $100,000
 
 ---
 
@@ -27,9 +27,9 @@ It stores which apps have been granted access to:
 ```
 
 This is a SQLite database with tables:
-- `access` — per-app permissions (service, client, auth_value, etc.)
-- `access_overrides` — system-level overrides
-- `admin` — MDM/admin policies
+- `access` - per-app permissions (service, client, auth_value, etc.)
+- `access_overrides` - system-level overrides
+- `admin` - MDM/admin policies
 
 ### Access Control
 
@@ -54,7 +54,7 @@ VALUES ('kTCCServiceCamera', 'com.tigisoftware.Filza', 0, 2, 0, ...);
 
 **Problem:** TCCd caches entries. Need to restart `tccd` or wait for cache expiry.
 
-**Restart TCCd:** `killall tccd` — but this requires root/kernel access to signal the daemon.
+**Restart TCCd:** `killall tccd` - but this requires root/kernel access to signal the daemon.
 
 ### 2. Kernel Memory Modification
 
@@ -124,4 +124,4 @@ The technical capability exists, but the TCC bypass has not been attempted.
 
 ---
 
-*Last updated: 2026-08-10 — Research phase, no implementation*
+*Last updated: 2026-08-10 - Research phase, no implementation*

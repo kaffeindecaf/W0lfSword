@@ -68,14 +68,14 @@ mPredictor  = (int32_t *) calloc( mConfig.frameLength * sizeof(int32_t), 1 );
 
 Every decode loop iterates numSamples over those buffers:
 
-- ALACDecoder.cpp:309 `mMixBufferU[i] = val;` (SCE uncompressed) — heap
+- ALACDecoder.cpp:309 `mMixBufferU[i] = val;` (SCE uncompressed) - heap
   write overflow, ASAN-verified
 - ag_dec.c:321 `*outPtr++ = del;` in dyn_decomp (SCE/CPE compressed,
-  writes mPredictor) — heap write overflow, ASAN-verified
+  writes mPredictor) - heap write overflow, ASAN-verified
 - ALACDecoder.cpp:336 / 520-524 `mShiftBuffer[i]` (shift path, CPE does
-  numSamples*2) — mShiftBuffer aliases mPredictor
+  numSamples*2) - mShiftBuffer aliases mPredictor
 - matrix_dec.c unmix24/unmix32 read `shiftUV[k]` with k up to
-  2*numSamples-1 — OOB read of the same buffer
+  2*numSamples-1 - OOB read of the same buffer
 - output loops write the caller's sampleBuffer with the inflated
   numSamples; *outNumSamples reports it back
 
@@ -93,7 +93,7 @@ WRITE of size 4 at 0x502000000014
 
 Second trigger path without partialFrame: caller numSamples (e.g. 4096)
 against a cookie frameLength=1 also overflows mPredictor via dyn_decomp
-(ag_dec.c:321) — the decoder never checks numSamples <= frameLength,
+(ag_dec.c:321) - the decoder never checks numSamples <= frameLength,
 period.
 
 Caveat for the bounty writeup: this is the open-source reference

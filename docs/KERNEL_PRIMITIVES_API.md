@@ -22,7 +22,7 @@ Read a kernel pointer with PAC stripping. Equivalent to `xpaci(kread64(addr))`.
 
 - **Context:** Same as kread64.
 - **Side effects:** None.
-- **Preferred over:** `xpaci(kread64(...))` — use this for all kernel pointers.
+- **Preferred over:** `xpaci(kread64(...))` - use this for all kernel pointers.
 
 ### `kread_smrptr(uint64_t addr)` → `uint64_t`
 
@@ -57,7 +57,7 @@ Bulk read/write of arbitrary-size kernel buffers.
 ### `proc_self(void)` → `uint64_t`
 
 Returns the kernel address of our own `proc` structure.
-Cached after first call — thread-safe with `__atomic_load_n`.
+Cached after first call - thread-safe with `__atomic_load_n`.
 
 - **Context:** Must hold kernel R/W.
 - **Side effects:** None.
@@ -68,7 +68,7 @@ Walk the `proc` linked list to find a process by PID.
 Returns the `proc` address or `-1` if not found.
 
 - **Context:** Must hold kernel R/W.
-- **Side effects:** Linear scan — O(n) in number of processes.
+- **Side effects:** Linear scan - O(n) in number of processes.
 - **PAC:** Uses `xpaci(kread64(...))` for list traversal pointers.
 
 ### `proc_find_by_name(const char *name)` → `uint64_t`
@@ -132,7 +132,7 @@ Main SSV write activation. Walks sandbox structures, patches extension paths to 
 
 - **Context:** Must hold kernel R/W. `g_exploitDone` must be true.
 - **Side effects:** Modifies kernel sandbox data. Calls `borrow_sandbox_ext` as fallback.
-- **Thread safety:** Uses `g_patch_sandbox_ext_done` flag. Not fully atomic — avoid concurrent calls.
+- **Thread safety:** Uses `g_patch_sandbox_ext_done` flag. Not fully atomic - avoid concurrent calls.
 
 ### `check_sandbox_var_rw(void)` → `int`
 

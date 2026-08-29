@@ -1,4 +1,4 @@
-# W0lfSword — Bug Bounty Research Writeup
+# W0lfSword - Bug Bounty Research Writeup
 
 > **Purpose:** Document vulnerability findings from the DarkSword exploit ecosystem
 > for Apple Security Bounty submission. Each section maps to an Apple bounty category.
@@ -11,13 +11,13 @@
 
 **Bounty Category:** Kernel Info Leak / KASLR Bypass  
 **Estimated Bounty:** $5,000–$25,000  
-**CVE Reference:** TBD — DarkSword exploit unnamed
+**CVE Reference:** TBD - DarkSword exploit unnamed
 
 ### Summary
 
 The DarkSword exploit's `physical_oob_read_mo()` function creates a race window between
 `pwritev()` and `mach_vm_map()` that allows reading freed physical pages. This is
-fundamentally a KASLR bypass — physical pages contain kernel pointers.
+fundamentally a KASLR bypass - physical pages contain kernel pointers.
 
 ### Technical Detail
 
@@ -41,7 +41,7 @@ and KASLR-revealing values) leaks to userspace.
 
 - **KASLR slide calculation**: Kernel pointers in freed heap pages reveal the slide
 - **Heap layout discovery**: Zone allocator patterns become visible
-- **No kernel R/W required**: This is a pure info leak — the OOB read race works without
+- **No kernel R/W required**: This is a pure info leak - the OOB read race works without
   the full DarkSword socket corruption chain
 
 ### Apple's Likely Fix
@@ -120,9 +120,9 @@ the correct APFS volume or snapshot.
 ### Impact
 
 Permanent modification of system binaries, libraries, and configuration:
-- `/System/Library/` — system frameworks and daemons
-- `/usr/lib/` — dynamic libraries
-- `/bin/` and `/sbin/` — command-line tools
+- `/System/Library/` - system frameworks and daemons
+- `/usr/lib/` - dynamic libraries
+- `/bin/` and `/sbin/` - command-line tools
 
 ### Apple's Likely Fix
 
@@ -136,7 +136,7 @@ Permanent modification of system binaries, libraries, and configuration:
 
 **Bounty Category:** Kernel Arbitrary Read/Write  
 **Estimated Bounty:** $150,000–$250,000  
-**CVE Reference:** TBD — DarkSword unnamed  
+**CVE Reference:** TBD - DarkSword unnamed  
 
 ### Summary
 
@@ -192,7 +192,7 @@ This enables:
 3. When the thread triggers EXC_GUARD, capture the exception message
 4. Overwrite the thread state registers (x0-x7, PC, LR, SP)
 5. Set PC to the target kernel function, LR to a return gadget
-6. Reply to the exception — the kernel resumes the thread at the target function
+6. Reply to the exception - the kernel resumes the thread at the target function
 7. The target function executes with kernel privileges
 
 ### Impact
@@ -235,16 +235,16 @@ All findings require:
 code audit). A PoC on hardware is required for submission.
 
 **Priority order for submission:**
-1. #4 (Kernel R/W) — highest value, clearest impact
-2. #2 (Sandbox Escape) — demonstrates practical attack chain
-3. #5 (Kernel Code Exec) — escalates #4 to full compromise
+1. #4 (Kernel R/W) - highest value, clearest impact
+2. #2 (Sandbox Escape) - demonstrates practical attack chain
+3. #5 (Kernel Code Exec) - escalates #4 to full compromise
 
 ---
 
 ## Apple Bounty Eligibility Classification
 
 > Each finding below is classified against the Apple Security Bounty eligibility checklist.
-> All findings currently lack human validation on real hardware — see Section 4 of the checklist.
+> All findings currently lack human validation on real hardware - see Section 4 of the checklist.
 
 ---
 
@@ -256,7 +256,7 @@ Affected component: IOSurface / mach_vm_map / vm_page_free path
 Affected OS/build: iOS 17.0–26.0.1 (all supported targets)
 Affected hardware: A12–A18 Pro, M1–M4
 Apple bounty category: Kernel Info Leak / KASLR Bypass
-Security boundary affected: Kernel ASLR — attacker learns kernel slide
+Security boundary affected: Kernel ASLR - attacker learns kernel slide
 Attacker prerequisites: App sandbox, ability to create IOSurface, socket access
 Victim interaction: None
 Demonstrated impact: Reading data from freed physical pages (theoretical)
@@ -266,10 +266,10 @@ Reliable reproduction: NO
 Working PoC: NO
 Target Flag required: UNKNOWN
 Target Flag demonstrated: N/A
-Publicly disclosed: YES — DarkSword exploit is public on GitHub
+Publicly disclosed: YES - DarkSword exploit is public on GitHub
 Third-party component: NO
 Apple scope exclusion: NO
-Duplicate/known issue: UNKNOWN — similar race patterns known (PhysPuppet, landa)
+Duplicate/known issue: UNKNOWN - similar race patterns known (PhysPuppet, landa)
 
 Eligibility: DO NOT SUBMIT YET
 
@@ -307,10 +307,10 @@ Reliable reproduction: NO
 Working PoC: NO
 Target Flag required: UNKNOWN
 Target Flag demonstrated: N/A
-Publicly disclosed: YES — sandbox_escape.m is in this repo
+Publicly disclosed: YES - sandbox_escape.m is in this repo
 Third-party component: NO
 Apple scope exclusion: NO
-Duplicate/known issue: UNKNOWN — sandbox extension patching documented by opa334/CrazyMind90
+Duplicate/known issue: UNKNOWN - sandbox extension patching documented by opa334/CrazyMind90
 
 Eligibility: DO NOT SUBMIT YET
 
@@ -348,7 +348,7 @@ Reliable reproduction: NO
 Working PoC: NO
 Target Flag required: UNKNOWN
 Target Flag demonstrated: N/A
-Publicly disclosed: YES — SSVUtils.m is in this repo
+Publicly disclosed: YES - SSVUtils.m is in this repo
 Third-party component: NO
 Apple scope exclusion: NO
 Duplicate/known issue: UNKNOWN
@@ -384,15 +384,15 @@ Attacker prerequisites: App sandbox, socket creation, IOSurface access
 Victim interaction: None
 Demonstrated impact: Full kernel memory read/write
 Exploitability: THEORETICAL (code exists, claimed by DarkSword authors)
-Human validation: NO (in this repo — original authors may have tested)
+Human validation: NO (in this repo - original authors may have tested)
 Reliable reproduction: NO
-Working PoC: NO (in this repo — original exploit may work on specific versions)
-Target Flag required: YES (likely — kernel R/W category)
+Working PoC: NO (in this repo - original exploit may work on specific versions)
+Target Flag required: YES (likely - kernel R/W category)
 Target Flag demonstrated: NO
-Publicly disclosed: YES — DarkSword exploit public since 2025/2026
+Publicly disclosed: YES - DarkSword exploit public since 2025/2026
 Third-party component: NO
-Apple scope exclusion: HIGH RISK — already publicly disclosed pre-submission
-Duplicate/known issue: LIKELY — DarkSword is a known public exploit
+Apple scope exclusion: HIGH RISK - already publicly disclosed pre-submission
+Duplicate/known issue: LIKELY - DarkSword is a known public exploit
 
 Eligibility: LIKELY INELIGIBLE
 
@@ -407,7 +407,7 @@ Reason:
   
   Exception possibility: If this specific ICMPv6 socket technique is different from
   what Apple has seen, and Apple hasn't fixed it yet, it MIGHT qualify. But the
-  timeline is against us — the code has been public for months.
+  timeline is against us - the code has been public for months.
 
 Missing evidence:
   - Proof that Apple has NOT already fixed this (check iOS 26.x KDK, sysctl diffs)
@@ -435,7 +435,7 @@ Reliable reproduction: NO
 Working PoC: NO
 Target Flag required: YES (for max reward)
 Target Flag demonstrated: NO
-Publicly disclosed: YES — RemoteCall.m is in this repo
+Publicly disclosed: YES - RemoteCall.m is in this repo
 Third-party component: NO
 Apple scope exclusion: NO
 Duplicate/known issue: UNKNOWN
@@ -445,7 +445,7 @@ Eligibility: DO NOT SUBMIT YET
 Reason:
   Requires Findings #4 and #3 as prerequisites. This is the deepest component of the
   exploit chain. Even if it works, demonstrating kernel code execution as distinct
-  from kernel R/W is challenging — Apple may consider it "just another use of kR/W."
+  from kernel R/W is challenging - Apple may consider it "just another use of kR/W."
   Needs to demonstrate something that kR/W alone cannot achieve (e.g., calling a
   PAC-protected function, or executing in a context kR/W can't reach).
 
@@ -479,5 +479,5 @@ All require human validation on real hardware before any "READY" classification 
 
 ---
 
-*Last updated: 2026-08-10 — All findings: DO NOT SUBMIT YET or LIKELY INELIGIBLE*
+*Last updated: 2026-08-10 - All findings: DO NOT SUBMIT YET or LIKELY INELIGIBLE*
 *Requires human researcher validation on real hardware before reclassification.*

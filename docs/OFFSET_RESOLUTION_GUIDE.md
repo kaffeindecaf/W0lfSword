@@ -1,4 +1,4 @@
-# Offset Resolution Guide — Adding New iOS Versions
+# Offset Resolution Guide - Adding New iOS Versions
 
 > How to find kernel struct offsets for a new iOS version and add them to W0lfSword.
 
@@ -127,7 +127,7 @@ if (isA18Above) {
 
 ### Thread/Machine Offsets
 
-These are the **most dangerous** to get wrong — a bad `off_thread_machine_kstackptr`
+These are the **most dangerous** to get wrong - a bad `off_thread_machine_kstackptr`
 will corrupt kernel memory.
 
 **Always verify** by reading a known-good value after setting:
@@ -176,7 +176,7 @@ Checks:
 | Wrong T1SZ | All pointers appear invalid | Check SoC detection: A16+ uses 0x11 |
 | Wrong SMR base | SMR pointers decode to garbage | Verify `smr_base` for SoC family |
 | New field added | Old offset now points to wrong field | Compare KDK struct dump between versions |
-| Field removed/reordered | Garbage values from `kread` | Struct may have been reorganized — find new offset |
+| Field removed/reordered | Garbage values from `kread` | Struct may have been reorganized - find new offset |
 
 ---
 

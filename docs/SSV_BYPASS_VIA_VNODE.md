@@ -105,7 +105,7 @@ unlink(tmp);  // Clean up temp file
 
 ## What This Bypasses
 
-- **MNT_RDONLY flag:** Irrelevant — we're not writing through the mount.
+- **MNT_RDONLY flag:** Irrelevant - we're not writing through the mount.
 - **APFS seal verification:** Only checked at mount time, not per-read.
 - **Code signing:** Kernel extensions and bins are validated at exec time, not at v_data swap.
 
@@ -136,11 +136,11 @@ and `apply_parent_permissions(path)` matches the parent directory's mode.
 
 ## Limitations
 
-1. **Requires kernel R/W** — same prerequisite as sandbox escape.
-2. **Race window** — another thread accessing the target path during the swap will see temp data.
-3. **Not persistent** — v_data changes are in-memory only.
-4. **Data pointer lifetime** — if the temp file is deleted while the v_data swap is active, reads return garbage.
-5. **Vnode reuse** — the kernel may recycle the temp vnode between the read and the restore.
+1. **Requires kernel R/W** - same prerequisite as sandbox escape.
+2. **Race window** - another thread accessing the target path during the swap will see temp data.
+3. **Not persistent** - v_data changes are in-memory only.
+4. **Data pointer lifetime** - if the temp file is deleted while the v_data swap is active, reads return garbage.
+5. **Vnode reuse** - the kernel may recycle the temp vnode between the read and the restore.
 
 ---
 
@@ -155,9 +155,9 @@ and `apply_parent_permissions(path)` matches the parent directory's mode.
 
 ## See Also
 
-- `SSV/SSVUtils.m` — implementation
-- `kexploit/vnode.m` — `vnode_redirect_file`, `vnode_get_child_vnode`
-- `kexploit/file.m` — `overwrite_system_file` using vnode swap
+- `SSV/SSVUtils.m` - implementation
+- `kexploit/vnode.m` - `vnode_redirect_file`, `vnode_get_child_vnode`
+- `kexploit/file.m` - `overwrite_system_file` using vnode swap
 - Apple documentation: SSV architecture (WWDC 2020 session)
 
 ---
