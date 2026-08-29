@@ -1,22 +1,51 @@
 # W0lfSword
 
-[![GitHub stars](https://img.shields.io/github/stars/kaffeindecaf/W0lfSword?style=flat-square&color=38_9df8)](https://github.com/kaffeindecaf/W0lfSword/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/kaffeindecaf/W0lfSword?style=flat-square&color=389df8)](https://github.com/kaffeindecaf/W0lfSword/stargazers)
 [![License](https://img.shields.io/github/license/kaffeindecaf/W0lfSword?style=flat-square&color=blue)](LICENSE)
 [![iOS](https://img.shields.io/badge/iOS-17.0%E2%80%9326.0.1-8A2BE2?style=flat-square)](https://github.com/kaffeindecaf/W0lfSword)
 [![DarkSword](https://img.shields.io/badge/exploit-DarkSword%20R%2FW-FF4D4D?style=flat-square)](https://github.com/kaffeindecaf/W0lfSword)
 [![Status](https://img.shields.io/badge/status-active%20development-39D353?style=flat-square)](https://github.com/kaffeindecaf/W0lfSword)
 
-**Kernel exploit toolkit for iOS.** One command turns a jailbroken iPhone with
-Filza into a full root file browser — and a separate host-side engine that
-**pulls kernel offsets from any iOS build without owning the device**.
+W0lfSword is a kernel exploit toolkit for iOS. One command turns a
+jailbroken iPhone with Filza into a full root file browser. The same
+toolkit also pulls kernel offsets from any iOS build on your computer,
+no device needed.
+
+Current release: v1.1.0
+
+## Quick start
+
+```bash
+git clone https://github.com/kaffeindecaf/W0lfSword.git
+cd W0lfSword
+
+./W0lfSword setup              # build tools, one time
+sudo ./W0lfSword adderall      # everything else
+```
+
+`adderall` does the whole run: finds the phone over USB or WiFi, installs
+any missing build tools, generates its own SSH key, builds the tweak,
+deploys it, restarts Filza, and reports whether the exploit won. The only
+times it needs you are the TRUST prompt on the phone and the Filza version
+question.
+
+Useful variants:
+
+- `sudo ./W0lfSword adderall --safe` ... UI hooks only, skips the kernel
+  part. Run this first if it's your first time.
+- `sudo ./W0lfSword adderall --yes` ... skip the remaining prompts.
+
+After a successful run, open Filza. The exploit fires within a second or two.
+
+## What it does
 
 - **DarkSword kernel R/W** (CVE-2025-43520) + SSV bypass, deployed over USB
-  in one command — no WiFi, no manual SSH setup
-- **XPF offset verification on the host** — resolve a kernelcache's struct
-  offsets, diff two builds, extract from an IPSW. The only toolkit that does
-  this without a jailbroken device
-- **Research tools built in** — panic log analyzer, kernelcache diffing,
-  fuzz harness, version-aware exploit guidance
+  in one command. No WiFi, no manual SSH setup.
+- **XPF offset verification on the host.** Resolve a kernelcache's struct
+  offsets, diff two builds, or extract from an IPSW. The only toolkit that
+  does this without a jailbroken device.
+- **Research tools built in.** Panic log analyzer, kernelcache diffing,
+  fuzz harness, version-aware exploit guidance.
 
 ![adderall demo](docs/demo.png)
 
@@ -54,60 +83,39 @@ Filza into a full root file browser — and a separate host-side engine that
 
 </details>
 
-**Current release: v1.1.0**
-
-## What's new in v1.1.0
-
-- `usbtest` command — harmless USB + pairing check: usbmuxd, cable
-  visibility, trust pairing, Lightning connection type, a lockdown
-  diagnostics round-trip and a short syslog capture. Read-only,
-  writes nothing. Run it before `adderall` if the phone isn't found.
-- `panic` command — drop a .ips crash report or panic log in and it
-  classifies the crash (kernel / SEP / MTE / userspace), extracts the
-  xnu build, and maps it to known CVEs + the BUG_BOUNTY findings
-  (BB-032..037). `panic fetch` pulls the latest report off the phone.
-- `kernelcache` command — offline XPF offset research: resolve a
-  kernelcache's offsets, diff two builds (the K4.1 methodology), or
-  extract the kernelcache straight from an IPSW. No device needed.
-- `--json` flag on status / offsets / audit — machine-readable output
-  for scripts and CI.
-- Version-aware hints — right after device detection the script prints
-  gray text saying what actually works on that iOS version: full kernel
-  exploit on 17.0–26.0.1, userspace-only (MCM / bad_query / fuzz) on
-  26.1+.
-- `adderall` gained the same USB round-trip probe and the version hints.
-- usbliter8 bundle refreshed from upstream — the offset-migration engine
-  (AArch64 fingerprinting, `migrate`/`propagate`, 10 A13 profiles) is now
-  bundled.
-- Exploit matrix corrected: usbliter8 is the A12/A13 SecureROM exploit
-  driven by an RP2350 board — it is NOT checkm8 (that was wrong).
-
 ## What it is
 
 W0lfSword is two things in one repo:
 
-1. **A deployable exploit tweak.** It injects into the Filza file manager and
-   runs a real kernel exploit (DarkSword, CVE-2025-43520) every time Filza
-   opens. When the exploit wins, Filza stops being a sandboxed app:
-   `/System`, `/usr`, `/bin`, other apps' containers — everything becomes
+1. **A deployable exploit tweak.** It injects into the Filza file manager
+   and runs a real kernel exploit (DarkSword, CVE-2025-43520) every time
+   Filza opens. When the exploit wins, Filza stops being a sandboxed app.
+   `/System`, `/usr`, `/bin`, other apps' containers: everything becomes
    readable and writable from the normal file browser UI.
 
 2. **A host-side offset research engine.** `kernelcache` + `panic` + the XPF
-   resolver do real kernel work with **no device at all**: resolve struct
+   resolver do real kernel work with no device at all. Resolve struct
    offsets from a kernelcache, diff two iOS builds to see what changed
    (syscalls added, structs resized, SPTM status), and classify crash logs.
-   This is the part that caught a wrong `itk_space` offset in our own table —
-   the tool verifies the exploit's assumptions before the exploit ever runs.
+   This is the part that caught a wrong `itk_space` offset in our own table.
+   The tool verifies the exploit's assumptions before the exploit ever runs.
 
-You drive the whole thing from a single script on your computer:
+## How it works
 
-```bash
-sudo ./W0lfSword adderall
+```
+Filza opens
+  → tweak loads, UI hooks active immediately (padlock/license/zip)
+  → 1s later: socket spray + OOB race → kernel R/W
+  → sandbox rules patched to "/"
+  → sealed system volume made writable
+  → full root access inside Filza
 ```
 
-It finds the phone (USB preferred, no WiFi IP needed), installs any missing
-build tools, generates + installs its own SSH key, builds the tweak, deploys
-it, restarts Filza, and reports whether the exploit won.
+If the race loses, it retries up to 5 times, then gives up quietly. Filza
+keeps working, just without the exploit.
+
+![Architecture](W0lfSwordArchitecture.png)
+![Exploit Pipeline](W0lfSwordChain.png?v=2)
 
 ## What you get
 
@@ -115,7 +123,7 @@ it, restarts Filza, and reports whether the exploit won.
 - chown/chmod on anything, hide/unhide files
 - Filza's padlocks and license screens gone
 - zip/unzip anywhere
-- All of it resets on reboot; open Filza again and it's back
+- All of it resets on reboot. Open Filza again and it's back
 
 ## What it is not
 
@@ -126,11 +134,25 @@ it, restarts Filza, and reports whether the exploit won.
 - It does not work on iPhone 17 / M5. Apple moved those to MTE (Memory
   Tagging Extension), which kills this exploit class.
 
+## Requirements
+
+- A jailbroken iPhone on iOS 17.0–26.0.1 (A10–A18 Pro, M1–M4) with
+  MobileSubstrate
+- Filza installed
+- OpenSSH on the phone (WiFi, root login)
+- Build tools on your computer: `./W0lfSword setup` (no sudo on macOS,
+  `sudo` on Linux)
+
+macOS 13+ works out of the box. Xcode Command Line Tools provide clang and
+the iPhoneOS SDK, Homebrew provides dpkg and libimobiledevice, Theos goes
+to `/opt/theos`. Run `setup` without sudo on a Mac, Homebrew refuses to run
+as root. See BUILD.md for the details.
+
 ## Known issues
 
-- iOS 26.1 and newer: the kernel stage is capped (DarkSword was patched
-  in 26.1). The userspace modules still work there — MCM container access
-  (`mha`) and the bad_query read-escape — and the script prints exactly
+- iOS 26.1 and newer: the kernel stage is capped (DarkSword was patched in
+  26.1). The userspace modules still work there, specifically MCM container
+  access (`mha`) and the bad_query read-escape. The script prints exactly
   what's available for your iOS version after it detects the device.
   (26.1+ research is post-v1.0, see the ROADMAP.)
 - The padlock bypass hooks Filza's UI classes. If a Filza update renames
@@ -141,76 +163,10 @@ it, restarts Filza, and reports whether the exploit won.
   the operation again.
 - The exploit is a race. It usually wins, but up to 5 attempts run per
   Filza launch. If the phone kernel-panics 3 launches in a row, the tweak
-  disables itself (`/var/mobile/Documents/.filza_tweak_disable`, delete the
+  disables itself (`/var/mobile/Documents/.filza_tweak_disable`; delete the
   file to re-enable).
 - Kernel panics are possible. This is a kernel exploit. A panic means a
   reboot, not data loss, but don't run it on a phone you can't reboot.
-
-## Requirements
-
-- A jailbroken iPhone on iOS 17.0–26.0.1 (A10–A18 Pro, M1–M4) with
-  MobileSubstrate
-- Filza installed
-- OpenSSH on the phone (WiFi, root login)
-- Build tools on your computer: `./W0lfSword setup` (no sudo on macOS,
-  `sudo` on Linux)
-
-macOS 13+ works out of the box: Xcode Command Line Tools provide clang and
-the iPhoneOS SDK, Homebrew provides dpkg and libimobiledevice, Theos goes to
-`/opt/theos`. Run `setup` without sudo on a Mac, Homebrew refuses to run as
-root. See BUILD.md for the details.
-
-## Quick start
-
-```bash
-git clone https://github.com/kaffeindecaf/W0lfSword.git
-cd W0lfSword
-
-./W0lfSword setup              # build tools, one time
-sudo ./W0lfSword adderall      # everything else
-
-# or do it by hand:
-./W0lfSword build
-./W0lfSword deploy 192.168.1.5
-```
-
-`adderall` is the one you want. It installs missing tools without asking,
-finds the phone over USB or WiFi, pairs it, tests the cable, checks your iOS
-version has offsets, builds, deploys, and verifies. The only times it needs
-you are the TRUST prompt on the phone and the Filza version question.
-
-- `sudo ./W0lfSword adderall --safe` — UI hooks only, skips the kernel part.
-  Run this first if it's your first time.
-- `sudo ./W0lfSword adderall --yes` — skip the remaining prompts.
-
-After a successful run, open Filza. The exploit fires within a second or two.
-
-## Features
-
-| What | How |
-|------|-----|
-| Kernel exploit | DarkSword: ICMPv6 socket spray + IOSurface physical OOB → kernel R/W |
-| Retries | Up to 5 attempts with backoff; first-try failures are normal |
-| Sandbox escape | Patches Filza's kernel sandbox rules to `/` |
-| SSV bypass | vnode redirection makes `/System`, `/usr`, `/bin` writable |
-| Root ownership | New files in system paths get `root:wheel` — plus Filza itself runs as root via the posix_cred patch after escape (K4.13) |
-| Root helper bypass | Filza's XPC calls intercepted, no helper app |
-| License bypass | "Binary modified" / activation alerts suppressed |
-| Padlock bypass | Edit/delete always allowed, confirmation dialogs skipped |
-| Zip/unzip | Via Filza's own minizip, function pointers validated |
-| Userspace read escape | bad_query containermanagerd traversal (26.0–26.6.1) + MCM bridge — container reads even before the kernel exploit (K4.10/K4.11) |
-| Kill switch | `touch /var/mobile/Documents/.filza_tweak_disable` |
-| Logging | Everything in `/tmp/FilzaTweak.log` (4MB rotation) |
-
-## Supported devices
-
-| iOS | A12–A14 | A15 | A16 | A17 | A18 | M1–M4 |
-|-----|---------|-----|-----|-----|-----|-------|
-| 17.0–17.7 | yes | yes | yes | yes | — | yes |
-| 18.0–18.7.7 | yes | yes | yes | yes | yes | yes |
-| 26.0–26.0.1 | yes | yes | yes | yes | yes | yes |
-
-Not supported: iPhone 17 (A19), M5 iPads. MTE blocks kernel R/W there.
 
 ## Commands
 
@@ -220,7 +176,7 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 
 | Command | Does | Example |
 |---------|------|---------|
-| `adderall` | discover → build → deploy → verify (needs sudo) — USB SSH preferred when the phone is plugged in | `sudo ./W0lfSword adderall` |
+| `adderall` | discover → build → deploy → verify (needs sudo). USB SSH preferred when the phone is plugged in | `sudo ./W0lfSword adderall` |
 | `adderall --usb` | force USB-only transport (fails if no USB device/sshd) | `sudo ./W0lfSword adderall --usb` |
 | `quick` | one-shot build → deploy → verify | `./W0lfSword quick` |
 | `build` | compile the tweak into a .deb | `./W0lfSword build` |
@@ -247,7 +203,7 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `crashlog` | last crash-monitor log | `./W0lfSword crashlog` |
 | `setup` | install build tools (needs sudo on Linux) | `sudo ./W0lfSword setup` |
 | `usbliter8` | A12/A13 tethered jailbreak TUI (needs sudo) | `sudo ./W0lfSword ul8` |
-| `usbtest (u)` | USB cable + pairing + data round-trip — harmless, read-only | `./W0lfSword usbtest` |
+| `usbtest (u)` | USB cable + pairing + data round-trip. Harmless, read-only | `./W0lfSword usbtest` |
 | `panic` | classify .ips crash logs → kernel/SEP/MTE + known CVEs (BB-032..037) | `./W0lfSword panic analyze crash.ips` |
 | `kernelcache` | offline XPF offset research: resolve / diff / extract (K4.1 as a command) | `./W0lfSword kernelcache diff a.img4 b.img4` |
 | `status/offsets/audit --json` | machine-readable output for scripts and CI | `./W0lfSword status --json` |
@@ -256,6 +212,33 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 
 Log colors: green success, red errors, yellow retries, cyan structure, dim
 details. Devices, profiles and history live in `.w0lfsword/` (gitignored).
+
+## Features
+
+| What | How |
+|------|-----|
+| Kernel exploit | DarkSword: ICMPv6 socket spray + IOSurface physical OOB → kernel R/W |
+| Retries | Up to 5 attempts with backoff; first-try failures are normal |
+| Sandbox escape | Patches Filza's kernel sandbox rules to `/` |
+| SSV bypass | vnode redirection makes `/System`, `/usr`, `/bin` writable |
+| Root ownership | New files in system paths get `root:wheel`. Filza itself runs as root via the posix_cred patch after escape (K4.13) |
+| Root helper bypass | Filza's XPC calls intercepted, no helper app |
+| License bypass | "Binary modified" / activation alerts suppressed |
+| Padlock bypass | Edit/delete always allowed, confirmation dialogs skipped |
+| Zip/unzip | Via Filza's own minizip, function pointers validated |
+| Userspace read escape | bad_query containermanagerd traversal (26.0–26.6.1) + MCM bridge. Container reads work even before the kernel exploit (K4.10/K4.11) |
+| Kill switch | `touch /var/mobile/Documents/.filza_tweak_disable` |
+| Logging | Everything in `/tmp/FilzaTweak.log` (4MB rotation) |
+
+## Supported devices
+
+| iOS | A12–A14 | A15 | A16 | A17 | A18 | M1–M4 |
+|-----|---------|-----|-----|-----|-----|-------|
+| 17.0–17.7 | yes | yes | yes | yes | no | yes |
+| 18.0–18.7.7 | yes | yes | yes | yes | yes | yes |
+| 26.0–26.0.1 | yes | yes | yes | yes | yes | yes |
+
+Not supported: iPhone 17 (A19), M5 iPads. MTE blocks kernel R/W there.
 
 ## What gets installed on the phone
 
@@ -270,29 +253,41 @@ Two files, nothing else:
 It injects into `com.tigisoftware.Filza` and `com.tigisoftware.Filza000`
 (Filza 4.0.2). Restart Filza and the exploit runs.
 
-## How it works, short version
+<details>
+<summary><b>What's new in v1.1.0</b></summary>
 
-```
-Filza opens
-  → tweak loads, UI hooks active immediately (padlock/license/zip)
-  → 1s later: socket spray + OOB race → kernel R/W
-  → sandbox rules patched to "/"
-  → sealed system volume made writable
-  → full root access inside Filza
-```
+- `usbtest` command: harmless USB + pairing check. Covers usbmuxd, cable
+  visibility, trust pairing, Lightning connection type, a lockdown
+  diagnostics round-trip and a short syslog capture. Read-only, writes
+  nothing. Run it before `adderall` if the phone isn't found.
+- `panic` command: drop a .ips crash report or panic log in and it
+  classifies the crash (kernel / SEP / MTE / userspace), extracts the
+  xnu build, and maps it to known CVEs plus the BUG_BOUNTY findings
+  (BB-032..037). `panic fetch` pulls the latest report off the phone.
+- `kernelcache` command: offline XPF offset research. Resolve a
+  kernelcache's offsets, diff two builds (the K4.1 methodology), or
+  extract the kernelcache straight from an IPSW. No device needed.
+- `--json` flag on status / offsets / audit for machine-readable output
+  in scripts and CI.
+- Version-aware hints: right after device detection the script prints
+  gray text saying what actually works on that iOS version. Full kernel
+  exploit on 17.0–26.0.1, userspace-only (MCM / bad_query / fuzz) on
+  26.1+.
+- `adderall` gained the same USB round-trip probe and the version hints.
+- usbliter8 bundle refreshed from upstream. The offset-migration engine
+  (AArch64 fingerprinting, `migrate`/`propagate`, 10 A13 profiles) is now
+  bundled.
+- Exploit matrix corrected: usbliter8 is the A12/A13 SecureROM exploit
+  driven by an RP2350 board. It is not checkm8 (that was wrong).
 
-If the race loses, it retries up to 5 times, then gives up quietly. Filza
-keeps working, just without the exploit.
-
-![Architecture](W0lfSwordArchitecture.png)
-![Exploit Pipeline](W0lfSwordChain.png?v=2)
+</details>
 
 ## Troubleshooting
 
 "ESCAPE NOT CONFIRMED" after adderall:
 
-1. `./W0lfSword offsets <your iOS version>` — is it covered?
-2. `./W0lfSword log 100` — read the actual failure
+1. `./W0lfSword offsets <your iOS version>`. Is it covered?
+2. `./W0lfSword log 100`. Read the actual failure.
 3. Run it again. Attempts 1–2 failing is normal.
 
 Build problems:
@@ -305,11 +300,12 @@ Build problems:
 Device problems:
 
 - Filza crashes on launch → a previous run panicked the kernel, reboot the phone
-- `ssh: connect refused` / scp fails → OpenSSH is not listening on the phone
-  (port 22). This is the #1 cause of deploy failures and no transport fixes
-  it — USB SSH (`adderall --usb`, iproxy over usbmuxd) only replaces WiFi,
-  the phone still needs sshd running (install OpenSSH on the jailbreak).
-  Also verify the phone's IP: `./W0lfSword device add <ip>` if it changed.
+- `ssh: connect refused` / scp fails → OpenSSH is not listening on the
+  phone (port 22). This is the #1 cause of deploy failures and no
+  transport fixes it. USB SSH (`adderall --usb`, iproxy over usbmuxd)
+  only replaces WiFi. The phone still needs sshd running (install
+  OpenSSH on the jailbreak). Also verify the phone's IP:
+  `./W0lfSword device add <ip>` if it changed.
 - `Permission denied (publickey)` → run `ssh root@<phone-ip>` once and accept the key
 - Tweak does nothing → kill-switch flag is set, `./W0lfSword toggle off`
 - Writes fail on system paths → SSV didn't activate, check the log for `ensureSSVActive set active=1`
@@ -344,20 +340,20 @@ make package FINALPACKAGE=1 DEBUG=0   # release, no address-leak logging
 
 Adding a new iOS version: grab the kernelcache from the device, run XPF on
 it (see `tools/xpf-cli/` for doing this on your computer), add a
-`SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO` block in `kexploit/offsets.m`, test
-on hardware, open a PR. Run `./W0lfSword audit` before committing.
+`SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO` block in `kexploit/offsets.m`,
+test on hardware, open a PR. Run `./W0lfSword audit` before committing.
 
 ## Credits
 
-[Huy Nguyen](https://github.com/34306/) — original FilzaJailedDS ·
-[wh1te4ever](https://github.com/wh1te4ever/) — DarkSword exploit, XPF offset
-engine · [opa334](https://github.com/opa334/) — XPF patchfinder, krw
-primitives, sandbox structures · [khanhduytran0](https://github.com/khanhduytran0/) —
-sandbox hook token technique · [CrazyMind90](https://github.com/crazymind90/) —
-sandbox token acquisition via kernel R/W · [XEmaz](https://x.com/XEmaz_) —
+[Huy Nguyen](https://github.com/34306/) : original FilzaJailedDS ·
+[wh1te4ever](https://github.com/wh1te4ever/) : DarkSword exploit, XPF
+offset engine · [opa334](https://github.com/opa334/) : XPF patchfinder,
+krw primitives, sandbox structures · [khanhduytran0](https://github.com/khanhduytran0/) :
+sandbox hook token technique · [CrazyMind90](https://github.com/crazymind90/) :
+sandbox token acquisition via kernel R/W · [XEmaz](https://x.com/XEmaz_) :
 SSV bypass, root chown, padlock/license bypass, zip hooks ·
-[kaffeindecaf](https://github.com/kaffeindecaf/) — 26.0.1 stability, retries,
-threading, logging, tooling.
+[kaffeindecaf](https://github.com/kaffeindecaf/) : 26.0.1 stability,
+retries, threading, logging, tooling.
 
 Built with knowledge from [felix-pb/kfd](https://github.com/felix-pb/kfd),
 [opa334/TrollStore](https://github.com/opa334/TrollStore) and
@@ -387,23 +383,25 @@ Highlights preserved in the archive:
 - Kernel bugs: `CVE-2026-20687` (AppleJPEGDriver UAF), `DirtySlide`
   (CVE-2026-43724), `SEP-Exhaustion-Kernel-Panic`
 - Sandbox escapes: `bad_query` (containermanagerd traversal, iOS 26–27),
-  `FilzaSlop` (MCM container access — ported into `kexploit/mcm_bridge.m`)
+  `FilzaSlop` (MCM container access, ported into `kexploit/mcm_bridge.m`)
 - Bootchain: `usbliter8-fun`, `usbliter8-fun2` (A12/A13 SecureROM, iOS 27)
 - Tooling: `iDevice-Toolkit` (CVE-2025-24203), `Mugunghwa`, `opainject`,
   `TrollStore`
 
 The active research doc is
-[`referenceforAI/SandboxEscape.md`](referenceforAI/SandboxEscape.md) — hunting
-a new sandbox escape for iOS 26.1, ImageIO memory corruption angle.
+[`referenceforAI/SandboxEscape.md`](referenceforAI/SandboxEscape.md),
+hunting a new sandbox escape for iOS 26.1 via the ImageIO memory
+corruption angle.
 
 ## More docs
 
-`CONTEXT.md` — project knowledge base, start here when resuming ·  
-`ROADMAP.md` — the task list · `BUG_BOUNTY.md` — security findings with Apple
-bounty ranges · `AUDIT_REPORT.md` — audit findings and fixes ·  
-`DEBUG_TRACKING.md` — every log statement mapped · `BUILD.md` — Theos setup
-and troubleshooting · `research/README.md` — index of research tooling and
-deep-dive docs (fuzz harness, AppleJPEG campaign, moreprojects analysis).
+`CONTEXT.md` : project knowledge base, start here when resuming ·
+`ROADMAP.md` : the task list · `BUG_BOUNTY.md` : security findings with
+Apple bounty ranges · `AUDIT_REPORT.md` : audit findings and fixes ·
+`DEBUG_TRACKING.md` : every log statement mapped · `BUILD.md` : Theos
+setup and troubleshooting · `research/README.md` : index of research
+tooling and deep-dive docs (fuzz harness, AppleJPEG campaign,
+moreprojects analysis).
 
 ## License
 
