@@ -15,6 +15,9 @@
 
 | File | Topic |
 |------|-------|
+| `audio_frameworks.md` | C4 campaign: audio attack-surface map (AudioToolbox/CoreAudio/CoreMedia), auditable-surface check, ASAN-verified ALAC findings BB-038 (partialFrame numSamples heap overflow) + BB-039 (cookie OOB read), repro harnesses in `alac_poc/`, next steps |
+| `other_frameworks.md` | C4.4 survey: 8 ranked userspace targets beyond ImageIO/audio (CoreText/FontParser, CoreMedia, PDFKit, libxml2, mDNSResponder, ICU, Quick Look/ModelIO, CoreImage) with verified CVE catalog, hunt approaches, and the dyld-cache RE workflow. Top pick: CVE-2025-43400 FontParser OOB write live on the 18.4.1 test device (BB-040) |
+| `alac_poc/` | ASAN PoC harnesses for the ALAC findings: harness_overflow.cpp (partialFrame heap overflow), harness_cookie.cpp (Init cookie OOB read), harness_multitest.cpp (T1/T2/T5/T6 variants: escape-path overflow, 1-byte frame OOB read, truncated compressed frame OOB read, frma+alac cookie underflow). Build against a clone of github.com/apple/ALAC |
 | `moreprojects_deep_dive.md` | The 5 new `referenceforAI/moreprojects` repos: CVE-2026-20687 (AppleJPEGDriver kernel UAF), DirtySlide (dyld slide LPE), CVE-2026-28990 (EXR ImageIO heap overflow), Glass-Cage duplicate, SEP exhaustion DoS — bug mechanics + W0lfSword relevance + menu-integration assessment |
 | `applejpeg_cve-2025-43539.md` | K4.8: AppleJPEG (userspace codec) OOB-write campaign — decode paths, fuzzer recipes, hardware reproduction checklist, Chain B escalation |
 | `bug_bounty_writeup.md` | DarkSword-ecosystem findings mapped to Apple bounty categories (KASLR leak, sandbox escape, etc.) |

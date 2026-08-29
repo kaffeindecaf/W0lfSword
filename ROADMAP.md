@@ -54,6 +54,26 @@
 - [x] `K4.14` 🟡 — **kcwatch kernel-delta watcher M1 + M2** (research/kcwatch.md)  \
   _Done 2026-08-25: scripts/kczip.py (zip64 remote range reader: EOCD/zip64 locator, retries, CRC-32 over UNCOMPRESSED data, auto raw-deflate), scripts/kcwatch.py (poll → fetch → resolve → diff → render + offsets.m verdict; --board/--version/--dry-run/--json; KCWATCH_DIR env for feed deployments), CLI `./W0lfSword kcwatch` (menu `w`, 5-place wiring). Validated live on t8030: 26.6 → 26.6.1 (xnu-12377.162.13~2 → .14~4) = 51 identical / 12 symbol shifts / 0 struct moves, verdict YES. xpf_diff.py gained the degraded (resolved↔UNRESOLVED) category. M2: public feed repo **kaffeindecaf/kernel-deltas** live — README, kernel-deltas.md feed, vendored pipeline, committed state, GitHub Actions cron (run validated green)._
 
+## 0.4 — Framework research campaign (2026-08-29, audio + media)
+
+> Full detail in Section C4. Started from the buffer-overflow / decoder
+> angle: Apple's audio frameworks (AudioToolbox, CoreAudio, CoreMedia
+> audio), then other userspace frameworks. Host-side audits + fuzz where
+> possible; hardware-gated parts stay open for later.
+
+- [x] `C4.1` ⚪ — Audio framework attack surface map + CVE catalog
+  _Done 2026-08-29: map in research/audio_frameworks.md (AudioToolbox/CoreAudio/CoreMedia entry points, formats, open-source status). CVE catalog merged from NVD/P0 research — see research/audio_frameworks.md + other_frameworks.md._
+- [x] `C4.2` ⚪ — Open-source code audit: ALAC decoder, apple-oss-distributions/CoreAudio
+  _Done 2026-08-29: apple-oss-distributions has NO CoreAudio (verified via git ls-remote; org = ICU/Libiconv/libxml2/mDNSResponder only). Audited apple/ALAC instead: two ASAN-verified bugs (BB-038 partialFrame numSamples heap overflow, BB-039 Init cookie OOB read) + unbounded bitstream reads. Harnesses in research/alac_poc/._
+- [ ] `C4.3` ⚪ — Audio fuzz harness (host + SE 18.4.1 probe)
+  _Host-side libFuzzer target over ALACDecoder planned (research/audio_frameworks.md next steps). On-device probe hardware-gated: no phone attached this session (iproxy 2222 refused)._
+- [x] `C4.4` ⚪ — Other framework targets (CoreMedia/CoreText/PDFKit/libxml2/ICU/mDNSResponder)
+  _Done 2026-08-29: research/other_frameworks.md — 8 ranked targets, verified CVE catalog (41 CVEs cited), dyld-cache RE workflow. Top lead: CVE-2025-43400 FontParser OOB write LIVE on the 18.4.1 test device (BB-040), fix recoverable by diffing libFontParser 18.4.1 vs 18.7.1._
+- [x] `C4.5` ⚪ — IPSW userspace extraction feasibility (rootfs DMG encryption)
+  _Done 2026-08-29: rootfs DMG is encrypted; kernel-deltas pipeline extracts only the kernelcache (20MB of an 8.45GB IPSW). Userspace frameworks come from the on-device dyld shared cache instead (blacktop/ipsw). No kernel offsets needed for the userspace findings so far._
+- [x] `C4.6` ⚪ — BUG_BOUNTY.md entries for confirmed findings (BB-022+)
+  _Done 2026-08-29: BB-038 (ALAC heap overflow, ASAN-verified), BB-039 (ALAC cookie OOB read, ASAN-verified), BB-040 (FontParser OOB write live on 18.4.1). Next-steps list extended with the audio probe + FontParser diff plan._
+
 ---
 
 ## LEGEND
@@ -453,6 +473,52 @@
 
 - [ ] `C3.4` ⚪ — Apple Pay / Wallet NFC emulation  
   _Prompt:_ "Research: can kernel R/W be used to interact with the NFC controller? Look at the NFC driver in IOKit (PN548, etc.). Can we read card data that's been provisioned to Apple Pay? Can we emulate a payment? This is extremely sensitive and potentially high-value for bug bounty."
+
+---
+
+## C4 — Framework Attack Surface: Audio & Media (campaign 2026-08-29)
+
+> Goal: find buffer overflows and other memory-safety bugs in Apple's
+> media frameworks, starting with audio decoding. Deliverables: attack
+> surface map, CVE catalog, open-source audits (ALAC / CoreAudio),
+> fuzz harness, BUG_BOUNTY entries. IPSW/kernelcache work via
+> kernel-deltas only if a finding needs offsets.
+
+- [x] `C4.1` ⚪ — Audio framework attack surface map: AudioToolbox
+  (AudioFile, AudioFileStream, AudioConverter, ExtAudioFile, AudioQueue,
+  AudioCodec), CoreAudio, CoreMedia audio paths. Formats: CAF, WAVE, AIFF,
+  MP3, AAC/ADTS, ALAC, FLAC. Entry points for fuzzing.
+  _Prompt:_ document in research/audio_frameworks.md
+  _Done 2026-08-29: research/audio_frameworks.md._
+- [x] `C4.2` ⚪ — CVE catalog for audio decoding (2015-2026): component,
+  root cause class, fixed version, live-vs-patched on 18.4.1 / 26.x.
+  Confirmed live bugs go to BUG_BOUNTY.md.
+  _Done 2026-08-29: catalog merged into research/audio_frameworks.md +
+  other_frameworks.md (audio CVEs incl. P0 CoreAudio fuzzing
+  CVE-2024-54529, CVE-2025-31200 APAC HOA decoder)._
+- [x] `C4.3` ⚪ — Audit open-source Apple audio code for overflows:
+  apple/ALAC decoder, apple-oss-distributions/CoreAudio,
+  AudioVideoBundles. Evidence per finding (file:line, trigger, impact).
+  _Done 2026-08-29: CoreAudio/AudioVideoBundles absent from the org
+  (verified). ALAC audit: BB-038 + BB-039 ASAN-verified, harnesses in
+  research/alac_poc/._
+- [ ] `C4.4` ⚪ — Audio fuzz harness reusing K4.2 patterns: ALAC/CAF/WAV
+  seeds, structure-aware mutator, host-side (libFuzzer/AFL++ if
+  feasible) then on-device probe on SE 18.4.1 (ExtAudioFile /
+  AVAudioPlayer decode).
+- [x] `C4.5` ⚪ — Other framework targets: CoreMedia sample buffers,
+  CoreText fonts, PDFKit, libxml2, ICU, mDNSResponder, Quick Look.
+  Rank by open-source availability, parser size, CVE density.
+  _Done 2026-08-29: research/other_frameworks.md — 8 targets ranked,
+  top lead CVE-2025-43400 FontParser live on 18.4.1 (BB-040)._
+- [x] `C4.6` ⚪ — IPSW userspace extraction: rootfs DMG is encrypted;
+  only the kernelcache is extractable via the kernel-deltas pipeline.
+  Notate as blocked if keys unavailable.
+  _Done 2026-08-29: confirmed blocked — userspace frameworks come from
+  the on-device dyld shared cache (blacktop/ipsw), not IPSWs._
+- [x] `C4.7` ⚪ — BUG_BOUNTY.md: confirmed findings as BB-022+ with
+  evidence (file:line, trigger, impact, bounty category).
+  _Done 2026-08-29: BB-038, BB-039, BB-040 added._
 
 ---
 
