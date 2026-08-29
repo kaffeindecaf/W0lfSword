@@ -1245,8 +1245,10 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 ## L2 — App Shell & Packaging
 
-- [ ] `L2.1` 🔴 — **Pick the build path and prove it**: Theos application target (`iphone:clang:latest` + `application.mk`) with ObjC/UIKit UI is the only Linux-buildable option (no Swift toolchain on Linux). Spike: `pocs/hub_shell/` minimal app that launches and shows a label.
-- [ ] `L2.2` 🔴 — Engine extraction: makefile target that compiles `kexploit/*.m`, `sandbox_escape.m`, `SSV/*.m`, `utils/*.m`, `kpf/*.m`, `XPF/src/*.c` into `libw0lfengine.a` (no tweak-only files: Tweak.m, FilzaPadlockBypass.xm excluded). Must build standalone with the same CFLAGS as the tweak (A2/A3/A5 fixes included).
+- [x] `L2.1` 🔴 — **Pick the build path and prove it**: Theos application target (`iphone:clang:latest` + `application.mk`) with ObjC/UIKit UI is the only Linux-buildable option (no Swift toolchain on Linux). Spike: `pocs/hub_shell/` minimal app that launches and shows a label.
+  _Done 2026-08-29: pocs/hub_shell/ builds with the repo Theos (linux toolchain, iPhoneOS sdk): arm64 Mach-O (PIE, NOUNDEFS), Resources/Info.plist copied, Theos adhoc-sign step passes. Label app shows L2.1/L2.2/L3.1 status + runtime offset resolution. `make clean` verified. Theos application path proven on Linux._
+- [x] `L2.2` 🔴 — Engine extraction: makefile target that compiles `kexploit/*.m`, `sandbox_escape.m`, `SSV/*.m`, `utils/*.m`, `kpf/*.m`, `XPF/src/*.c` into `libw0lfengine.a` (no tweak-only files: Tweak.m, FilzaPadlockBypass.xm excluded). Must build standalone with the same CFLAGS as the tweak (A2/A3/A5 fixes included).
+  _Done 2026-08-29: `make libengine` → scripts/build_libengine.sh — 48 objects (kexploit 18 + sandbox_escape + SSV + utils 5 + kpf + XPF/src 6 + ChOma 17), ar rcs → .theos/libengine/libw0lfengine.a (660K). Same -I flags + -DDEBUG as the tweak; Tweak.m/TweakExploit.m/FilzaPadlockBypass.xm excluded. Key symbols verified via nm: kexploit_opa334, sandbox_escape, offsets_init, bad_query_escape, mcm_bridge_available, patch_sandbox_ext, set_root_credentials._
 - [ ] `L2.3` 🟠 — Entitlements: base `get-task-allow` (debug) + `platform-application` only for the TrollStore build (TrollStore grants it); document why the plain sideload build omits it.
 - [ ] `L2.4` 🟠 — Codesign: Procursus `ldid -S` (vendored scripts/ldid) + `jbctl trustcache add` recipe from the tweak chain (skill: w0lfsword-toolkit-dev) — the dylib-in-app must be signed or dyld refuses it.
 - [ ] `L2.5` 🟠 — `scripts/build_hub_ipa.sh`: Theos build → ldid sign → .ipa assemble (Payload/W0lfSwordHub.app) → optional version bump. Verify with `unzip -l` + `ldid -h`.
@@ -1254,7 +1256,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 ## L3 — Reuse the W0lfSword Engine
 
-- [ ] `L3.1` 🔴 — Boot path in-app: on launch, resolve offsets for the running iOS version (port the offsets.m threshold logic — reuse `scripts/test_offsets.py`'s parse output at build time to generate a compact `offsets.json`).
+- [x] `L3.1` 🔴 — Boot path in-app: on launch, resolve offsets for the running iOS version (port the offsets.m threshold logic — reuse `scripts/test_offsets.py`'s parse output at build time to generate a compact `offsets.json`).
+  _Done 2026-08-29: scripts/gen_offsets_json.py (make offsets-json) parses kexploit/offsets.m threshold blocks (test_offsets.py logic), drops 0xdeaddead sentinels, emits cumulative effective tables → pocs/hub_shell/Resources/offsets.json (8 thresholds 17.0→26.0, 72 unique offsets; itk_space 0x310 at 26.0 verified). Bundled into the app by Theos (offsets.json in the .app wrapper, verified). In-app boot path in AppDelegate.m resolveOffsetsInfo: picks highest threshold <= running iOS, reports offset count + itk_space; unsupported iOS handled._
 - [ ] `L3.2` 🟠 — XPF integration: embed the XPF-verified offset table (kcwatch data; export via `kcwatch index --json` when available). If the running version has no table entry → show "unsupported iOS" and disable kernel paths.
 - [ ] `L3.3` 🟠 — Engine entry: `kexploit_opa334()` + `sandbox_escape()` + `patch_sandbox_ext()` callable from the app with the same error codes (utils/errors.h — TWEAK_ERR_*).
 - [ ] `L3.4` 🟡 — Keep the crash-safety from the tweak: port the A3.1 crash counter + auto-disable flag + success flag into the engine (app-scoped paths: Library/Application Support/ instead of /var/mobile/Documents).

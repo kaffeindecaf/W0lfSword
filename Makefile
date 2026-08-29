@@ -66,6 +66,18 @@ mha:
 	@test -n "$(IPA)" || { echo "  ✗ usage: make mha IPA=/path/Filza.ipa [OUT=Filza-MHA.ipa]"; exit 1; }
 	bash scripts/re-sign_mha.sh "$(IPA)" "$(MHA_DYLIB)" "$(OUT)"
 
+# L2.2 — engine extraction: kexploit/sandbox/SSV/utils/kpf/XPF (no tweak-only
+# files) as a standalone static lib for the W0lfSword Hub app. Same CFLAGS as
+# the tweak. Output: .theos/libengine/libw0lfengine.a
+libengine:
+	bash scripts/build_libengine.sh
+
+# L3.1 — build-time offsets.json for the Hub app (cumulative offset table per
+# iOS threshold, parsed from kexploit/offsets.m). Bundled at
+# pocs/hub_shell/Resources/offsets.json.
+offsets-json:
+	python3 scripts/gen_offsets_json.py
+
 FilzaApplySandboxExt_CCFLAGS = $(FilzaApplySandboxExt_CFLAGS)
 FilzaApplySandboxExt_OBJCFLAGS = $(FilzaApplySandboxExt_CFLAGS)
 FilzaApplySandboxExt_OBJCCFLAGS = $(FilzaApplySandboxExt_CFLAGS)
