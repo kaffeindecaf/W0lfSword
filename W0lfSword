@@ -274,6 +274,52 @@ select_exploit() {
     esac
 }
 
+# K5.9 — auto-select the best attack chain for a device (iOS version + model).
+# Letters follow the K5 chain matrix (ROADMAP K5): A DarkSword, B userspace/
+# ImageIO, D bootchain, E PUAF. Order per K5.9: DarkSword offsets → A; else
+# 16.x → E; else A11- → D; else userspace bug → B; else nothing.
+# Prints: "<id>|<name>|<status>|<why>"
+select_best_chain() {
+    local ver="$1" model="$2"
+    [ -n "$ver" ] || { echo "|unknown||no iOS version"; return; }
+    local major minor
+    major="${ver%%.*}"; minor="${ver#*.}"; minor="${minor%%.*}"
+    [ -n "$major" ] || { echo "|unknown||unparseable version $ver"; return; }
+    local method; method=$(select_exploit "$model")
+
+    # K5 A — DarkSword kernel R/W (→ C5.3 chain B): A12+ on 17.0–26.0.1
+    if { [ "$method" = pe_v1 ] || [ "$method" = pe_v2 ]; } \
+       && [ "$major" -ge 17 ] \
+       && { [ "$major" -lt 26 ] || { [ "$major" -eq 26 ] && [ "$minor" -le 0 ]; }; }; then
+        echo "A|DarkSword kernel R/W|implemented|17.0–26.0.1, $method (stages: chains b)"
+        return
+    fi
+    # K5 E — kfd PUAF fallback: 16.x
+    if [ "$major" -eq 16 ]; then
+        echo "E|kfd PUAF fallback|port pending|16.x — K5.3"
+        return
+    fi
+    # K5 D — bootchain: A9–A11 checkm8, A12/A13 usbliter8 tethered
+    case "$model" in
+        iPhone8,*|iPhone9,*|iPhone10,*)   # A9–A11
+            echo "D|checkm8 bootchain|usbliter8-fun2|A9–A11, 15.6–27.0b"
+            return
+            ;;
+        iPhone1[1-2],*)    # A12/A13 — usbliter8 when the kernel gate is closed
+            if [ "$major" -ge 26 ]; then
+                echo "D|usbliter8 tethered|implemented|A12/A13, any iOS (needs RP2350 board)"
+                return
+            fi
+            ;;
+    esac
+    # K5 B — userspace escape (→ C5.3 chain A): bad_query/MCM on 26.1+
+    if [ "$major" -ge 26 ]; then
+        echo "B|userspace escape (bad_query/MCM)|implemented|26.1+ no-kernel route (stages: chains a)"
+        return
+    fi
+    echo "|no chain||DarkSword needs A12+ ≤26.0.1; kfd port (K5.3) would cover 16.x + A10/A11"
+}
+
 soc_family() {
     case "$1" in
         iPhone8,*|iPhone9,*|iPhone10,*) echo "A9-A11";;
@@ -1388,7 +1434,38 @@ CHAIN G — FontStrike: the SE2's complete live chain (18.4.1)
           CoreAudio plugin is disassembly-confirmed.
 EOF
             ;;
-        *) printf "  ${C_DIM}chains <a|b|c|d|e|f|g> for a chain's stages. Full writeup: research/attack_chains.md${NC}\n" ;;
+        best|auto)
+            local IOS_VER="${2:-}" DEV_MODEL="${3:-}"
+            if [ -z "$IOS_VER" ]; then
+                # detect like the tweak probe: USB first, then saved IP over SSH
+                if command -v idevice_id &>/dev/null; then
+                    local uuid; uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
+                    if [ -n "$uuid" ]; then
+                        DEV_MODEL=$(ideviceinfo -k ProductType 2>/dev/null || echo "")
+                        IOS_VER=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
+                    fi
+                fi
+                if [ -z "$IOS_VER" ]; then
+                    local IP; IP=$(get_device_ip)
+                    if [ -n "$IP" ] && ping_check "$IP"; then
+                        IOS_VER=$(ssh_safe "root@$IP" "sw_vers -productVersion" 2>/dev/null || echo "")
+                        DEV_MODEL=$(ssh_safe "root@$IP" "sysctl -n hw.machine" 2>/dev/null || echo "")
+                    fi
+                fi
+            fi
+            local best; best=$(select_best_chain "$IOS_VER" "$DEV_MODEL")
+            local bid bname bstatus bwhy
+            IFS='|' read -r bid bname bstatus bwhy <<<"$best"
+            if [ -z "$bid" ]; then
+                echo -e "  ${C_RED}no chain available for this device${NC}"
+                [ -n "$bwhy" ] && echo -e "  ${C_DIM}${bwhy}${NC}"
+            else
+                echo -e "  device: ${C_EYE}${DEV_MODEL:-<none>}${NC} · iOS ${C_EYE}${IOS_VER:-<none>}${NC}"
+                echo -e "  best chain (K5 matrix): ${C_FROST}${bid} — ${bname}${NC} [${C_GRN}${bstatus}${NC}]"
+                echo -e "  ${C_DIM}${bwhy}${NC}"
+            fi
+            ;;
+        *) printf "  ${C_DIM}chains <a|b|c|d|e|f|g|best> for a chain's stages — 'chains best [iosver] [model]' auto-selects per device. Full writeup: research/attack_chains.md${NC}\n" ;;
     esac
     echo ""
     echo -e "  ${C_DIM}green = deployable today · yellow = research. Per-version status: research/attack_chains.md${NC}"

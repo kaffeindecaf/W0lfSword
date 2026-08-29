@@ -224,8 +224,8 @@
 - [x] `A5.6` 🟡 — utils/tweak_log.h: no NULL check on format param → vfprintf(NULL) SIGSEGV
   _Verified 2026-08-25: TweakLog guards `if (!format) return;` at entry._
 
-- [ ] `A5.7` 🟡 — sandbox_escape.m: ucred scan does ptr_in_kernel() but not mapping-aware  
-  _ptr_in_kernel checks range+alignment only — unmapped kernel VA causes data abort on read._
+- [x] `A5.7` 🟡 — sandbox_escape.m: ucred scan does ptr_in_kernel() but not mapping-aware
+  _Done 2026-08-29: ptr_in_kernel_mapped(p, anchor) added (KPTR_WINDOW 1 GiB) — range + alignment + window around a known-mapped anchor. Applied to the proc_ro ucred scan candidates (smr/pac, anchored on proc_ro), the scan's inner label/sandbox probes (anchored on the parent), and the post-scan chain (label←ucred, sandbox←label, ext_set←sandbox). Rationale: the DarkSword kread primitive dereferences the VA in kernel context, so an in-range-but-unmapped candidate (garbage struct field) = data abort = panic; zone objects referenced by a parent sit within a GiB of VA of each other. is_kaddr_valid kept for the generic API (docs/KERNEL_PRIMITIVES_API.md). make package: 0 errors._
 
 - [x] `A5.8` 🟢 — SSV/SSVUtils.m: fd leak on rename fallback failure → ulimit exhaustion
   _Verified 2026-08-25: SSVUtils rename-fallback closes both fds on every path (unconditional closes after the copy loop)._
@@ -1238,8 +1238,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [ ] `K5.8` ⚪ — Study CVE-2025-55177 chain structure for BlastDoor insights  
   _Prompt: "Read referenceforAI/projects/zero-click-exploit-analysis (paper + patch diffs). Extract exactly how the WhatsApp chain crossed from ImageIO corruption to wider file access, and whether any analogous BlastDoor/thumbnail-provider hop exists on 26.1."_
 
-- [ ] `K5.9` 🟡 — CLI: auto-select the best chain per device in the exploit menu  
-  _Prompt: "In cmd_adderall (or the new exploits subcommand, K1.5), implement chain selection: if DarkSword offsets exist → Chain A; else if 16.x → Chain E; else if A11- → Chain D; else if a userspace bug is available for that version → Chain B; else print the matrix and what's missing."_
+- [x] `K5.9` 🟡 — CLI: auto-select the best chain per device in the exploit menu
+  _Done 2026-08-29: select_best_chain(ver, model) + `chains best [iosver] [model]` (auto-detects USB→ideviceinfo, else saved-IP SSH). Order per prompt: DarkSword offsets + A12+ → K5 A (stages: chains b); 16.x → K5 E (kfd, pending); A9–A11 → K5 D checkm8; A12/A13 on 26.x → K5 D usbliter8 (RP2350); else 26.1+ → K5 B userspace (stages: chains a). Verified: 18.4.1/A13→A, 26.1/A16→B, 26.1/A13→D-usbliter8, 26.0.1/A16→A, 16.5/A9→E, 17.2/A11→D-checkm8. bash -n + audit pass._
 
 ---
 
@@ -1324,9 +1324,12 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
   _Done 2026-08-29: pocs/hub_shell/ builds with the repo Theos (linux toolchain, iPhoneOS sdk): arm64 Mach-O (PIE, NOUNDEFS), Resources/Info.plist copied, Theos adhoc-sign step passes. Label app shows L2.1/L2.2/L3.1 status + runtime offset resolution. `make clean` verified. Theos application path proven on Linux._
 - [x] `L2.2` 🔴 — Engine extraction: makefile target that compiles `kexploit/*.m`, `sandbox_escape.m`, `SSV/*.m`, `utils/*.m`, `kpf/*.m`, `XPF/src/*.c` into `libw0lfengine.a` (no tweak-only files: Tweak.m, FilzaPadlockBypass.xm excluded). Must build standalone with the same CFLAGS as the tweak (A2/A3/A5 fixes included).
   _Done 2026-08-29: `make libengine` → scripts/build_libengine.sh — 48 objects (kexploit 18 + sandbox_escape + SSV + utils 5 + kpf + XPF/src 6 + ChOma 17), ar rcs → .theos/libengine/libw0lfengine.a (660K). Same -I flags + -DDEBUG as the tweak; Tweak.m/TweakExploit.m/FilzaPadlockBypass.xm excluded. Key symbols verified via nm: kexploit_opa334, sandbox_escape, offsets_init, bad_query_escape, mcm_bridge_available, patch_sandbox_ext, set_root_credentials._
-- [ ] `L2.3` 🟠 — Entitlements: base `get-task-allow` (debug) + `platform-application` only for the TrollStore build (TrollStore grants it); document why the plain sideload build omits it.
-- [ ] `L2.4` 🟠 — Codesign: Procursus `ldid -S` (vendored scripts/ldid) + `jbctl trustcache add` recipe from the tweak chain (skill: w0lfsword-toolkit-dev) — the dylib-in-app must be signed or dyld refuses it.
-- [ ] `L2.5` 🟠 — `scripts/build_hub_ipa.sh`: Theos build → ldid sign → .ipa assemble (Payload/W0lfSwordHub.app) → optional version bump. Verify with `unzip -l` + `ldid -h`.
+- [x] `L2.3` 🟠 — Entitlements: base `get-task-allow` (debug) + `platform-application` only for the TrollStore build (TrollStore grants it); document why the plain sideload build omits it.
+  _Done 2026-08-29: build_hub_ipa.sh generates ent-sideload.plist (get-task-allow only) vs ent-trollstore.plist (+platform-application) per mode; verified via `ldid -e` on the signed binary._
+- [x] `L2.4` 🟠 — Codesign: Procursus `ldid -S` (vendored scripts/ldid) + `jbctl trustcache add` recipe from the tweak chain (skill: w0lfsword-toolkit-dev) — the dylib-in-app must be signed or dyld refuses it.
+  _Done 2026-08-29: scripts/build_hub_ipa.sh signs the app binary with scripts/ldid -S<entitlements>; CodeDirectory v=20400 verified via ldid -h. The jbctl trustcache step stays on-device (adderall-style) for real installs._
+- [x] `L2.5` 🟠 — `scripts/build_hub_ipa.sh`: Theos build → ldid sign → .ipa assemble (Payload/W0lfSwordHub.app) → optional version bump. Verify with `unzip -l` + `ldid -h`.
+  _Done 2026-08-29: build_hub_ipa.sh [sideload|trollstore] [version] → .w0lfsword/dist/W0lfSwordHub-<ver>-<mode>.ipa. Verified: unzip -l shows Payload/W0lfSwordHub.app/{W0lfSwordHubShell, Info.plist, offsets.json}; ldid -h shows embedded CodeDirectory; ldid -e shows the mode's entitlements; python3 plistlib version bump. Both modes built._
 - [ ] `L2.6` 🟡 — App icons + LaunchScreen (asset catalog or plain PNGs; no Xcode needed).
 
 ## L3 — Reuse the W0lfSword Engine

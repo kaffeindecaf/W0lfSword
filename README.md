@@ -189,7 +189,7 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `status` | project health overview | `./W0lfSword status` |
 | `offsets [ver]` | offset coverage per iOS version | `./W0lfSword offsets 26.0` |
 | `exploits` | technique matrix: what works on your device (K1.5) | `./W0lfSword exploits` |
-| `chains [a-e]` | attack chain catalog: 5 chains with stages, versions, implementation status (C5.3) | `./W0lfSword chains a` |
+| `chains [a-g\|best]` | attack chain catalog with stages; `chains best` auto-selects for the connected device (K5.9) | `./W0lfSword chains best` |
 | `cve [filter]` | CVE tracker: kernel / userspace / sandbox / tcc / ssv / live (C5.1/C5.2) | `./W0lfSword cve live` |
 | `poclab list` | PoC lab: found-but-unimplemented bugs with status (tested / blocked / needs-device) | `./W0lfSword poclab list` |
 | `poclab test <id>` | run a host-side PoC: `alac` (ASAN harnesses, BB-038/039), `libxml2-diff` (fork comparison) | `./W0lfSword poclab test alac` |

