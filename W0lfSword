@@ -1487,6 +1487,63 @@ cmd_cve() {
 }
 
 # ═══════════════════════════════════════════════════════════════
+#  POCLAB — proof-of-concept lab (C6): found-but-unimplemented bugs
+# ═══════════════════════════════════════════════════════════════
+
+poclab_concepts() {
+    # id|name|status|why
+    cat <<'EOF'
+alac|ALAC decoder overflow (BB-038/BB-039)|TESTED-WORKING|ASAN heap write + cookie OOB read reproduced on host
+libxml2-diff|libxml2 fork-diff (Apple vs upstream)|TESTED-NEGATIVE|no exploitable divergence in the tested shapes
+mdns|mDNSResponder record-decoder fuzz|BLOCKED|mbedtls dep chain; no passwordless sudo on this host
+dirtyslide|DirtySlide kernel OOB R/W (CVE-2026-43724)|NEEDS-MACOS|syscall-536 exploit is macOS-kernel; iOS needs SPTM-free + sandbox bypass
+bl_sbx|itunesstored/bookassetd write-escape (BB-041)|NEEDS-DEVICE|requires AFC/USB write + 3 reboots on a real phone
+fontparser|FontParser OOB write diff (CVE-2025-43400)|NEEDS-CACHE|18.4.1 vs 18.7.1 libFontParser dyld-cache diff; no device attached
+cve-2025-46285|kernel timestamp LPE (K4.7)|NEEDS-DEVICE|26.1 device required for trigger validation
+apac|APAC HOA remapper (CVE-2025-31200)|PATCHED|fixed exactly in 18.4.1 (the test device)
+cve-2025-43329|sandbox perms escape (BB-042)|NEEDS-DEVICE|stock 18.x device; SE2 is jailbroken (alters sandbox)
+EOF
+}
+
+cmd_poclab() {
+    local sub="${1:-list}"
+    show_header
+    echo ""
+    section "PoC Lab (C6) — found-but-unimplemented bugs"
+    case "$sub" in
+        list|ls|status)
+            printf "  ${C_FROST}%-16s${NC} %-42s %-16s %s\n" "ID" "Concept" "Status" "Why"
+            printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 108)"
+            while IFS='|' read -r id name status why; do
+                [ -z "$id" ] && continue
+                case "$status" in
+                    TESTED-WORKING)       scol="$C_GRN";;
+                    TESTED-NEGATIVE|PATCHED) scol="$C_EYE";;
+                    *)                    scol="$C_AMB";;
+                esac
+                printf "  ${C_FROST}%-16s${NC} %-42s ${scol}%-16s${NC} %s\n" "$id" "$name" "$status" "$why"
+            done < <(poclab_concepts)
+            echo ""
+            echo -e "  ${C_DIM}test <id> runs the host-side test where possible. Docs: research/poclab.md${NC}"
+            ;;
+        test)
+            local id="${2:-}"
+            case "$id" in
+                alac)          bash scripts/poclab_test_alac.sh;;
+                libxml2-diff|libxml2) bash scripts/poclab_test_libxml2.sh;;
+                *)
+                    echo -e "  ${C_RED}unknown concept: ${id:-<none>}${NC}"
+                    echo -e "  ${C_DIM}testable now: alac, libxml2-diff${NC}"
+                    echo -e "  ${C_DIM}blocked (see 'poclab list'): mdns, dirtyslide, bl_sbx, fontparser, cve-2025-46285, apac, cve-2025-43329${NC}"
+                    ;;
+            esac
+            ;;
+        *) echo -e "  ${C_RED}usage: poclab list | poclab test <alac|libxml2-diff>${NC}";;
+    esac
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
 #  POC — panic-PoC lab (research only — crashes the device)
 # ═══════════════════════════════════════════════════════════════
 
@@ -2296,6 +2353,7 @@ draw_menu() {
     menu_opt 7 "Diagnostics"      "doctor · audit · status"
     menu_opt 8 "Targets & Exploits" "supported apps · technique matrix"
     menu_opt n "Chains & CVEs"      "attack chain catalog · CVE tracker (C5)"
+    menu_opt o "PoC Lab"            "test found-but-unimplemented bugs (C6)"
     menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
     menu_opt u "USB Test"         "cable · pairing · data round-trip (harmless)"
     menu_opt p "Panic Analyzer"   "classify .ips crash logs → known CVEs (BB-032..037)"
@@ -2407,6 +2465,7 @@ run_menu() {
             exploits|e)   cmd_exploits || true;;
             chains|ch)    cmd_chains || true;;
             cve)          cmd_cve || true;;
+            poclab|o)     cmd_poclab || true;;
             # usbliter8-arctic
             9|ul8|usbliter8)
                 if [ "$EUID" -ne 0 ]; then
@@ -2438,7 +2497,7 @@ run_menu() {
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n, or q${NC}";;
+                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -3587,6 +3646,18 @@ cve — the tracked CVE catalog (C5.1/C5.2).
   research are not yet confirmed on hardware.
 EOF
             ;;
+        poclab)
+            cat <<'EOF'
+poclab — proof-of-concept lab (C6).
+  Found-but-unimplemented bugs, with a runnable host-side test where
+  possible and an honest blocker reason otherwise. 'poclab list' shows
+  the catalog with status (TESTED-WORKING / TESTED-NEGATIVE / BLOCKED /
+  NEEDS-DEVICE). 'poclab test alac' builds and runs the ALAC ASAN
+  harnesses (BB-038/BB-039). 'poclab test libxml2-diff' builds Apple's
+  libxml2 fork vs upstream and runs the crafted-catalog harness.
+  Docs: research/poclab.md
+EOF
+            ;;
         poc)
             cat <<'EOF'
 poc — the panic-PoC lab (RESEARCH ONLY — crashes the device).
@@ -3736,8 +3807,8 @@ explain — plain-English explanations of commands.
 Usage: ./W0lfSword explain <command>   (e.g. explain adderall)
 Available: adderall, build, deploy, quick, safe, toggle, setup,
            doctor, status, monitor, log, reboot, offsets, tweaks,
-           exploits, chains, cve, poc, fuzz, usbliter8, usbtest, panic,
-           kernelcache, help
+           exploits, chains, cve, poclab, poc, fuzz, usbliter8, usbtest,
+           panic, kernelcache, help
 EOF
             ;;
     esac
@@ -3795,6 +3866,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "exploits (e)" "Exploit technique matrix (K1.5)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "chains"       "Attack chain catalog + stages (C5.3)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "cve [filter]" "CVE tracker: kernel|userspace|sandbox|tcc|ssv|live (C5.1/C5.2)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "poclab (o)"   "PoC lab: test found-but-unimplemented bugs — list | test <alac|libxml2-diff> (C6)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "toggle on|off" "Enable/disable tweak"
     printf "  ${C_EYE}%-14s${NC} %s\n" "history"      "Exploit stats + chart"
     echo ""
@@ -3884,6 +3956,7 @@ main() {
         exploits)  cmd_exploits "${args[@]}";;
         chains)    cmd_chains "${args[@]}";;
         cve)       cmd_cve "${args[@]}";;
+        poclab)    cmd_poclab "${args[@]}";;
         poc)       cmd_poc "${args[@]}";;
         fuzz)      cmd_fuzz "${args[@]}";;
         kcwatch)   cmd_kcwatch "${args[@]}";;

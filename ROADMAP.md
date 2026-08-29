@@ -91,6 +91,19 @@
 - [x] `C5.5` ⚪ — Documentation: research doc + BUG_BOUNTY entries for confirmed live findings
   _Done 2026-08-29: BB-041 (bl_sbx write-escape, ALIVE ≤26.2b1) + BB-042 (CVE-2025-43329 sandbox escape, LIVE all 18.x). Findings: 42 total._
 
+## 0.6 — PoC lab campaign (2026-08-29, test the found bugs)
+
+> Full detail in Section C6. Goal: turn the found-but-unimplemented bugs
+> into tested proof-of-concepts, document why each works or doesn't on
+> this host, and expose them through a new `poclab` CLI tab.
+
+- [x] `C6.1` ⚪ — Re-verify ALAC PoCs (BB-038/BB-039) end-to-end under ASAN
+- [x] `C6.2` ⚪ — libxml2 fork-diff test (apple-oss-distributions vs upstream)
+- [x] `C6.3` ⚪ — mDNSResponder Linux build + smoke test
+- [x] `C6.4` ⚪ — DirtySlide / bl_sbx / FontParser: why-not-testable analysis
+- [x] `C6.5` ⚪ — `poclab` CLI tab (list / test / status)
+- [x] `C6.6` ⚪ — research/poclab docs (human style, per-bug explanations)
+
 ---
 
 ## LEGEND
@@ -577,6 +590,68 @@
   doc; BUG_BOUNTY.md entries for confirmed live findings.
   _Done 2026-08-29: research/attack_chains.md + kernel26_cves.md +
   userspace_escapes.md; BUG_BOUNTY BB-041 + BB-042 (42 total)._
+
+---
+
+## C6 — PoC Lab (campaign 2026-08-29, test the found bugs)
+
+> Goal: take the found-but-unimplemented bugs, build and run proof-of-
+> concepts where the host allows, and write up why each one works or
+> doesn't. The `poclab` CLI tab lists every concept with a runnable
+> test or a blocker. Docs in research/poclab.md.
+
+- [x] `C6.1` ⚪ — ALAC PoCs (BB-038 partialFrame heap overflow, BB-039
+  cookie OOB read): re-verify both harnesses under ASAN on this host,
+  wire `poclab test alac` to build + run them against a cloned
+  apple/ALAC. Expected: heap-buffer-overflow WRITE (BB-038) + READ
+  (BB-039). Why it works: the reference decoder never bounds the
+  bitstream numSamples against the cookie-sized buffers.
+  _Done 2026-08-29: scripts/poclab_test_alac.sh (clone cached in
+  .w0lfsword/poclab/alac) builds both harnesses and both ASAN
+  signatures reproduce: heap-buffer-overflow WRITE at
+  ALACDecoder.cpp:309, stack-buffer-overflow READ at :102. Verdict
+  logic fixed once (set -euo pipefail turned the expected crash exit
+  into a pipeline failure; capture with || true instead)._
+- [x] `C6.2` ⚪ — libxml2 fork-diff: clone apple-oss-distributions/Libxml2
+  and GNOME upstream, compare versions + fix coverage. Expected result:
+  list of upstream security fixes Apple's fork has not synced, or
+  confirmation it is current. Wire `poclab test libxml2-diff`.
+  _Done 2026-08-29: TESTED-NEGATIVE, honest. Apple's fork is 2.9.13
+  (209013) vs upstream 2.15.0 (21600) but backports selectively:
+  CVE-2024-25062 reader guards + modern xmlParseInternalSubset present.
+  The nextCatalog dedup loop (f75abfca) is absent, but the c632489
+  NULL-deref fix guards only that loop, which Apple's code does not
+  have, so no exploitable divergence in the three malformed-catalog
+  shapes tested (scripts/poclab_cat.c). Real side findings: fork does
+  not compile on Linux without 2 patches (uri.c stdint, xpath.c Darwin
+  symbol stub)._
+- [x] `C6.3` ⚪ — mDNSResponder: try the Linux build (mDNSPosix), smoke
+  test the daemon. If it builds: candidate for the CVE-2015-7987-class
+  record-decoder fuzz later; if not, note the blocker.
+  _Done 2026-08-29: BLOCKED — mDNSPosix needs mbedTLS, the clone does
+  not vendor it, the mbedtls source needs its own submodules, and this
+  host has no passwordless sudo for libmbedtls-dev. Dependency chain,
+  not a code problem; the Makefile targets Linux explicitly. Left for
+  when deps are available._
+- [x] `C6.4` ⚪ — Why-not-testable analysis (host-side): DirtySlide
+  (macOS-only kernel, SPTM on A17+), bl_sbx (needs AFC/USB + device),
+  FontParser 43400 diff (needs dyld caches), CVE-2025-46285 (needs a
+  26.1 device), APAC (patched on 18.4.1). Each gets a blocker entry in
+  poclab + a short doc.
+  _Done 2026-08-29: all nine concepts documented in research/poclab.md
+  with status + reason + repro._
+- [x] `C6.5` ⚪ — `poclab` CLI tab: list (all concepts + status),
+  test <id> (runs the host-side test), status (tested / blocked /
+  needs-device). 5-place menu wiring, new menu entry.
+  _Done 2026-08-29: cmd_poclab + poclab_concepts wired in all 5 places
+  (dispatch, menu case, menu_opt o "PoC Lab", cmd_help, explain_text +
+  Available list). `poclab list` renders the table; `poclab test alac`
+  and `poclab test libxml2-diff` verified through the CLI. bash -n +
+  audit pass._
+- [x] `C6.6` ⚪ — research/poclab.md + per-bug docs: plain language,
+  why it works or doesn't, exact repro, evidence. No AI filler.
+  _Done 2026-08-29: research/poclab.md (9 concepts, terse plain style),
+  index row in research/README.md, README commands table rows._
 
 ---
 

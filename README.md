@@ -191,6 +191,8 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `exploits` | technique matrix: what works on your device (K1.5) | `./W0lfSword exploits` |
 | `chains [a-e]` | attack chain catalog: 5 chains with stages, versions, implementation status (C5.3) | `./W0lfSword chains a` |
 | `cve [filter]` | CVE tracker: kernel / userspace / sandbox / tcc / ssv / live (C5.1/C5.2) | `./W0lfSword cve live` |
+| `poclab list` | PoC lab: found-but-unimplemented bugs with status (tested / blocked / needs-device) | `./W0lfSword poclab list` |
+| `poclab test <id>` | run a host-side PoC: `alac` (ASAN harnesses, BB-038/039), `libxml2-diff` (fork comparison) | `./W0lfSword poclab test alac` |
 | `poc list` | panic-PoC catalog (research only, crashes the phone) | `./W0lfSword poc list` |
 | `poc sep-panic [ip]` | build + deploy + fire the SEP panic PoC | `./W0lfSword poc sep-panic` |
 | `poc exr [ip]` | deploy the CVE-2026-28990 EXR ImageIO trigger | `./W0lfSword poc exr` |
