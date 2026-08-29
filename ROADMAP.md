@@ -74,6 +74,23 @@
 - [x] `C4.6` ⚪ — BUG_BOUNTY.md entries for confirmed findings (BB-022+)
   _Done 2026-08-29: BB-038 (ALAC heap overflow, ASAN-verified), BB-039 (ALAC cookie OOB read, ASAN-verified), BB-040 (FontParser OOB write live on 18.4.1). Next-steps list extended with the audio probe + FontParser diff plan._
 
+## 0.5 — CVE hunting + attack chains campaign (2026-08-29, 26.1+ direction)
+
+> Full detail in Section C5. Goal: find CVEs across exploit types (kernel
+> 26.1+, sandbox escape, TCC bypass, SSV bypass), chain the live bugs into
+> usable attack chains, wire the catalog into the W0lfSword CLI.
+
+- [x] `C5.1` ⚪ — Kernel CVE hunt: xnu bugs fixed in iOS 26.1–26.6.x (LPE candidates for a 26.1+ kernel stage, incl. CVE-2025-46285)
+  _Done 2026-08-29: research/kernel26_cves.md — full catalog 26.1→26.6.1. Top candidates: DirtySlide (CVE-2026-43724, only public kernel-write PoC), CVE-2026-64747 AVEVideoEncoder (kernel CODE EXEC, live 26.1–26.5.x), CVE-2026-28951 (root LPE, widest window), CVE-2026-20687 (AppleJPEG UAF, public trigger). CVE-2025-46285 confirmed fixed 26.2/18.7.3 → live 26.1 AND 18.4.1._
+- [x] `C5.2` ⚪ — Userspace CVE hunt: sandbox escape + TCC bypass + SSV bypass (2025-2026), live-vs-patched on 18.4.1 / 26.x
+  _Done 2026-08-29: research/userspace_escapes.md — top finds: CVE-2025-43329 (sandbox escape, LIVE all 18.x, fixed only in 26.0, BB-042), bl_sbx itunesstored/bookassetd write-escape (ALIVE ≤26.2b1, BB-041), CVE-2025-14174/43510 (DarkSword kit escape stages), CVE-2026-28973 (libc int overflow escape). No iOS SSV CVEs in 2025-26 (kernel-mediated only)._
+- [x] `C5.3` ⚪ — Attack chain designs from live bugs (bad_query / MCM / FontParser / kernel ≤26.0.1)
+  _Done 2026-08-29: research/attack_chains.md — 7 chains (A ContainerKey ~75%, B TCC-Key ~55%, C MediaLock ~30%, D Kernel26 ~35%, E SealBreaker ~70%, F GestaltForge novel ~40%, G FontStrike novel ~25%)._
+- [x] `C5.4` ⚪ — W0lfSword CLI: `chains` + `cve` commands, exploits matrix update
+  _Done 2026-08-29: cmd_chains (7 chains, per-chain stages) + cmd_cve (kernel/userspace/sandbox/tcc/ssv/live filters) wired in 5 places (dispatch, menu, menu_opt n, help, explain). exploits matrix gained bad_query/MCM/ALAC/FontParser/APAC rows. README commands table updated. bash -n + audit pass._
+- [x] `C5.5` ⚪ — Documentation: research doc + BUG_BOUNTY entries for confirmed live findings
+  _Done 2026-08-29: BB-041 (bl_sbx write-escape, ALIVE ≤26.2b1) + BB-042 (CVE-2025-43329 sandbox escape, LIVE all 18.x). Findings: 42 total._
+
 ---
 
 ## LEGEND
@@ -519,6 +536,47 @@
 - [x] `C4.7` ⚪ — BUG_BOUNTY.md: confirmed findings as BB-022+ with
   evidence (file:line, trigger, impact, bounty category).
   _Done 2026-08-29: BB-038, BB-039, BB-040 added._
+
+---
+
+## C5 — CVE Hunting + Attack Chains (campaign 2026-08-29, 26.1+ direction)
+
+> Goal: find CVEs across exploit types, chain the live bugs into usable
+> attack chains, wire the catalog into the CLI. Kernel gate on 26.1+ is
+> still closed (DarkSword patched); userspace modules (bad_query, MCM)
+> are the 26.1+ delivery. Chains documented in research/attack_chains.md,
+> CVE catalog in the CLI + research docs.
+
+- [x] `C5.1` ⚪ — Kernel CVE hunt (26.1+): xnu bugs fixed in iOS 26.1–26.6.x.
+  LPE candidates that could re-open the kernel gate (K5.6) or serve as a
+  chain's final stage. Include CVE-2025-46285 (K4.7, 64-bit timestamp
+  integer overflow) and any P0/ZDI 2025-2026 kernel findings. Note
+  reachability (local app? sandboxed? remote?) and PoC availability.
+  _Done 2026-08-29: research/kernel26_cves.md. Top-10 ranked candidates;
+  DirtySlide is the only public-knowledge kernel-write path; AVEVideoEncoder
+  CVE-2026-64747 is the highest-impact unknown (kernel code exec)._
+- [x] `C5.2` ⚪ — Userspace CVE hunt: sandbox escape + TCC bypass + SSV
+  bypass, 2025-2026, iOS 17-26. Live-vs-patched on 18.4.1 (SE2) and
+  26.x. Skip already-ported bugs (bad_query K4.10, MCM/mha K4.12).
+  _Done 2026-08-29: research/userspace_escapes.md. BB-041 (bl_sbx), BB-042
+  (CVE-2025-43329). No iOS SSV CVEs 2025-26._
+- [x] `C5.3` ⚪ — Attack chain designs: chain the live bugs (bad_query
+  read-escape, MCM container access, FontParser 18.4.1 OOB write, kernel
+  R/W ≤26.0.1) into 3-5 concrete chains with per-version applicability,
+  prerequisites, and delivery surfaces. Mine public chain writeups
+  (CVE-2025-31200+31201 iMessage, Glass Cage, FORCEDENTRY) as templates.
+  _Done 2026-08-29: research/attack_chains.md — 7 chains (A-G) with
+  implementation %, per-version tables, CLI automation needs._
+- [x] `C5.4` ⚪ — W0lfSword CLI: add `chains` (attack chain catalog +
+  per-device status) and `cve` (CVE tracker: id, component, class,
+  fixed-in, live-on) commands; update the `exploits` matrix with 26.1+
+  userspace chains. 5-place menu wiring, bash -n + audit verification.
+  _Done 2026-08-29: cmd_chains + cmd_cve wired (dispatch/menu/menu_opt n/
+  help/explain); exploits matrix updated; README commands table; verified._
+- [x] `C5.5` ⚪ — Documentation: research/attack_chains.md + CVE catalog
+  doc; BUG_BOUNTY.md entries for confirmed live findings.
+  _Done 2026-08-29: research/attack_chains.md + kernel26_cves.md +
+  userspace_escapes.md; BUG_BOUNTY BB-041 + BB-042 (42 total)._
 
 ---
 

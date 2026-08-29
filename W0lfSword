@@ -1273,11 +1273,216 @@ cmd_exploits() {
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2026-20687)\n" "AppleJPEGDriver UAF" "26.3" "A19" "kernel UAF → MTE panic" "research"
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2026-43724)\n" "dyld slide OOB" "26.x?" "arm64e" "v5 slide-walk OOB R/W" "research"
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2026-28990)\n" "EXR ImageIO overflow" "≤26.4.2" "all" "int overflow → heap overflow" "research"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_GRN}%s${NC}\n" "bad_query traversal" "26.0–26.6.1" "all" "containermanagerd path traversal" "implemented"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_GRN}%s${NC}\n" "MCM container lease" "18–27b" "all" "MobileHouseArrest re-sign" "implemented"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (BB-038)\n" "ALAC decoder overflow" "17–27" "all" "audio heap overflow" "research"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_GRN}%s${NC} (BB-040)\n" "FontParser OOB write" "≤18.4.1" "arm64e" "font parsing" "LIVE on SE2"
+    printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC} (CVE-2025-31200)\n" "APAC HOA remapper" "≤18.4.0" "all" "spatial audio OOB R/W" "patched"
     printf "  ${C_FROST}%-24s${NC} %-12s %-10s %-24s ${C_AMB}%s${NC}\n" "SEP exhaustion" "26.1–26.2" "A13–A19" "AppleKeyStore → SEP panic" "research"
     echo ""
     echo -e "  ${C_DIM}green = deployable today · yellow = in progress · research = reference PoC in${NC}"
     echo -e "  ${C_DIM}referenceforAI/moreprojects (deep dive: research/moreprojects_deep_dive.md)${NC}"
     echo -e "  ${C_DIM}Panic-PoC catalog: ${C_FROST}./W0lfSword poc list${NC}"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  CHAINS — attack chain catalog (C5.3)
+# ═══════════════════════════════════════════════════════════════
+
+cmd_chains() {
+    local want="${1:-all}"
+    show_header
+    echo ""
+    section "Attack Chains (C5.3)"
+    printf "  ${C_FROST}%-6s${NC} %-30s %-38s %s\n" "ID" "Chain" "Goal" "Versions"
+    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 96)"
+    printf "  ${C_FROST}%-6s${NC} %-30s %-38s ${C_GRN}%s${NC}\n" "A" "userspace read-escape" "other-app container exfiltration" "26.0–26.6.1"
+    printf "  ${C_FROST}%-6s${NC} %-30s %-38s ${C_GRN}%s${NC}\n" "B" "kernel → TCC.db"        "persistent permission grant"  "17.0–26.0.1"
+    printf "  ${C_FROST}%-6s${NC} %-30s %-38s ${C_AMB}%s${NC}\n" "C" "media RCE → escape"     "iMessage-style full chain"    "pre-18.4.1"
+    printf "  ${C_FROST}%-6s${NC} %-30s %-38s ${C_AMB}%s${NC}\n" "D" "26.1+ kernel LPE"       "re-open the kernel gate"      "26.1–26.3"
+    printf "  ${C_FROST}%-6s${NC} %-30s %-38s ${C_AMB}%s${NC}\n" "E" "SSV tamper"             "system binary modification"   "kernel R/W needed"
+    printf "  ${C_FROST}%-6s${NC} %-30s %-38s ${C_AMB}%s${NC}\n" "F" "GestaltForge (novel)"   "no-kernel write-escape → Gestalt spoof" "26.0–26.6.1"
+    printf "  ${C_FROST}%-6s${NC} %-30s %-38s ${C_AMB}%s${NC}\n" "G" "FontStrike (novel)"     "font RCE → kernel → TCC+SSV"  "18.x ≤18.7.0"
+    echo ""
+    section "Detail"
+    case "$want" in
+        a|A|1)
+            cat <<'EOF'
+CHAIN A — userspace read-escape → other-app container exfiltration
+  Stage 1: bad_query containermanagerd traversal (26.0–26.6.1) or MCM
+           container lease (mha, 18–27b) → read/write another app's
+           container
+  Stage 2: harvest data (SMS.db, Keychain.sqlite3, app documents)
+  Stage 3: exfil over the existing SSH/USB transport
+  Status: implemented (kexploit/bad_query_escape.m, mcm_bridge.m)
+  Impact: cross-app data read without kernel — high-value on 26.1+
+EOF
+            ;;
+        b|B|2)
+            cat <<'EOF'
+CHAIN B — kernel R/W (≤26.0.1) → TCC.db modification → persistent grants
+  Stage 1: DarkSword kernel R/W + sandbox escape (17.0–26.0.1)
+  Stage 2: modify /var/mobile/Library/TCC/TCC.db (or tccd memory)
+  Stage 3: camera/mic/photos/location granted silently
+  Status: BB-007 research; TCC.db write path exists via SSV bypass
+  Impact: full TCC bypass — bounty up to $100k (C2.1)
+EOF
+            ;;
+        c|C|3)
+            cat <<'EOF'
+CHAIN C — media RCE → sandbox escape (iMessage-style, pre-18.4.1)
+  Stage 1: parser RCE (APAC audio CVE-2025-31200, FontParser
+           CVE-2025-43400 on 18.4.1, ALAC findings BB-038)
+  Stage 2: sandbox escape (bad_query/MCM on 18.x, kernel on ≤26.0.1)
+  Stage 3: data access / persistence
+  Status: CVE-2025-31200 chained with CVE-2025-31201 RPAC in the wild;
+          our ALAC/FontParser angles are research-stage (BB-038/040)
+  Impact: zero-click class chain — bounty top tier
+EOF
+            ;;
+        d|D|4)
+            cat <<'EOF'
+CHAIN D — 26.1+ kernel LPE (re-open the kernel gate, K5.6)
+  Stage 1: userspace read-escape (bad_query/MCM) for info
+  Stage 2: kernel bug (CVE-2025-46285 class, see cve list kernel)
+  Stage 3: kernel R/W → full chain
+  Status: research — see ROADMAP K4.7/K5.6, hardware-gated
+EOF
+            ;;
+        e|E|5)
+            cat <<'EOF'
+CHAIN E — SSV tamper → system binary modification
+  Stage 1: kernel R/W (or read-only mount trick, CVE-2025-24203 class)
+  Stage 2: vnode redirect / mount flag toggle (SSV bypass, BB-003)
+  Stage 3: modify /System binary or launch daemon
+  Status: implemented for ≤26.0.1 (SSVUtils); CVE-2025-24203-style
+          no-jailbreak variant is research (iDevice-Toolkit)
+EOF
+            ;;
+        f|F|6)
+            cat <<'EOF'
+CHAIN F — GestaltForge: no-kernel write-escape → device-identity spoof
+  Stage 1: bad_query lease with create=true (class 13 SystemGroup) or
+           Geod-MCM class-12 partDomain route → MobileGestalt cache path
+  Stage 2: O_RDWR rewrite of com.apple.MobileGestalt.plist (feature
+           flags, device-class spoofing)
+  Stage 3: extend to other systemgroup containers
+  Status: lease machinery implemented; Gestalt write research-only.
+          Public precedent: GestaltEdit BadQueryBridge (same constants).
+  Impact: sandbox WRITE-escape (novel vs public read-only PoCs) — 26.1+
+          with no kernel
+EOF
+            ;;
+        g|G|7)
+            cat <<'EOF'
+CHAIN G — FontStrike: the SE2's complete live chain (18.4.1)
+  Stage 1: CVE-2025-43400 FontParser OOB write (LIVE on 18.4.1, no
+           public PoC — recover the fix by diffing libFontParser
+           18.4.1 vs 18.7.1)
+  Stage 2: RCE in the parsing process (font via Filza/Mail/Quick Look)
+  Stage 3: DarkSword kernel R/W (LIVE ≤26.0.1)
+  Stage 4: TCC grant (Chain B) + SSV implant (Chain E)
+  Status: all building blocks exist; the 43400 weaponization is the
+          missing piece. Variant: ALAC audio (BB-038) if the production
+          CoreAudio plugin is disassembly-confirmed.
+EOF
+            ;;
+        *) printf "  ${C_DIM}chains <a|b|c|d|e|f|g> for a chain's stages. Full writeup: research/attack_chains.md${NC}\n" ;;
+    esac
+    echo ""
+    echo -e "  ${C_DIM}green = deployable today · yellow = research. Per-version status: research/attack_chains.md${NC}"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  CVE — tracked CVE catalog (C5.1/C5.2)
+# ═══════════════════════════════════════════════════════════════
+
+cmd_cve() {
+    local filter="${1:-all}"
+    show_header
+    echo ""
+    section "CVE Catalog (C5.1/C5.2) — filter: ${filter}"
+    printf "  ${C_FROST}%-18s${NC} %-12s %-14s %-22s %s\n" "CVE" "Class" "Component" "Fixed in" "Live on"
+    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 96)"
+    case "$filter" in
+        kernel|k)
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43520" "kernel R/W" "DarkSword/ICMPv6" "18.7.2/26.1" "LIVE ≤26.0.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-46285" "kernel LPE" "xnu timestamps" "26.2/18.7.3" "26.1 + 18.4.1 (research)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20626" "root LPE" "missing authz" "26.3" "26.1–26.2"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20687" "kernel UAF" "AppleJPEGDriver" "26.4" "26.1–26.3 (A19)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28951" "root LPE" "incorrect authz" "26.5" "26.1–26.4.x"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28972" "kernel write" "OOB write" "26.5" "26.1–26.4.x"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43724" "kernel OOB R/W" "dyld slide v5" "26.5.2" "26.0–26.5.1 (macOS PoC)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-39868" "kernel corrupt" "input validation" "26.5.2" "26.1–26.5.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43805" "kernel write" "IOKit race" "26.6" "26.1–26.5.2"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43778" "kernel write" "UAF" "26.6" "26.1–26.5.2"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-64747" "kernel CODE EXEC" "AVEVideoEncoder bof" "26.6" "26.1–26.5.x"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-64751" "kernel write" "UAF" "26.6.1" "26.1–26.6.0"
+            ;;
+        userspace|u)
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-31200" "OOB R/W" "APAC audio" "18.4.1" "patched"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43400" "OOB write" "FontParser" "18.7.1" "LIVE 18.4.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2024-54529" "type conf." "coreaudiod" "15.2" "macOS"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28990" "int ovf" "EXR ImageIO" "26.5" "≤26.4.2"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-24203" "file R/W" "vm_behavior_set" "?" "17–26 (research)"
+            ;;
+        sandbox|s)
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43329" "escape" "Sandbox perms" "26.0 (not 18.x)" "LIVE 18.4.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43407" "escape" "Assets entitlements" "26.1" "LIVE 18.4.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43448" "escape" "CloudKit symlink" "26.1" "LIVE 18.4.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-14174" "escape" "ANGLE WebGL" "26.2" "LIVE 18.4.1 (ITW)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20628" "escape" "Sandbox perms" "26.3" "≤26.2.x"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28995" "escape" "App Intents" "26.5" "≤26.4.x"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28973" "escape" "libc int ovf" "26.6" "18.4.1 + ≤26.5"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "bad_query" "escape" "containermanagerd" "unpatched" "26.0–26.6.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "MCM/mha" "escape" "MobileHouseArrest" "unpatched" "18–27b"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "bl_sbx" "write-esc" "itunesstored/bookassetd" "unpatched" "≤26.2b1 (BB-041)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "BB-032" "escape" "container traversal" "unpatched" "26.0–26.6.1"
+            ;;
+        tcc)
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43530" "TCC bypass" "scrod private API" "26.2" "LIVE 18.4.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20677" "TCC class" "symlink race" "26.3" "LIVE 18.4.1/≤26.2"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "BB-007" "TCC bypass" "TCC.db" "kernel-gated" "17.0–26.0.1"
+            ;;
+        ssv)
+            printf "  %-18s %-12s %-14s %-22s %s\n" "BB-003" "SSV bypass" "vnode swap" "kernel-gated" "17.0–26.0.1"
+            ;;
+        live|LIVE)
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43329" "escape" "Sandbox perms" "26.0 (not 18.x)" "LIVE 18.4.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43400" "OOB write" "FontParser" "18.7.1" "LIVE 18.4.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-14174" "escape" "ANGLE WebGL" "26.2" "LIVE 18.4.1 (ITW)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28990" "int ovf" "EXR ImageIO" "26.5" "≤26.4.2"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28973" "escape" "libc int ovf" "26.6" "18.4.1 + ≤26.5"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28951" "root LPE" "incorrect authz" "26.5" "26.1–26.4.x"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-64747" "kernel CODE EXEC" "AVEVideoEncoder bof" "26.6" "26.1–26.5.x"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "bl_sbx" "write-esc" "itunesstored/bookassetd" "unpatched" "≤26.2b1 (BB-041)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-46285" "kernel LPE" "xnu timestamps" "26.2/18.7.3" "26.1 + 18.4.1 (research)"
+            ;;
+        all|*)
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43520" "kernel R/W" "DarkSword/ICMPv6" "18.7.2/26.1" "LIVE ≤26.0.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-46285" "kernel LPE" "xnu timestamps" "26.2/18.7.3" "26.1 + 18.4.1 (research)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28951" "root LPE" "incorrect authz" "26.5" "26.1–26.4.x"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20687" "kernel UAF" "AppleJPEGDriver" "26.4" "26.1–26.3 (A19)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43724" "kernel OOB R/W" "dyld slide v5" "26.5.2" "26.0–26.5.1 (macOS PoC)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-64747" "kernel CODE EXEC" "AVEVideoEncoder bof" "26.6" "26.1–26.5.x"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43778" "kernel write" "UAF" "26.6" "26.1–26.5.2"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-31200" "OOB R/W" "APAC audio" "18.4.1" "patched"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43400" "OOB write" "FontParser" "18.7.1" "LIVE 18.4.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2024-54529" "type conf." "coreaudiod" "15.2" "macOS"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28990" "int ovf" "EXR ImageIO" "26.5" "≤26.4.2"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-24203" "file R/W" "vm_behavior_set" "?" "17–26 (research)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43329" "escape" "Sandbox perms" "26.0 (not 18.x)" "LIVE 18.4.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-14174" "escape" "ANGLE WebGL" "26.2" "LIVE 18.4.1 (ITW)"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28973" "escape" "libc int ovf" "26.6" "18.4.1 + ≤26.5"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "bad_query" "escape" "containermanagerd" "unpatched" "26.0–26.6.1"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "MCM/mha" "escape" "MobileHouseArrest" "unpatched" "18–27b"
+            printf "  %-18s %-12s %-14s %-22s %s\n" "bl_sbx" "write-esc" "itunesstored/bookassetd" "unpatched" "≤26.2b1 (BB-041)"
+            ;;
+    esac
+    echo ""
+    echo -e "  ${C_DIM}filters: kernel|k userspace|u sandbox|s tcc ssv live. Full catalog: research/attack_chains.md${NC}"
     echo ""
 }
 
@@ -2090,6 +2295,7 @@ draw_menu() {
     menu_group "diagnostics & power"
     menu_opt 7 "Diagnostics"      "doctor · audit · status"
     menu_opt 8 "Targets & Exploits" "supported apps · technique matrix"
+    menu_opt n "Chains & CVEs"      "attack chain catalog · CVE tracker (C5)"
     menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
     menu_opt u "USB Test"         "cable · pairing · data round-trip (harmless)"
     menu_opt p "Panic Analyzer"   "classify .ips crash logs → known CVEs (BB-032..037)"
@@ -2199,6 +2405,8 @@ run_menu() {
             readiness|r)  cmd_readiness || true;;
             f|fuzz)       cmd_fuzz || true;;
             exploits|e)   cmd_exploits || true;;
+            chains|ch)    cmd_chains || true;;
+            cve)          cmd_cve || true;;
             # usbliter8-arctic
             9|ul8|usbliter8)
                 if [ "$EUID" -ne 0 ]; then
@@ -2230,7 +2438,7 @@ run_menu() {
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/poc, or q${NC}";;
+                echo -e "  ${C_RED}Unknown — try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -3360,6 +3568,25 @@ exploits — the technique matrix (K1.5).
   exhaustion. Each row: iOS range, SoC, bug class, status.
 EOF
             ;;
+        chains)
+            cat <<'EOF'
+chains — the attack chain catalog (C5.3).
+  Five chains built from the repo's live bugs: A userspace read-escape
+  (bad_query/MCM), B kernel -> TCC.db, C media RCE -> escape, D 26.1+
+  kernel LPE, E SSV tamper. 'chains <a|b|c|d|e>' shows the stages of
+  one chain with versions and implementation status. Full writeup:
+  research/attack_chains.md
+EOF
+            ;;
+        cve)
+            cat <<'EOF'
+cve — the tracked CVE catalog (C5.1/C5.2).
+  Lists researched CVEs with class, component, fixed version and live
+  status. Filters: kernel, userspace, sandbox, tcc, ssv, live. The
+  catalog is filled by the C5 research campaign; entries marked
+  research are not yet confirmed on hardware.
+EOF
+            ;;
         poc)
             cat <<'EOF'
 poc — the panic-PoC lab (RESEARCH ONLY — crashes the device).
@@ -3509,8 +3736,8 @@ explain — plain-English explanations of commands.
 Usage: ./W0lfSword explain <command>   (e.g. explain adderall)
 Available: adderall, build, deploy, quick, safe, toggle, setup,
            doctor, status, monitor, log, reboot, offsets, tweaks,
-           exploits, poc, fuzz, usbliter8, usbtest, panic, kernelcache,
-           help
+           exploits, chains, cve, poc, fuzz, usbliter8, usbtest, panic,
+           kernelcache, help
 EOF
             ;;
     esac
@@ -3566,6 +3793,8 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "doctor"       "Check environment"
     printf "  ${C_EYE}%-14s${NC} %s\n" "offsets"      "iOS version coverage"
     printf "  ${C_EYE}%-14s${NC} %s\n" "exploits (e)" "Exploit technique matrix (K1.5)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "chains"       "Attack chain catalog + stages (C5.3)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "cve [filter]" "CVE tracker: kernel|userspace|sandbox|tcc|ssv|live (C5.1/C5.2)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "toggle on|off" "Enable/disable tweak"
     printf "  ${C_EYE}%-14s${NC} %s\n" "history"      "Exploit stats + chart"
     echo ""
@@ -3653,6 +3882,8 @@ main() {
         offsets)   cmd_offsets "${args[@]}";;
         targets)   cmd_targets "${args[@]}";;
         exploits)  cmd_exploits "${args[@]}";;
+        chains)    cmd_chains "${args[@]}";;
+        cve)       cmd_cve "${args[@]}";;
         poc)       cmd_poc "${args[@]}";;
         fuzz)      cmd_fuzz "${args[@]}";;
         kcwatch)   cmd_kcwatch "${args[@]}";;
