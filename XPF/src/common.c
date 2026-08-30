@@ -1433,6 +1433,168 @@ static uint64_t xpf_find_iorvbar(void)
 	return iorvbar;
 }
 
+// ── extended struct offsets (kcwatch feed; 26.x recipes from offsets.m) ──
+
+static uint64_t xpf_ldr_imm_at(PFSection *section, uint64_t addr)
+{
+	uint64_t imm = 0;
+	if (arm64_dec_ldr_imm(pfsec_read32(section, addr), NULL, NULL, &imm, NULL, NULL) != 0) return 0;
+	return imm;
+}
+
+static uint64_t xpf_add_imm_at(PFSection *section, uint64_t addr)
+{
+	uint16_t imm = 0;
+	if (arm64_dec_add_imm(pfsec_read32(section, addr), NULL, NULL, &imm) != 0) return 0;
+	return imm;
+}
+
+static uint64_t xpf_find_thread_ast(void)
+{
+	// iOS 26.x: find hex 09 01 80 52 9F 02 00 71, offset at prologue+0xa0 (ADD) or +0xac (LDR)
+	uint32_t inst[2] = { 0x52800109, 0x7100029f };
+	__block uint64_t matchAddr = 0;
+	PFPatternMetric *patternMetric = pfmetric_pattern_init(inst, NULL, sizeof(inst), sizeof(uint32_t));
+	pfmetric_run(gXPF.kernelTextSection, patternMetric, ^(uint64_t vmaddr, bool *stop) {
+		matchAddr = vmaddr;
+		*stop = true;
+	});
+	pfmetric_free(patternMetric);
+	XPF_ASSERT(matchAddr);
+	uint64_t func = pfsec_find_function_start(gXPF.kernelTextSection, matchAddr);
+	XPF_ASSERT(func);
+	if (func + 0xa0 < matchAddr) {
+		uint64_t ast = xpf_add_imm_at(gXPF.kernelTextSection, func + 0xa0);
+		if (ast) return ast;
+	}
+	if (func + 0xac < matchAddr) {
+		uint64_t ast = xpf_ldr_imm_at(gXPF.kernelTextSection, func + 0xac);
+		if (ast) return ast;
+	}
+	return 0;
+}
+
+static uint64_t xpf_find_thread_ctid(void)
+{
+	// iOS 18.4 - 26.x: ?? ?? FF B5 ?? ?? ?? ?? ?? ?? ?? ?? 02 00 80 52 03 00 80 52 04 00 80 12,
+	// offset at prologue+0x64 (LDR)
+	uint32_t inst[6] = { 0xb5ff0000, 0, 0, 0x52800002, 0x52800003, 0x12800004 };
+	uint32_t mask[6] = { 0xffff0000, 0, 0, 0xffffffff, 0xffffffff, 0xffffffff };
+	__block uint64_t matchAddr = 0;
+	PFPatternMetric *patternMetric = pfmetric_pattern_init(inst, mask, sizeof(inst), sizeof(uint32_t));
+	pfmetric_run(gXPF.kernelTextSection, patternMetric, ^(uint64_t vmaddr, bool *stop) {
+		matchAddr = vmaddr;
+		*stop = true;
+	});
+	pfmetric_free(patternMetric);
+	XPF_ASSERT(matchAddr);
+	uint64_t func = pfsec_find_function_start(gXPF.kernelTextSection, matchAddr);
+	XPF_ASSERT(func);
+	if (func + 0x64 >= matchAddr) return 0;
+	return xpf_ldr_imm_at(gXPF.kernelTextSection, func + 0x64);
+}
+
+static uint64_t xpf_find_thread_t_tro(void)
+{
+	// iOS 17.x/18.x/26.x: E1 00 00 54 28 00 40 F9 1F 01 00 EB C1 00 00 54.
+	// The t_tro field LDR sits at prologue+0xc or +0x10 of one of the
+	// matching accessor copies - collect from every match, mode wins.
+	uint32_t inst[4] = { 0x540000e1, 0xf9400028, 0xeb00011f, 0x540000c1 };
+	__block uint64_t cand[16] = { 0 };
+	__block int ncand = 0;
+	PFPatternMetric *patternMetric = pfmetric_pattern_init(inst, NULL, sizeof(inst), sizeof(uint32_t));
+	pfmetric_run(gXPF.kernelTextSection, patternMetric, ^(uint64_t vmaddr, bool *stop) {
+		uint64_t func = pfsec_find_function_start(gXPF.kernelTextSection, vmaddr);
+		if (!func) return;
+		if (func + 0xc < vmaddr && ncand < 16) {
+			uint64_t v = xpf_ldr_imm_at(gXPF.kernelTextSection, func + 0xc);
+			if (v) cand[ncand++] = v;
+		}
+		if (func + 0x10 < vmaddr && ncand < 16) {
+			uint64_t v = xpf_ldr_imm_at(gXPF.kernelTextSection, func + 0x10);
+			if (v) cand[ncand++] = v;
+		}
+	});
+	pfmetric_free(patternMetric);
+	uint64_t best = 0;
+	int bestN = 0;
+	for (int i = 0; i < ncand; i++) {
+		int n = 0;
+		for (int j = 0; j < ncand; j++) if (cand[j] == cand[i]) n++;
+		if (n > bestN) { bestN = n; best = cand[i]; }
+	}
+	return best;
+}
+
+static uint64_t xpf_find_thread_machine_upcb(void)
+{
+	// iOS 26.x: 88 42 40 B9 08 69 1B 12; the function that references it twice
+	// carries the offset at prologue+0x1c or +0x24 (LDR)
+	uint32_t inst[2] = { 0xb9404288, 0x121b6908 };
+	__block uint64_t matchAddr = 0;
+	PFPatternMetric *patternMetric = pfmetric_pattern_init(inst, NULL, sizeof(inst), sizeof(uint32_t));
+	pfmetric_run(gXPF.kernelTextSection, patternMetric, ^(uint64_t vmaddr, bool *stop) {
+		matchAddr = vmaddr;
+		*stop = true;
+	});
+	pfmetric_free(patternMetric);
+	XPF_ASSERT(matchAddr);
+	PFXrefMetric *xrefMetric = pfmetric_xref_init(matchAddr, XREF_TYPE_MASK_CALL);
+	__block uint64_t upcb = 0;
+	pfmetric_run(gXPF.kernelTextSection, xrefMetric, ^(uint64_t xref, bool *stop) {
+		uint64_t func = pfsec_find_function_start(gXPF.kernelTextSection, xref);
+		if (!func || func + 0x24 >= matchAddr) return;
+		uint64_t a = xpf_ldr_imm_at(gXPF.kernelTextSection, func + 0x1c);
+		uint64_t b = xpf_ldr_imm_at(gXPF.kernelTextSection, func + 0x24);
+		if (a && a == b) {
+			upcb = a;
+			*stop = true;
+		}
+	});
+	pfmetric_free(xrefMetric);
+	return upcb;
+}
+
+static uint64_t xpf_find_proc_p_fd(void)
+{
+	// iOS 26.x: ?? ?? FF 34 E9 03 0A AA 4B 05 00 11 0B 7C AA 88 5F 01 09 6B,
+	// offset at prologue+0x48 (LDR)
+	uint32_t inst[5] = { 0x34ff0000, 0xaa0a03e9, 0x1100054b, 0x88aa7c0b, 0x6b09015f };
+	uint32_t mask[5] = { 0xffff0000, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
+	__block uint64_t matchAddr = 0;
+	PFPatternMetric *patternMetric = pfmetric_pattern_init(inst, mask, sizeof(inst), sizeof(uint32_t));
+	pfmetric_run(gXPF.kernelTextSection, patternMetric, ^(uint64_t vmaddr, bool *stop) {
+		matchAddr = vmaddr;
+		*stop = true;
+	});
+	pfmetric_free(patternMetric);
+	XPF_ASSERT(matchAddr);
+	uint64_t func = pfsec_find_function_start(gXPF.kernelTextSection, matchAddr);
+	XPF_ASSERT(func);
+	if (func + 0x48 >= matchAddr) return 0;
+	return xpf_ldr_imm_at(gXPF.kernelTextSection, func + 0x48);
+}
+
+static uint64_t xpf_find_task_task_exc_guard(void)
+{
+	// iOS 26.x: BF 06 02 71 E3 27 9F 1A. The guard-flag LDRB sits a few
+	// instructions before the pattern - walk back and take the first load.
+	uint32_t inst[2] = { 0x710206bf, 0x1a9f27e3 };
+	__block uint64_t matchAddr = 0;
+	PFPatternMetric *patternMetric = pfmetric_pattern_init(inst, NULL, sizeof(inst), sizeof(uint32_t));
+	pfmetric_run(gXPF.kernelTextSection, patternMetric, ^(uint64_t vmaddr, bool *stop) {
+		matchAddr = vmaddr;
+		*stop = true;
+	});
+	pfmetric_free(patternMetric);
+	XPF_ASSERT(matchAddr);
+	for (int i = 1; i <= 0x10; i++) {
+		uint64_t off = xpf_ldr_imm_at(gXPF.kernelTextSection, matchAddr - 4 * i);
+		if (off) return off;
+	}
+	return 0;
+}
+
 void xpf_common_init(void)
 {
 	xpf_item_register("kernelSymbol.start_first_cpu", xpf_find_start_first_cpu, NULL);
@@ -1501,4 +1663,12 @@ void xpf_common_init(void)
 
 	if(!gXPF.isSPTMDevice)
 		xpf_item_register("kernelSymbol.iorvbar", xpf_find_iorvbar, NULL);
+
+	// kcwatch extended struct offsets (26.x recipes)
+	xpf_item_register("kernelStruct.thread.ast", xpf_find_thread_ast, NULL);
+	xpf_item_register("kernelStruct.thread.ctid", xpf_find_thread_ctid, NULL);
+	xpf_item_register("kernelStruct.thread.t_tro", xpf_find_thread_t_tro, NULL);
+	xpf_item_register("kernelStruct.thread.machine_upcb", xpf_find_thread_machine_upcb, NULL);
+	xpf_item_register("kernelStruct.proc.p_fd", xpf_find_proc_p_fd, NULL);
+	xpf_item_register("kernelStruct.task.task_exc_guard", xpf_find_task_task_exc_guard, NULL);
 }
