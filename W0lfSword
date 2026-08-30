@@ -1048,23 +1048,14 @@ show_wolf() {
     echo -e "${NC}"
 }
 
-# Boot loading screen: the wolf's own characters scramble and settle
-# into the real art, with a tiny spinner + "loading..." above. When the
-# wolf belongs in the menu (show_wolf=menu), it stays on screen and the
-# menu draws below it; otherwise the screen clears for a text-only menu.
-WOLF_ON_SCREEN=false
-show_loading() {
-    anim_on || return 0
-    [ "$CFG_SHOW_WOLF" = "never" ] && return 0
-    # read the art into an array once
+# Scramble the wolf art's own characters ($1 color, $2 frames, $3 spinner)
+# and settle into the real art. Leaves the settled wolf on screen.
+scramble_wolf() {
+    local color="${1:-$C_WOLF}" frames="${2:-12}" spinner="${3:-0}"
     local -a art=()
     local line
     while IFS= read -r line; do art+=("$line"); done < <(wolf_art)
     local n=${#art[@]}
-    local frames
-    frames=$(awk "BEGIN{printf \"%d\", $CFG_LOADING_TIME*12}")
-    [ "$frames" -lt 8 ] && frames=8
-    [ "$frames" -gt 40 ] && frames=40
     local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+-=<>?/\\|"
     local spin=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
     local f i j len out ch r p
@@ -1072,7 +1063,7 @@ show_loading() {
     for ((f=0; f<frames; f++)); do
         p=$((f * 100 / frames))   # % of chars already settled this frame
         printf "\033[H\033[2J"
-        printf "  ${C_EYE}%s${NC} ${C_GREY}loading...${NC}\n" "${spin[$((f % 10))]}"
+        [ "$spinner" = "1" ] && printf "  ${C_EYE}%s${NC} ${C_GREY}loading...${NC}\n" "${spin[$((f % 10))]}"
         for ((i=0; i<n; i++)); do
             line="${art[$i]}"
             len=${#line}
@@ -1094,14 +1085,77 @@ show_loading() {
     done
     # settle: show the real, fully normal wolf
     printf "\033[H\033[2J"
-    show_wolf
-    anim_pause 0.35
+    show_wolf "$color"
     printf "\033[?25h"
+}
+
+# Boot loading screen: the wolf's own characters scramble and settle
+# into the real art, with a tiny spinner + "loading..." above. When the
+# wolf belongs in the menu (show_wolf=menu), it stays on screen and the
+# menu draws below it; otherwise the screen clears for a text-only menu.
+WOLF_ON_SCREEN=false
+show_loading() {
+    anim_on || return 0
+    [ "$CFG_SHOW_WOLF" = "never" ] && return 0
+    local frames
+    frames=$(awk "BEGIN{printf \"%d\", $CFG_LOADING_TIME*12}")
+    [ "$frames" -lt 8 ] && frames=8
+    [ "$frames" -gt 40 ] && frames=40
+    scramble_wolf "$C_WOLF" "$frames" 1
+    anim_pause 0.35
     if [ "$CFG_SHOW_WOLF" = "menu" ]; then
         WOLF_ON_SCREEN=true      # menu draws below the settled wolf
     else
         printf "\033[H\033[2J"   # text-only menu
     fi
+}
+
+# Text reveal: reads lines on stdin, resolves each one with a short
+# color cascade (dim -> frost -> real colors), top to bottom. Shorter
+# per line than the wolf scramble, so the menu materializes quickly.
+reveal_lines() {
+    printf "\033[?25l"
+    local -a lines=()
+    local line
+    while IFS= read -r line; do lines+=("$line"); done
+    local n=${#lines[@]}
+    local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+-=<>?/\\|"
+    local i j len out ch r p plain
+    for ((i=0; i<n; i++)); do
+        line="${lines[$i]}"
+        # strip ANSI codes to get the visible text for scrambling
+        plain=$(printf '%s' "$line" | sed $'s/\033\\[[0-9;]*m//g')
+        len=${#plain}
+        if [ "$len" -eq 0 ]; then
+            printf "\n"
+            continue
+        fi
+        # two quick scramble frames, colors shift dim -> frost
+        for p in 30 75; do
+            out=""
+            for ((j=0; j<len; j++)); do
+                ch="${plain:$j:1}"
+                if [ "$ch" = " " ]; then
+                    out+=" "
+                elif [ $((RANDOM % 100)) -lt "$p" ]; then
+                    out+="$ch"
+                else
+                    r=$((RANDOM % ${#chars}))
+                    out+="${chars:$r:1}"
+                fi
+            done
+            if [ "$p" -eq 30 ]; then
+                printf "\r\033[K${C_DIM}%s${NC}" "$out"
+            else
+                printf "\r\033[K${C_FROST}%s${NC}" "$out"
+            fi
+            anim_pause 0.008
+        done
+        # settle: the real line, its own colors
+        printf "\r\033[K%s\n" "$line"
+        anim_pause 0.005
+    done
+    printf "\033[?25h"
 }
 
 show_header() {
@@ -1999,13 +2053,14 @@ libxml2-diff|libxml2 fork-diff (Apple vs upstream)|negative|tested: no exploitab
 EOF
 }
 
-cmd_experimental() {
+# experimental body: the content below the wolf (also used by the
+# scramble reveal, so it must be pure stdout)
+experimental_body() {
     local sub="${1:-list}"
-    clear
-    [ "$CFG_SHOW_WOLF" != "never" ] && show_wolf "$C_RED"
     echo ""
-    section "Experimental  -  dev section"
+    section "Experimental  -  dev section  [beta]"
     echo -e "  ${C_RED}developer section  -  unfinished exploits, novel chains, verbose output${NC}"
+    echo -e "  ${C_AMB}beta  -  output and subcommands may change between releases${NC}"
     echo -e "  ${C_DIM}nothing here is guaranteed. device-crashing tests stay under 'poc'.${NC}"
     echo ""
     case "$sub" in
@@ -2087,6 +2142,23 @@ EOF
             ;;
     esac
     echo ""
+}
+
+cmd_experimental() {
+    local sub="${1:-list}"
+    clear
+    if [ "$CFG_SHOW_WOLF" != "never" ]; then
+        if anim_on; then
+            scramble_wolf "$C_RED" 10 0
+        else
+            show_wolf "$C_RED"
+        fi
+    fi
+    if anim_on; then
+        experimental_body "$sub" | reveal_lines
+    else
+        experimental_body "$sub"
+    fi
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -2840,19 +2912,10 @@ EOF
 #  INTERACTIVE MENU
 # ═══════════════════════════════════════════════════════════════
 
-draw_menu() {
-    if $WOLF_ON_SCREEN; then
-        # the boot scramble already drew the wolf; menu text goes below it
-        WOLF_ON_SCREEN=false
-        FIRST_DRAW=false
-    else
-        clear
-        # wolf in the menu too, per show_wolf=menu
-        if $FIRST_DRAW; then
-            [ "$CFG_SHOW_WOLF" = "menu" ] && show_wolf
-            FIRST_DRAW=false
-        fi
-    fi
+# emits the menu content (header, devices, groups, shortcuts); the
+# prompt line is printed by draw_menu so it never goes through the
+# scramble reveal
+menu_body() {
     show_header
     echo ""
 
@@ -2912,7 +2975,6 @@ draw_menu() {
     menu_opt 8 "Targets & Exploits" "supported apps · technique matrix"
     menu_opt n "Chains & CVEs"      "attack chain catalog · CVE tracker (C5)"
     menu_opt o "PoC Lab"            "test found-but-unimplemented bugs (C6)"
-    menu_opt ex "Experimental"      "unfinished exploits · novel chains (dev)"
     menu_opt g "Config"             "animations · colors · menu behavior"
     menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
     menu_opt u "USB Test"         "cable · pairing · data round-trip (harmless)"
@@ -2925,6 +2987,7 @@ draw_menu() {
     menu_opt k "Kernelcache Diff" "offline XPF offset research  -  resolve/diff kernelcaches"
     menu_opt w "kcwatch"          "auto kernel-delta watcher  -  poll → fetch → resolve → report"
     menu_opt r "readiness"        "device capability + exploit-readiness report (live probes)"
+    menu_opt ex "Experimental"    "unfinished exploits · novel chains (dev)" "${C_AMB}[beta]${NC}"
     [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
@@ -2932,6 +2995,30 @@ draw_menu() {
     printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}r${NC} readiness  ${C_FROST}g${NC} config  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
     echo ""
+}
+
+draw_menu() {
+    local do_reveal=false
+    if $FIRST_DRAW && anim_on; then
+        do_reveal=true   # first draw after boot: text materializes with the scramble cascade
+    fi
+    if $WOLF_ON_SCREEN; then
+        # the boot scramble already drew the wolf; menu text goes below it
+        WOLF_ON_SCREEN=false
+        FIRST_DRAW=false
+    else
+        clear
+        # wolf in the menu too, per show_wolf=menu
+        if $FIRST_DRAW; then
+            [ "$CFG_SHOW_WOLF" = "menu" ] && show_wolf
+            FIRST_DRAW=false
+        fi
+    fi
+    if $do_reveal; then
+        menu_body | reveal_lines
+    else
+        menu_body
+    fi
     echo -ne "  ${C_FROST}${B}${CFG_PROMPT}${NC} "
 }
 
