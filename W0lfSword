@@ -2046,7 +2046,7 @@ cmd_poclab() {
 # ═══════════════════════════════════════════════════════════════
 
 # experimental exploit catalog: found-but-unimplemented, research-grade.
-# id|name|status|why (status: poc-only | design | needs-device | negative)
+# id|name|status|why (status: poc-only | design | needs-device | testable | negative)
 experimental_rows() {
     cat <<'EOF'
 dirtyslide|DirtySlide kernel OOB R/W (CVE-2026-43724)|poc-only|macOS PoC; iOS needs sandbox bypass + SPTM-free silicon
@@ -2057,11 +2057,45 @@ bl_sbx|itunesstored/bookassetd write-escape (BB-041)|poc-only|public PoC, alive 
 gestaltforge|Chain F: no-kernel write-escape to Gestalt spoof|design|bad_query create + MCM; ~40% implemented
 fontstrike|Chain G: font RCE to kernel to TCC+SSV|design|all stages exist except the 43400 weaponization; ~25%
 apac-hunt|APAC spatial-audio OOB sibling hunt|design|CVE-2025-31200 pattern; patched at 18.4.1, hunt siblings
-alac-probe|ALAC decoder overflow probe (BB-038/039)|poc-only|ASAN verified (poclab test alac); production binary unconfirmed
+alac-probe|ALAC decoder overflow probe (BB-038/039)|testable|ASAN verified on host (experimental test alac)
 fontparser-diff|FontParser fix recovery (CVE-2025-43400)|needs-cache|18.4.1 vs 18.7.1 libFontParser diff; no device attached
 sandbox-diff|Sandbox escape fix recovery (CVE-2025-43329)|needs-cache|18.7.10 vs 26.0 sandbox diff; live on all 18.x
-libxml2-diff|libxml2 fork-diff (Apple vs upstream)|negative|tested: no exploitable divergence (poclab test libxml2-diff)
+libxml2-diff|libxml2 fork-diff (Apple vs upstream)|testable|no exploitable divergence (experimental test libxml2-diff)
 EOF
+}
+
+# report topics: alias -> research file (experimental report <topic>)
+experimental_report() {
+    local topic="${1:-list}" file=""
+    case "$topic" in
+        list|ls|"") ;;
+        poclab)            file="research/poclab.md";;
+        alac|audio)        file="research/audio_frameworks.md";;
+        chains|attack)     file="research/attack_chains.md";;
+        kernel26|cves)     file="research/kernel26_cves.md";;
+        other|frameworks)  file="research/other_frameworks.md";;
+        userspace|sandbox) file="research/userspace_escapes.md";;
+        *)
+            echo -e "  ${C_RED}unknown report: ${topic}${NC}"
+            echo -e "  ${C_DIM}available: poclab · alac · chains · kernel26 · other · userspace${NC}"
+            return 1
+            ;;
+    esac
+    if [ -z "$file" ]; then
+        section "Research reports  -  cat one with 'experimental report <topic>'"
+        printf "  ${C_FROST}%-10s${NC} %s\n" "poclab"    "research/poclab.md            - PoC lab: status of every tracked bug"
+        printf "  ${C_FROST}%-10s${NC} %s\n" "alac"      "research/audio_frameworks.md  - ALAC/audio deep dive (BB-038/039)"
+        printf "  ${C_FROST}%-10s${NC} %s\n" "chains"    "research/attack_chains.md     - the five attack chains, stage by stage"
+        printf "  ${C_FROST}%-10s${NC} %s\n" "kernel26"  "research/kernel26_cves.md     - 26.x kernel CVEs + fix diffs"
+        printf "  ${C_FROST}%-10s${NC} %s\n" "other"     "research/other_frameworks.md  - FontParser + remaining frameworks"
+        printf "  ${C_FROST}%-10s${NC} %s\n" "userspace" "research/userspace_escapes.md - sandbox/TCC/userspace escapes"
+    elif [ -f "$file" ]; then
+        cat "$file"
+    else
+        echo -e "  ${C_RED}report file missing: $file${NC}"
+        return 1
+    fi
+    echo ""
 }
 
 # experimental body: the content below the wolf (also used by the
@@ -2085,15 +2119,34 @@ experimental_body() {
                     design)       sc="$C_AMB"; st="design";;
                     needs-device) sc="$C_RED"; st="needs-device";;
                     needs-cache)  sc="$C_AMB"; st="needs-cache";;
+                    testable)     sc="$C_GRN"; st="testable";;
                     negative)     sc="$C_EYE"; st="tested-neg";;
                     *) sc="$C_DIM"; st="$status";;
                 esac
                 printf "  ${C_FROST}%-16s${NC} %-52s ${sc}%-14s${NC} %s\n" "$id" "$name" "$st" "$why"
             done < <(experimental_rows)
             echo ""
-            echo -e "  ${C_DIM}subcommands: list · chains (novel chain stages, verbose) · device (verbose device dump)${NC}"
-            echo -e "  ${C_DIM}run a host-side test: ./W0lfSword poclab test alac | alac-fuzz | libxml2-diff${NC}"
+            echo -e "  ${C_DIM}subcommands: list · chains (novel chain stages) · device (device dump) ·${NC}"
+            echo -e "  ${C_DIM}             test <id> (run host-side) · report [topic] (research reports)${NC}"
+            echo -e "  ${C_DIM}run a host-side test: ./W0lfSword experimental test alac | alac-fuzz | libxml2-diff${NC}"
             echo -e "  ${C_DIM}docs: research/attack_chains.md · research/poclab.md · research/kernel26_cves.md${NC}"
+            ;;
+        test)
+            local id="${2:-}"
+            case "$id" in
+                alac)          bash scripts/poclab_test_alac.sh;;
+                alac-fuzz)     bash scripts/poclab_fuzz_alac.sh "${3:-60}";;
+                libxml2-diff|libxml2) bash scripts/poclab_test_libxml2.sh;;
+                *)
+                    echo -e "  ${C_RED}unknown test: ${id:-<none>}${NC}"
+                    echo -e "  ${C_DIM}host-testable now: alac · alac-fuzz [secs] · libxml2-diff${NC}"
+                    echo -e "  ${C_DIM}the rest need a device, a cache, or macOS (see 'experimental list')${NC}"
+                    ;;
+            esac
+            echo ""
+            ;;
+        report|reports)
+            experimental_report "${2:-list}"
             ;;
         chains)
             section "Novel chains  -  verbose"
@@ -2149,7 +2202,7 @@ EOF
             echo -e "  ${C_DIM}saved devices: .w0lfsword/devices.json${NC}"
             ;;
         *)
-            echo -e "  ${C_RED}usage: experimental [list|chains|device]${NC}"
+            echo -e "  ${C_RED}usage: experimental [list|chains|device|test <id>|report [topic]]${NC}"
             ;;
     esac
     echo ""
@@ -2165,11 +2218,19 @@ cmd_experimental() {
             show_wolf "$C_RED"
         fi
     fi
-    if anim_on; then
-        experimental_body "$sub" | reveal_lines
-    else
-        experimental_body "$sub"
-    fi
+    # test/report emit live script + file output - never scramble those
+    case "$sub" in
+        test|report|reports)
+            experimental_body "$@"
+            ;;
+        *)
+            if anim_on; then
+                experimental_body "$sub" | reveal_lines
+            else
+                experimental_body "$sub"
+            fi
+            ;;
+    esac
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -4373,9 +4434,12 @@ experimental  -  the red dev section.
   Unfinished exploits and novel chains in one place, with verbose
   output. 'experimental list' catalogs the found-but-unimplemented
   work (DirtySlide, CVE-2025-46285, AVEVideoEncoder, bl_sbx, the
-  GestaltForge/FontStrike chains, the fix-recovery diffs). 
-  'experimental chains' prints the novel chain stages. 'experimental
-  device' dumps the connected device with the compatibility matrix.
+  GestaltForge/FontStrike chains, the fix-recovery diffs). 'experimental
+  chains' prints the novel chain stages. 'experimental device' dumps
+  the connected device with the compatibility matrix. 'experimental
+  test <id>' runs the host-side harnesses (alac, alac-fuzz [secs],
+  libxml2-diff). 'experimental report [topic]' prints the research
+  reports (poclab, alac, chains, kernel26, other, userspace).
   Nothing here is guaranteed; device-crashing tests stay under 'poc'.
 EOF
             ;;
