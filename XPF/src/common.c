@@ -1500,7 +1500,10 @@ static uint64_t xpf_find_thread_t_tro(void)
 	// The t_tro field LDR sits at prologue+0xc or +0x10 of one of the
 	// matching accessor copies - collect from every match, mode wins.
 	uint32_t inst[4] = { 0x540000e1, 0xf9400028, 0xeb00011f, 0x540000c1 };
-	__block uint64_t cand[16] = { 0 };
+	// Blocks capture plain arrays as const copies - use a __block pointer
+	// into storage so writes land in the caller's buffer.
+	uint64_t cand_storage[16] = { 0 };
+	__block uint64_t *cand = cand_storage;
 	__block int ncand = 0;
 	PFPatternMetric *patternMetric = pfmetric_pattern_init(inst, NULL, sizeof(inst), sizeof(uint32_t));
 	pfmetric_run(gXPF.kernelTextSection, patternMetric, ^(uint64_t vmaddr, bool *stop) {
