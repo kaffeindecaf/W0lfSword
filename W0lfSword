@@ -788,7 +788,7 @@ mkdir -p "$DATA_DIR/profiles" "$DATA_DIR"
 # ═══════════════════════════════════════════════════════════════
 
 show_wolf() {
-    echo -e "${C_WOLF}"
+    echo -e "${1:-$C_WOLF}"
     cat << 'WOLF'
 
                          .d$$b
@@ -1715,7 +1715,8 @@ EOF
 
 cmd_experimental() {
     local sub="${1:-list}"
-    show_header
+    clear
+    show_wolf "$C_RED"
     echo ""
     section "Experimental  -  dev section"
     echo -e "  ${C_RED}developer section  -  unfinished exploits, novel chains, verbose output${NC}"
