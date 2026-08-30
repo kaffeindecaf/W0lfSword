@@ -1,6 +1,6 @@
 #!/bin/bash
 # Single-source version  -  keep this in sync with control (A6.12).
-VERSION="1.2.0"
+VERSION="1.3.0"
 # Last used exploit method (set by cmd_adderall; saved/restored by profiles  -  K1.9)
 EXPLOIT_METHOD="auto"
 # ╔══════════════════════════════════════════════════════════════╗
@@ -212,6 +212,7 @@ color|on|color output (off = plain text, for logs / slow terminals)
 confirm_risky|on|ask before device-crashing PoCs (off = fire immediately)
 prompt_symbol|W0lfSword ▸|interactive menu prompt text
 loading_time|1.2|loading animation length in seconds
+report_errors|ask|on critical failure: ask (prompt) | on (auto-file) | off (save log only)
 EOF
 }
 
@@ -229,6 +230,7 @@ config_defaults() {
             confirm_risky)  CFG_CONFIRM_RISKY="$d";;
             prompt_symbol)  CFG_PROMPT="$d";;
             loading_time)   CFG_LOADING_TIME="$d";;
+            report_errors)  CFG_REPORT_ERRORS="$d";;
         esac
     done < <(config_schema)
 }
@@ -244,6 +246,7 @@ config_get() {
         confirm_risky) echo "$CFG_CONFIRM_RISKY";;
         prompt_symbol) echo "$CFG_PROMPT";;
         loading_time)  echo "$CFG_LOADING_TIME";;
+        report_errors) echo "$CFG_REPORT_ERRORS";;
         *) echo "";;
     esac
 }
@@ -258,6 +261,8 @@ config_valid() {
             [ "$2" = "loading" ] || [ "$2" = "menu" ] || [ "$2" = "never" ];;
         prompt_symbol)
             [ -n "$2" ];;
+        report_errors)
+            [ "$2" = "ask" ] || [ "$2" = "on" ] || [ "$2" = "off" ];;
         loading_time)
             case "$2" in
                 ''|*[!0-9.]*) false;;
@@ -326,6 +331,151 @@ load_config() {
     fi
 }
 load_config
+
+# ═══════════════════════════════════════════════════════════════
+#  ERROR REPORTING  -  critical failures → verbose log → GitHub
+# ═══════════════════════════════════════════════════════════════
+
+REPORT_DIR="$DATA_DIR/reports"
+CRIT_CMD=""   # set in main() to the invoked subcommand
+
+# Collect a full verbose report of the failure; echoes the file path.
+error_report_collect() {
+    local msg="$1" file="$REPORT_DIR/crash-$(date '+%Y%m%d-%H%M%S')-$$.txt"
+    mkdir -p "$REPORT_DIR"
+    local gitrev="" branch=""
+    if git -C "$PROJECT_DIR" rev-parse --short HEAD &>/dev/null; then
+        gitrev=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null)
+        branch=$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null)
+    fi
+    {
+        echo "W0lfSword error report  -  $(date '+%Y-%m-%d %H:%M:%S %Z')"
+        echo "=========================================="
+        echo "version:   $VERSION"
+        echo "commit:    ${gitrev:-unknown} (${branch:-?})"
+        echo "command:   $0 ${CRIT_CMD:-?}"
+        echo "error:     $msg"
+        echo ""
+        echo "system:"
+        echo "  os:      $(uname -s) $(uname -r) $(uname -m)"
+        echo "  bash:    $BASH_VERSION"
+        [ -n "${THEOS:-}" ] && echo "  theos:   $THEOS"
+        echo ""
+        echo "config:"
+        [ -f "$CONFIG_FILE" ] && sed 's/^/  /' "$CONFIG_FILE" || echo "  (none)"
+        echo ""
+        echo "device:"
+        [ -f "$DATA_DIR/active_device" ] && echo "  active:  $(cat "$DATA_DIR/active_device")" || echo "  (none)"
+        echo ""
+        echo "session log tail:"
+        [ -f "$SESSION_LOG" ] && tail -80 "$SESSION_LOG" | sed 's/^/  /' || echo "  (none)"
+    } > "$file"
+    echo "$file"
+}
+
+# File a saved report as a GitHub issue. 0 = filed.
+report_to_github() {
+    local file="$1" msg="$2"
+    if ! command -v gh &>/dev/null; then
+        err "gh CLI not installed  -  report saved to $file"
+        hint "install https://cli.github.com  -  then: gh issue create --repo kaffeindecaf/W0lfSword --body-file \"$file\""
+        return 1
+    fi
+    if ! gh auth status &>/dev/null; then
+        err "gh not logged in  -  run: gh auth login"
+        hint "report saved to $file  -  or file it manually at https://github.com/kaffeindecaf/W0lfSword/issues"
+        return 1
+    fi
+    local title="[auto-report] ${CRIT_CMD:-menu}: ${msg:0:72}"
+    title=$(printf '%s' "$title" | tr '\n\r' '  ')
+    local issue_url
+    issue_url=$(gh issue create --repo kaffeindecaf/W0lfSword --title "$title" --body-file "$file" 2>&1)
+    if [ $? -eq 0 ] && [ -n "$issue_url" ]; then
+        ok "issue filed: $issue_url"
+        log_script "github issue filed: $title -> $issue_url"
+        return 0
+    fi
+    err "gh issue create failed: ${issue_url:-unknown error}  -  report saved to $file"
+    return 1
+}
+
+# crit: the critical-error entry point. Prints the error, dumps a full
+# verbose report, then (per config) prompts / auto-files / stays local.
+crit() {
+    local msg="$1"
+    err "$msg"
+    log_script "CRITICAL: $msg"
+    local file; file=$(error_report_collect "$msg")
+    vlog "error report: $file"
+    # JSON mode or piped stdin: never prompt, never send - just save.
+    if $JSON_MODE || [ ! -t 0 ]; then
+        if $JSON_MODE; then
+            echo "  verbose report saved: $file" >&2
+        else
+            hint "verbose report saved: $file"
+        fi
+        return 1
+    fi
+    case "${CFG_REPORT_ERRORS:-ask}" in
+        off)
+            hint "verbose report saved: $file  (report_errors=off)"
+            ;;
+        on)
+            report_to_github "$file" "$msg"
+            ;;
+        ask)
+            if $YES_MODE; then
+                report_to_github "$file" "$msg"
+            else
+                echo -ne "  ${C_AMB}Report this error to GitHub (kaffeindecaf/W0lfSword)? [y/N]${NC} "; read -r ans
+                case "$ans" in
+                    y|Y|yes|YES) report_to_github "$file" "$msg";;
+                    *)
+                        hint "report saved locally: $file  -  file it later: ./W0lfSword report $file"
+                        ;;
+                esac
+            fi
+            ;;
+    esac
+    return 1
+}
+
+cmd_report() {
+    local sub="${1:-list}"
+    case "$sub" in
+        list|ls)
+            show_header
+            echo ""
+            section "Error reports  -  $REPORT_DIR"
+            if [ -d "$REPORT_DIR" ] && ls "$REPORT_DIR"/crash-*.txt &>/dev/null; then
+                local f
+                for f in "$REPORT_DIR"/crash-*.txt; do
+                    local head; head=$(head -1 "$f")
+                    printf "  ${C_FROST}%s${NC}  %s\n" "$(basename "$f")" "$head"
+                done
+                echo ""
+                echo -e "  ${C_DIM}file one as a GitHub issue: ./W0lfSword report <file>${NC}"
+            else
+                echo -e "  ${C_DIM}no saved reports yet  -  critical errors land here automatically${NC}"
+            fi
+            ;;
+        *)
+            local f="$1"
+            [ -f "$f" ] || f="$REPORT_DIR/$f"
+            if [ ! -f "$f" ]; then
+                err "report not found: $1"
+                hint "saved reports: ./W0lfSword report list"
+                return 1
+            fi
+            local msg cmdline
+            msg=$(grep '^error:' "$f" | head -1 | sed 's/^error:[[:space:]]*//')
+            cmdline=$(grep '^command:' "$f" | head -1 | sed 's/^command:[[:space:]]*//; s#.*/W0lfSword ##')
+            [ -n "$cmdline" ] && CRIT_CMD="$cmdline"
+            report_to_github "$f" "${msg:-unknown error}"
+            ;;
+    esac
+    echo ""
+}
 
 cmd_config() {
     local sub="${1:-show}"
@@ -1265,7 +1415,7 @@ cmd_build() {
     if [ $ec -eq 0 ] && [ -n "$deb" ]; then
         ok "Built $(basename "$deb") ($(du -h "$deb" | cut -f1))"
     else
-        err "Build failed (exit=$ec)"
+        crit "Build failed (exit=$ec)"
         hint "Run './W0lfSword doctor' to see which tool is missing  -  it's almost always THEOS or the iOS SDK."
         [ -n "$log" ] && echo -e "  ${C_DIM}${log}${NC}" | tail -5
         return 1
@@ -1470,6 +1620,7 @@ print(json.dumps({"files": rows, "issues": sum(1 for r in rows if not r["ok"]), 
         echo ""; echo -e "  ${C_GRN}${B}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  AUDIT PASSED${NC}"
     else
         echo ""; echo -e "  ${C_RED}${B}$issues issue(s) found${NC}"
+        crit "audit found $issues issue(s) in the exploit sources"
     fi
 }
 
@@ -2317,7 +2468,7 @@ poc_sep_panic() {
     local ec=$?
     $VERBOSE && echo "$build_log" | tail -8
     if [ $ec -ne 0 ]; then
-        err "sep_panic build failed (exit=$ec)"
+        crit "sep_panic build failed (exit=$ec)"
         hint "Run './W0lfSword doctor'  -  it's almost always THEOS or the SDK."
         return 1
     fi
@@ -3906,6 +4057,7 @@ EOF
         echo -e "  • Verify offsets.m covers iOS $IOS_VER and $DEV_MODEL"
         echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$IP\",\"ios\":\"$IOS_VER\",\"result\":\"fail\"}" >> "$DATA_DIR/history.json"
         log_script "adderall FAIL: $DEV_MODEL iOS $IOS_VER @ $IP"
+        crit "adderall: escape not confirmed on $DEV_MODEL iOS $IOS_VER"
     fi
     echo ""
 }
@@ -4428,6 +4580,16 @@ poclab  -  proof-of-concept lab (C6).
   Docs: research/poclab.md
 EOF
             ;;
+        report)
+            cat <<'EOF'
+report  -  error reports, saved locally and optionally filed on GitHub.
+  On a critical failure (build/deploy/audit/adderall) the script writes a
+  full verbose report to .w0lfsword/reports/crash-<ts>.txt and asks if you
+  want to file it as a GitHub issue. 'report list' shows saved reports,
+  'report <file>' files one. Config: report_errors=ask (prompt) | on
+  (auto-file) | off (save only). Uses the gh CLI (github.com/kaffeindecaf).
+EOF
+            ;;
         experimental)
             cat <<'EOF'
 experimental  -  the red dev section.
@@ -4680,6 +4842,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "reboot [ip]"  "SSH reboot device"
     printf "  ${C_EYE}%-14s${NC} %s\n" "crashlog"     "View last crash log"
     printf "  ${C_EYE}%-14s${NC} %s\n" "export [file]" "Zip logs + offsets for bug reports"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "report ..."     "Error reports: list saved, or file one as a GitHub issue"
     printf "  ${C_EYE}%-14s${NC} %s\n" "profile ..."   "Save/load exploit configs"
     printf "  ${C_EYE}%-14s${NC} %s\n" "device ..."   "Multi-device manager"
     printf "  ${C_EYE}%-14s${NC} %s\n" "usbliter8 (ul8)" "A12/A13 tethered jailbreak TUI (RP2350)${C_AMB} [root]${NC}"
@@ -4714,6 +4877,7 @@ main() {
         [ -z "$cmd" ] && { cmd="$a"; continue; }
         args+=("$a")
     done
+    CRIT_CMD="$cmd"
 
     if $EXPLAIN; then
         explain_text "${cmd:-help}"
@@ -4745,6 +4909,7 @@ main() {
         cve)       cmd_cve "${args[@]}";;
         poclab)    cmd_poclab "${args[@]}";;
         experimental|exp) cmd_experimental "${args[@]}";;
+        report)    cmd_report "${args[@]}";;
         config|cfg|g) cmd_config "${args[@]}";;
         poc)       cmd_poc "${args[@]}";;
         fuzz)      cmd_fuzz "${args[@]}";;

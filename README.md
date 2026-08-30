@@ -11,7 +11,7 @@ jailbroken iPhone with Filza into a full root file browser. The same
 repo holds host-side tools that pull kernel offsets from any iOS build
 on your computer, no device needed.
 
-Current release: v1.2.0
+Current release: v1.3.0
 
 ## Quick start
 
@@ -209,7 +209,7 @@ Menu behavior (animations, colors, wolf art, prompt) is configurable:
 `.w0lfsword/config` - a plain key=value file, or `./W0lfSword config` to
 view/change it from the CLI (`config set <key> <value>`, `config edit`,
 `config reset`). Keys: animations, anim_speed, show_wolf, menu_compact,
-device_scan, color, confirm_risky, prompt_symbol, loading_time.
+device_scan, color, confirm_risky, prompt_symbol, loading_time, report_errors.
 
 The interactive menu opens with a short loading animation: the wolf's
 own characters scramble (with a small spinner + "loading..."), settle
@@ -260,6 +260,21 @@ Two files, nothing else:
 
 It injects into `com.tigisoftware.Filza` and `com.tigisoftware.Filza000`
 (Filza 4.0.2). Restart Filza and the exploit runs.
+
+<details>
+<summary><b>What's new in v1.3.0</b></summary>
+
+- Critical errors (build/deploy/audit/adderall failures) now write a full
+  verbose report to `.w0lfsword/reports/crash-<ts>.txt` - version, git
+  commit, command line, OS, config, device, session-log tail - then ask
+  whether to file it as a GitHub issue. Answer yes and it's sent via the
+  gh CLI (github.com/kaffeindecaf/W0lfSword), no copy-pasting needed.
+- `report` command: `report list` shows saved reports, `report <file>`
+  files one later.
+- Config key `report_errors`: `ask` (prompt, default), `on` (auto-file),
+  `off` (save locally only). Never prompts in --json or piped output.
+
+</details>
 
 <details>
 <summary><b>What's new in v1.2.0</b></summary>

@@ -1,6 +1,6 @@
 Package: com.kaffeindecaf.w0lfsword
 Name: W0lfSword
-Version: 1.2.0
+Version: 1.3.0
 Architecture: iphoneos-arm64
 Depends: mobilesubstrate, firmware (>= 15.0)
 Description: iOS Kernel Exploit Toolkit — auto kexploit + sandbox escape + SSV bypass + root helper bypass + padlock bypass
