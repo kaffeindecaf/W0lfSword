@@ -205,7 +205,7 @@ config_schema() {
     cat <<'EOF'
 animations|on|master toggle for all animations (loading screen, spinner, effects)
 anim_speed|normal|animation speed: fast | normal | slow
-show_wolf|loading|when the ascii wolf shows: loading (boot only) | menu (boot + menu) | never
+show_wolf|menu|when the ascii wolf shows: menu (default, boot + menu) | loading (boot only) | never
 menu_compact|off|tighten the menu: fewer blank lines, no device block
 device_scan|on|scan USB/WiFi devices on every menu draw (off = only saved device)
 color|on|color output (off = plain text, for logs / slow terminals)
@@ -382,7 +382,7 @@ cmd_config() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  ANIMATIONS  -  loading screen, matrix rain, wolf reveal
+#  ANIMATIONS  -  loading screen, wolf scramble, type effects
 #  All gated by config + TTY: never fire in --json or piped output.
 # ═══════════════════════════════════════════════════════════════
 
@@ -402,28 +402,6 @@ anim_pause() {
         slow) t=$(awk "BEGIN{print $t*2}");;
     esac
     sleep "$t" 2>/dev/null || true
-}
-
-# cmatrix-style rain: a column of random chars scrolls down
-matrix_rain() {
-    local frames="${1:-12}" rows=10 cols=52
-    local chars="ABCDEF0123456789#$%&*+-=<>?/\\|"
-    local -a buf=()
-    local f r c i head line
-    for ((f=0; f<frames; f++)); do
-        head=""
-        for ((c=0; c<cols; c++)); do
-            i=$((RANDOM % ${#chars}))
-            head+="${chars:$i:1}"
-        done
-        for ((r=rows-1; r>0; r--)); do buf[$r]="${buf[$((r-1))]:-}"; done
-        buf[0]="$head"
-        printf "\033[H\033[2J"
-        for ((r=0; r<rows; r++)); do
-            printf "\033[K  ${C_GRN}%s${NC}\n" "${buf[$r]:-}"
-        done
-        anim_pause 0.06
-    done
 }
 
 # typewriter effect for short strings
@@ -1031,57 +1009,10 @@ mkdir -p "$DATA_DIR/profiles" "$DATA_DIR"
 #  ASCII ART  -  Arctic Wolf
 # ═══════════════════════════════════════════════════════════════
 
-show_wolf() {
-    echo -e "${1:-$C_WOLF}"
+# single source of truth for the art; show_wolf and the boot scramble
+# both render from here
+wolf_art() {
     cat << 'WOLF'
-
-                         .d$$b
-                       .' TO$;\
-                      /  : TP._;
-                     / _.;  :Tb|
-                    /   /   ;j$j
-                _.-"       d$$$$
-              .' ..       d$$$$;
-             /  /P'      d$$$$P. |\
-            /   "      .d$$$P' |\^"l
-          .'           `T$P^"""""  :
-      ._.'      _.'                ;
-   `-.-".-'-' ._.       _.-"    .-"
- `.-" _____  ._              .-"
--.(g$$$$$$$b.              .'
-  ""^^T$$$P^)            .(:
-    _/  -"  /.'         /:/;
- ._.'-'`-'  ")/         /;/;
-`-.-"..--""   " /         /  ;
-.-" ..--""        -'          :
-..--""--.-"         (\      .-(\
-  ..--""              `-\(\/;`
-    _.                      :
-                            ;`-
-                           :\
-                           ;
-WOLF
-    echo -e "${NC}"
-}
-
-# Boot loading screen: matrix rain, then the wolf reveals line by line,
-# then the screen clears so the menu draws text-only. Config-gated.
-show_loading() {
-    anim_on || return 0
-    # rain frames scale with loading_time (default 1.2s -> ~14 frames)
-    local frames
-    frames=$(awk "BEGIN{printf \"%d\", $CFG_LOADING_TIME*12}")
-    [ "$frames" -lt 6 ] && frames=6
-    printf "\033[?25l"   # hide cursor during the animation
-    matrix_rain "$frames"
-    printf "\033[H\033[2J"
-    if [ "$CFG_SHOW_WOLF" != "never" ]; then
-        echo -e "${C_WOLF}"
-        local line
-        while IFS= read -r line; do
-            printf "%s\n" "$line"
-            anim_pause 0.012
-        done << 'WOLF'
 
                          .d$$b
                        .' TO$;\
@@ -1109,10 +1040,68 @@ show_loading() {
                            :\
                            ;
 WOLF
-        echo -e "${NC}"
+}
+
+show_wolf() {
+    echo -e "${1:-$C_WOLF}"
+    wolf_art
+    echo -e "${NC}"
+}
+
+# Boot loading screen: the wolf's own characters scramble and settle
+# into the real art, with a tiny spinner + "loading..." above. When the
+# wolf belongs in the menu (show_wolf=menu), it stays on screen and the
+# menu draws below it; otherwise the screen clears for a text-only menu.
+WOLF_ON_SCREEN=false
+show_loading() {
+    anim_on || return 0
+    [ "$CFG_SHOW_WOLF" = "never" ] && return 0
+    # read the art into an array once
+    local -a art=()
+    local line
+    while IFS= read -r line; do art+=("$line"); done < <(wolf_art)
+    local n=${#art[@]}
+    local frames
+    frames=$(awk "BEGIN{printf \"%d\", $CFG_LOADING_TIME*12}")
+    [ "$frames" -lt 8 ] && frames=8
+    [ "$frames" -gt 40 ] && frames=40
+    local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+-=<>?/\\|"
+    local spin=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local f i j len out ch r p
+    printf "\033[?25l"
+    for ((f=0; f<frames; f++)); do
+        p=$((f * 100 / frames))   # % of chars already settled this frame
+        printf "\033[H\033[2J"
+        printf "  ${C_EYE}%s${NC} ${C_GREY}loading...${NC}\n" "${spin[$((f % 10))]}"
+        for ((i=0; i<n; i++)); do
+            line="${art[$i]}"
+            len=${#line}
+            out=""
+            for ((j=0; j<len; j++)); do
+                ch="${line:$j:1}"
+                if [ "$ch" = " " ]; then
+                    out+=" "
+                elif [ $((RANDOM % 100)) -lt "$p" ]; then
+                    out+="$ch"
+                else
+                    r=$((RANDOM % ${#chars}))
+                    out+="${chars:$r:1}"
+                fi
+            done
+            printf "%s\n" "$out"
+        done
+        anim_pause 0.05
+    done
+    # settle: show the real, fully normal wolf
+    printf "\033[H\033[2J"
+    show_wolf
+    anim_pause 0.35
+    printf "\033[?25h"
+    if [ "$CFG_SHOW_WOLF" = "menu" ]; then
+        WOLF_ON_SCREEN=true      # menu draws below the settled wolf
+    else
+        printf "\033[H\033[2J"   # text-only menu
     fi
-    anim_pause 0.3
-    printf "\033[?25h\033[H\033[2J"
 }
 
 show_header() {
@@ -2852,12 +2841,17 @@ EOF
 # ═══════════════════════════════════════════════════════════════
 
 draw_menu() {
-    clear
-    # the wolf lives in the boot loading screen by default (show_wolf=loading);
-    # show_wolf=menu keeps it on the first menu draw too
-    if $FIRST_DRAW; then
-        [ "$CFG_SHOW_WOLF" = "menu" ] && show_wolf
+    if $WOLF_ON_SCREEN; then
+        # the boot scramble already drew the wolf; menu text goes below it
+        WOLF_ON_SCREEN=false
         FIRST_DRAW=false
+    else
+        clear
+        # wolf in the menu too, per show_wolf=menu
+        if $FIRST_DRAW; then
+            [ "$CFG_SHOW_WOLF" = "menu" ] && show_wolf
+            FIRST_DRAW=false
+        fi
     fi
     show_header
     echo ""
@@ -4163,11 +4157,13 @@ config  -  menu behavior, stored in .w0lfsword/config.
     config edit       open the file in $EDITOR
     config reset      back to defaults
   Keys: animations (on|off), anim_speed (fast|normal|slow),
-  show_wolf (loading|menu|never), menu_compact (on|off),
+  show_wolf (menu|loading|never), menu_compact (on|off),
   device_scan (on|off), color (on|off), confirm_risky (on|off),
   prompt_symbol (text), loading_time (seconds).
   animations=off also disables the boot loading screen; color=off
-  strips all ANSI colors (handy for logs).
+  strips all ANSI colors (handy for logs). show_wolf=menu is the
+  default (wolf in the boot animation and the menu); =loading keeps
+  it boot-only; =never hides it everywhere.
 EOF
             ;;
         status)

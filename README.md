@@ -211,10 +211,12 @@ view/change it from the CLI (`config set <key> <value>`, `config edit`,
 `config reset`). Keys: animations, anim_speed, show_wolf, menu_compact,
 device_scan, color, confirm_risky, prompt_symbol, loading_time.
 
-The interactive menu opens with a short loading animation (matrix rain +
-the arctic wolf), then draws the menu as text only, so the wolf never
-pushes the options off-screen. Set `animations=off` for a plain instant
-menu, or `color=off` to strip ANSI codes for logs.
+The interactive menu opens with a short loading animation: the wolf's
+own characters scramble (with a small spinner + "loading..."), settle
+into the real art, then the menu draws with the wolf at the top. Set
+show_wolf=loading to hide the wolf from the menu (boot animation only),
+show_wolf=never to drop it entirely, or animations=off for a plain
+instant menu. color=off strips ANSI codes for logs.
 
 ## Features
 
@@ -259,9 +261,10 @@ It injects into `com.tigisoftware.Filza` and `com.tigisoftware.Filza000`
 <details>
 <summary><b>What's new in v1.2.0</b></summary>
 
-- Loading screen: the interactive menu opens with a short matrix-rain +
-  arctic-wolf animation, then draws the menu as text only (the wolf no
-  longer pushes the options off-screen).
+- Loading screen: the interactive menu opens with the wolf's own
+  characters scrambling (small spinner + "loading..." above), then
+  settling into the real art before the menu draws - the wolf stays in
+  the menu by default (show_wolf=menu).
 - `config` command + `.w0lfsword/config` file: animations (on/off),
   anim_speed (fast/normal/slow), show_wolf (loading/menu/never),
   menu_compact (on/off), device_scan (on/off), color (on/off),
