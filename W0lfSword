@@ -1113,6 +1113,8 @@ show_loading() {
 # Text reveal: reads lines on stdin, resolves each one with a short
 # color cascade (dim -> frost -> real colors), top to bottom. Shorter
 # per line than the wolf scramble, so the menu materializes quickly.
+# Lines wider than the terminal are printed as-is: scrambling a line
+# that wraps would leave frame fragments behind.
 reveal_lines() {
     printf "\033[?25l"
     local -a lines=()
@@ -1120,14 +1122,23 @@ reveal_lines() {
     while IFS= read -r line; do lines+=("$line"); done
     local n=${#lines[@]}
     local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+-=<>?/\\|"
-    local i j len out ch r p plain
+    local i j len out ch r p plain cols
+    cols=$(stty size 2>/dev/null | awk '{print $2}')
+    [ -n "$cols" ] && [ "$cols" -gt 20 ] || cols=80
     for ((i=0; i<n; i++)); do
         line="${lines[$i]}"
         # strip ANSI codes to get the visible text for scrambling
         plain=$(printf '%s' "$line" | sed $'s/\033\\[[0-9;]*m//g')
-        len=${#plain}
+        # character count, not bytes: multibyte glyphs (─, ·, →) are 1 char
+        len=$(printf '%s' "$plain" | wc -m 2>/dev/null | tr -d ' ')
+        [ -n "$len" ] && [ "$len" -gt 0 ] || len=${#plain}
         if [ "$len" -eq 0 ]; then
             printf "\n"
+            continue
+        fi
+        # too wide to animate safely: the line would wrap mid-scramble
+        if [ "$len" -gt "$cols" ]; then
+            printf "%s\n" "$line"
             continue
         fi
         # two quick scramble frames, colors shift dim -> frost
