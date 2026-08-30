@@ -65,8 +65,15 @@
   _Done 2026-08-29: map in research/audio_frameworks.md (AudioToolbox/CoreAudio/CoreMedia entry points, formats, open-source status). CVE catalog merged from NVD/P0 research — see research/audio_frameworks.md + other_frameworks.md._
 - [x] `C4.2` ⚪ — Open-source code audit: ALAC decoder, apple-oss-distributions/CoreAudio
   _Done 2026-08-29: apple-oss-distributions has NO CoreAudio (verified via git ls-remote; org = ICU/Libiconv/libxml2/mDNSResponder only). Audited apple/ALAC instead: two ASAN-verified bugs (BB-038 partialFrame numSamples heap overflow, BB-039 Init cookie OOB read) + unbounded bitstream reads. Harnesses in research/alac_poc/._
-- [ ] `C4.3` ⚪ — Audio fuzz harness (host + SE 18.4.1 probe)
-  _Host-side libFuzzer target over ALACDecoder planned (research/audio_frameworks.md next steps). On-device probe hardware-gated: no phone attached this session (iproxy 2222 refused)._
+- [x] `C4.3` ⚪ — Audio fuzz harness (host + SE 18.4.1 probe)
+  _Done 2026-08-30 (host side): libFuzzer target over ALACDecoder
+  (research/alac_poc/fuzz_alac.cpp, structure-aware mutator on
+  partialFrame/numSamples) + encoder-based seed generator
+  (gen_seeds.cpp), wired as `./W0lfSword poclab test alac-fuzz [secs]`.
+  Finds in 30-60s: unpc_block READ OOB (dp_dec.c:99), dyn_decomp WRITE
+  (ag_dec.c:345 = BB-038 compressed path), BitBufferRead OOB
+  (ALACBitUtilities.c:48). On-device probe stays hardware-gated: no
+  phone attached this session._
 - [x] `C4.4` ⚪ — Other framework targets (CoreMedia/CoreText/PDFKit/libxml2/ICU/mDNSResponder)
   _Done 2026-08-29: research/other_frameworks.md — 8 ranked targets, verified CVE catalog (41 CVEs cited), dyld-cache RE workflow. Top lead: CVE-2025-43400 FontParser OOB write LIVE on the 18.4.1 test device (BB-040), fix recoverable by diffing libFontParser 18.4.1 vs 18.7.1._
 - [x] `C4.5` ⚪ — IPSW userspace extraction feasibility (rootfs DMG encryption)
@@ -546,10 +553,17 @@
   _Done 2026-08-29: CoreAudio/AudioVideoBundles absent from the org
   (verified). ALAC audit: BB-038 + BB-039 ASAN-verified, harnesses in
   research/alac_poc/._
-- [ ] `C4.4` ⚪ — Audio fuzz harness reusing K4.2 patterns: ALAC/CAF/WAV
+- [x] `C4.4` ⚪ — Audio fuzz harness reusing K4.2 patterns: ALAC/CAF/WAV
   seeds, structure-aware mutator, host-side (libFuzzer/AFL++ if
   feasible) then on-device probe on SE 18.4.1 (ExtAudioFile /
   AVAudioPlayer decode).
+  _Done 2026-08-30 (host side): fuzz_alac.cpp libFuzzer target
+  (cookie + packet input, custom mutator on partialFrame/numSamples),
+  gen_seeds.cpp encoder-vended corpus (mono/stereo, 16/24/32-bit).
+  Wired `./W0lfSword poclab test alac-fuzz [secs]`; 30-60s finds the
+  unpc_block READ OOB (dp_dec.c:99), dyn_decomp WRITE (ag_dec.c:345,
+  BB-038 compressed path) and BitBufferRead OOB (ALACBitUtilities.c:48).
+  On-device probe hardware-gated (no phone)._
 - [x] `C4.5` ⚪ — Other framework targets: CoreMedia sample buffers,
   CoreText fonts, PDFKit, libxml2, ICU, mDNSResponder, Quick Look.
   Rank by open-source availability, parser size, CVE density.

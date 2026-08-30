@@ -27,6 +27,9 @@ FilzaApplySandboxExt.dylib
 .w0lfsword/
 .device_ip
 
+# Fuzz crash artifacts (regenerated each run)
+research/alac_poc/crashes/
+
 # OS noise
 .DS_Store
 .DS_Store?

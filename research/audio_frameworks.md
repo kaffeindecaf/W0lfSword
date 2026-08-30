@@ -228,10 +228,16 @@ CVE-2025-43429=WebKit.
 
 ## Next steps
 
-- [ ] Host-side ALAC fuzzing: wrap ALACDecoder in a libFuzzer target
+- [x] Host-side ALAC fuzzing: wrap ALACDecoder in a libFuzzer target
   (cookie + packet bytes as input), seeds from the convert-utility
   corpus. The format is small; structure-aware mutation of the
   partialFrame/numSamples fields is the highest-yield recipe.
+  _Done 2026-08-30: research/alac_poc/fuzz_alac.cpp + gen_seeds.cpp,
+  wired as `./W0lfSword poclab test alac-fuzz [secs]`. Custom mutator
+  keeps the cookie valid and edits the partialFrame/escapeFlag header +
+  numSamples field. Finds in 30-60s: unpc_block READ OOB (dp_dec.c:99),
+  dyn_decomp WRITE (ag_dec.c:345, BB-038 compressed path), BitBufferRead
+  OOB (ALACBitUtilities.c:48). Crashes to research/alac_poc/crashes/._
 - [ ] On-device probe (SE 18.4.1): imgio_probe-style binary using
   ExtAudioFile/AVAudioPlayer to decode a mutated corpus; needs the
   phone attached (iproxy 2222). Hardware-gated for now.

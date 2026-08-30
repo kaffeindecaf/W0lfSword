@@ -9,6 +9,38 @@ alac`, `test libxml2-diff`).
 Statuses: TESTED-WORKING (reproduced), TESTED-NEGATIVE (tried, no bug),
 BLOCKED (host limitation), NEEDS-DEVICE, NEEDS-CACHE, PATCHED.
 
+## alac-fuzz - ALAC libFuzzer target (C4.4) - TESTED-WORKING
+
+Repro: `./W0lfSword poclab test alac-fuzz [secs]`. Builds
+research/alac_poc/fuzz_alac.cpp with clang's libFuzzer + ASAN/UBSAN
+against the cached apple/ALAC codec, regenerates a seed corpus via
+research/alac_poc/gen_seeds.cpp (encoder-vended cookie + frames, so
+every seed is a cleanly decodable stream), then fuzzes for the given
+time (default 60s). Crashes land in research/alac_poc/crashes/ and the
+run prints the ASAN sites.
+
+Input layout is [24-byte magic cookie][bitstream]. The custom mutator
+keeps the cookie valid and spends its edits on the element header
+(partialFrame + escapeFlag bits) and the 32-bit numSamples field - the
+fields the decoder trusts without bounds.
+
+Findings in a 30-60s run:
+  - heap-buffer-overflow READ at dp_dec.c:99 (unpc_block) - the
+    predictor loop reads out[j-1] past the frameLength-sized mPredictor
+    when numSamples overrides the caller count on a tiny-frameLength
+    cookie. Same root cause family as BB-038 (unbounded numSamples vs
+    frameLength-sized buffers) but on the READ side of the compressed
+    path.
+  - heap-buffer-overflow WRITE at ag_dec.c:345 (dyn_decomp) - the
+    compressed-path write side of BB-038.
+  - heap-buffer-overflow READ at ALACBitUtilities.c:48 (BitBufferRead) -
+    the unbounded bitstream reads noted in the C4.2 audit: the decoder
+    keeps pulling bits past the end of the packet.
+
+Caveat: same as the alac entry - this is the open-source reference
+decoder. The production AudioToolbox binary is not
+disassembly-confirmed.
+
 ## alac - ALAC decoder overflow (BB-038 + BB-039) - TESTED-WORKING
 
 Repro: `./W0lfSword poclab test alac`. Clones apple/ALAC once into
