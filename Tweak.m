@@ -512,6 +512,41 @@ static void hook_activationViewDidLoad(id self, SEL _cmd) {
     TweakLog("[Tweak] Suppressed activation nag");
 }
 
+#pragma mark - First-Launch Welcome
+
+// One-time "thank you" alert on the first Filza launch with the tweak.
+// Uses Filza's own TGAlertController (the same helper the license hook
+// wraps - non-integrity alerts pass straight through). Tracked by a flag
+// file in /var/mobile/Documents, same place as the crash/success flags.
+static void showWelcomeOnce(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        const char *welcomeFlag = "/var/mobile/Documents/.filza_welcome_shown";
+        if (access(welcomeFlag, F_OK) == 0) {
+            TweakLog("[Tweak] Welcome already shown, skipping");
+            return;
+        }
+        Class alertCtrl = NSClassFromString(@"TGAlertController");
+        if (!alertCtrl) {
+            TweakLog("[Tweak] TGAlertController missing - skipping welcome");
+            return;
+        }
+        TweakLog("[Tweak] Showing first-launch welcome");
+        ((id(*)(id,SEL,id,id,id,id,id))objc_msgSend)(alertCtrl,
+            NSSelectorFromString(@"showAlertWithTitle:text:cancelButton:otherButtons:completion:"),
+            @"W0lfSword",
+            @"Thank you for using W0lfSword!",
+            @"OK", nil, nil);
+        // Record after presenting, so a crash mid-presentation doesn't
+        // burn the one-time welcome.
+        FILE *wf = fopen(welcomeFlag, "w");
+        if (wf) {
+            fprintf(wf, "%lld", (long long)time(NULL));
+            fclose(wf);
+        }
+    });
+}
+
 #pragma mark - SSV Hooks
 
 static BOOL pathMatchesProtectedRoot(NSString *path, NSString *root) {
@@ -1045,6 +1080,33 @@ __attribute__((constructor)) void TweakInit(void) {
     TweakLog("[Tweak] TweakInit started");
     refreshUIDebugBypassFlag();
     installHooks();
+
+    // First-launch welcome (UI-only, safe in every state - exploit or not).
+    // Fire after the app finishes launching so there's a window to present.
+    // showWelcomeOnce is dispatch_once'd, so multiple triggers are harmless.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIApplication *app = [UIApplication sharedApplication];
+        if (app.applicationState == UIApplicationStateActive) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                dispatch_get_main_queue(), ^{
+                showWelcomeOnce();
+            });
+        }
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
+            object:nil queue:nil usingBlock:^(NSNotification *note) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                dispatch_get_main_queue(), ^{
+                showWelcomeOnce();
+            });
+        }];
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+            object:nil queue:nil usingBlock:^(NSNotification *note) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                dispatch_get_main_queue(), ^{
+                showWelcomeOnce();
+            });
+        }];
+    });
 
     // Check if sandbox is already escaped. A stale .sbx_check (left by a
     // crash between open() and unlink() in a previous run) must NOT skip the
