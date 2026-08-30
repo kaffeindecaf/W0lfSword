@@ -11,7 +11,7 @@ jailbroken iPhone with Filza into a full root file browser. The same
 repo holds host-side tools that pull kernel offsets from any iOS build
 on your computer, no device needed.
 
-Current release: v1.1.0
+Current release: v1.2.0
 
 ## Quick start
 
@@ -205,6 +205,17 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 Log colors: green success, red errors, yellow retries, cyan structure, dim
 details. Devices, profiles and history live in `.w0lfsword/` (gitignored).
 
+Menu behavior (animations, colors, wolf art, prompt) is configurable:
+`.w0lfsword/config` - a plain key=value file, or `./W0lfSword config` to
+view/change it from the CLI (`config set <key> <value>`, `config edit`,
+`config reset`). Keys: animations, anim_speed, show_wolf, menu_compact,
+device_scan, color, confirm_risky, prompt_symbol, loading_time.
+
+The interactive menu opens with a short loading animation (matrix rain +
+the arctic wolf), then draws the menu as text only, so the wolf never
+pushes the options off-screen. Set `animations=off` for a plain instant
+menu, or `color=off` to strip ANSI codes for logs.
+
 ## Features
 
 | What | How |
@@ -244,6 +255,22 @@ Two files, nothing else:
 
 It injects into `com.tigisoftware.Filza` and `com.tigisoftware.Filza000`
 (Filza 4.0.2). Restart Filza and the exploit runs.
+
+<details>
+<summary><b>What's new in v1.2.0</b></summary>
+
+- Loading screen: the interactive menu opens with a short matrix-rain +
+  arctic-wolf animation, then draws the menu as text only (the wolf no
+  longer pushes the options off-screen).
+- `config` command + `.w0lfsword/config` file: animations (on/off),
+  anim_speed (fast/normal/slow), show_wolf (loading/menu/never),
+  menu_compact (on/off), device_scan (on/off), color (on/off),
+  confirm_risky (on/off), prompt_symbol (text), loading_time (seconds).
+  Change it by hand or via `./W0lfSword config set <key> <value>`.
+- Animations on quit (typed "howl later"), config-gated spinner, and a
+  red wolf in the experimental tab only when show_wolf != never.
+
+</details>
 
 <details>
 <summary><b>What's new in v1.1.0</b></summary>

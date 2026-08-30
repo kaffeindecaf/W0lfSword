@@ -20,6 +20,8 @@
   _Done 2026-08-14: README Known Issues section restored — 26.1+ cap, best-effort padlock/SSV, MTE/A19, probabilistic race, panic risk + auto-disable._
 - [x] `V1.3` 🟡 — **Release build + tag**: `make package FINALPACKAGE=1`, verify .deb, `git tag v1.0.0` + push
   _Done 2026-08-14: FINALPACKAGE=1 now defines NDEBUG + strips KPRINTF (verified: address-leak strings absent in final dylib, present in debug); v1.0.0 .deb built; tag pushed._
+- [x] `V1.4` 🟡 — **Menu config + boot animation**: `.w0lfsword/config` (key=value, `config` CLI to show/set/edit/reset) controlling animations, anim_speed, show_wolf, menu_compact, device_scan, color, confirm_risky, prompt_symbol, loading_time. Interactive menu opens with a matrix-rain + wolf loading screen, then draws text-only (wolf no longer pushes options off-screen). Config-gated spinner, typed "howl later" on quit, red wolf gated in experimental. Version bumped 1.1.0 → 1.2.0.
+  _Done 2026-08-30: config system + animations wired, `./W0lfSword config` verified (set/validate/reload/reset), PTY smoke test of rain → wolf → text menu → animated quit. Audit passes. One bug found+fixed along the way: config_write_template clobbered config_set's local `k` via bash dynamic scoping (loop var not declared local)._
 
 ## 0.2 — Device/research work (needs iOS 26.1+ hardware or kernelcache)
 

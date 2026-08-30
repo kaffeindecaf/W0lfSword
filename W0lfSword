@@ -1,6 +1,6 @@
 #!/bin/bash
 # Single-source version  -  keep this in sync with control (A6.12).
-VERSION="1.1.0"
+VERSION="1.2.0"
 # Last used exploit method (set by cmd_adderall; saved/restored by profiles  -  K1.9)
 EXPLOIT_METHOD="auto"
 # ╔══════════════════════════════════════════════════════════════╗
@@ -194,6 +194,249 @@ C_GREY=$C_DIM
 C_STEEL=$C_DIM
 
 # ═══════════════════════════════════════════════════════════════
+#  CONFIG  -  .w0lfsword/config (plain key=value, # comments)
+#  Edit by hand or: ./W0lfSword config set <key> <value>
+# ═══════════════════════════════════════════════════════════════
+
+CONFIG_FILE="$DATA_DIR/config"
+
+# key|default|one-line help (schema doubles as the written template)
+config_schema() {
+    cat <<'EOF'
+animations|on|master toggle for all animations (loading screen, spinner, effects)
+anim_speed|normal|animation speed: fast | normal | slow
+show_wolf|loading|when the ascii wolf shows: loading (boot only) | menu (boot + menu) | never
+menu_compact|off|tighten the menu: fewer blank lines, no device block
+device_scan|on|scan USB/WiFi devices on every menu draw (off = only saved device)
+color|on|color output (off = plain text, for logs / slow terminals)
+confirm_risky|on|ask before device-crashing PoCs (off = fire immediately)
+prompt_symbol|W0lfSword ▸|interactive menu prompt text
+loading_time|1.2|loading animation length in seconds
+EOF
+}
+
+config_defaults() {
+    local k d
+    while IFS='|' read -r k d _; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            animations)     CFG_ANIMATIONS="$d";;
+            anim_speed)     CFG_ANIM_SPEED="$d";;
+            show_wolf)      CFG_SHOW_WOLF="$d";;
+            menu_compact)   CFG_MENU_COMPACT="$d";;
+            device_scan)    CFG_DEVICE_SCAN="$d";;
+            color)          CFG_COLOR="$d";;
+            confirm_risky)  CFG_CONFIRM_RISKY="$d";;
+            prompt_symbol)  CFG_PROMPT="$d";;
+            loading_time)   CFG_LOADING_TIME="$d";;
+        esac
+    done < <(config_schema)
+}
+
+config_get() {
+    case "$1" in
+        animations)    echo "$CFG_ANIMATIONS";;
+        anim_speed)    echo "$CFG_ANIM_SPEED";;
+        show_wolf)     echo "$CFG_SHOW_WOLF";;
+        menu_compact)  echo "$CFG_MENU_COMPACT";;
+        device_scan)   echo "$CFG_DEVICE_SCAN";;
+        color)         echo "$CFG_COLOR";;
+        confirm_risky) echo "$CFG_CONFIRM_RISKY";;
+        prompt_symbol) echo "$CFG_PROMPT";;
+        loading_time)  echo "$CFG_LOADING_TIME";;
+        *) echo "";;
+    esac
+}
+
+config_valid() {
+    case "$1" in
+        animations|menu_compact|device_scan|color|confirm_risky)
+            [ "$2" = "on" ] || [ "$2" = "off" ];;
+        anim_speed)
+            [ "$2" = "fast" ] || [ "$2" = "normal" ] || [ "$2" = "slow" ];;
+        show_wolf)
+            [ "$2" = "loading" ] || [ "$2" = "menu" ] || [ "$2" = "never" ];;
+        prompt_symbol)
+            [ -n "$2" ];;
+        loading_time)
+            case "$2" in
+                ''|*[!0-9.]*) false;;
+                *) [ "$(echo "$2" | awk '{print ($1>=0.4 && $1<=5) ? 1 : 0}')" = "1" ];;
+            esac;;
+        *) false;;
+    esac
+}
+
+config_write_template() {
+    mkdir -p "$DATA_DIR"
+    local k d h
+    {
+        echo "# W0lfSword config - edit this file or use: ./W0lfSword config set <key> <value>"
+        echo "# one key=value per line, # for comments. defaults shown."
+        echo ""
+        while IFS='|' read -r k d h; do
+            [ -n "$k" ] || continue
+            echo "# $h"
+            echo "$k=$d"
+        done < <(config_schema)
+    } > "$CONFIG_FILE"
+}
+
+config_set() {
+    local k="$1" v="$2" tmp="$CONFIG_FILE.tmp" found=0
+    config_valid "$k" "$v" || return 1
+    [ -f "$CONFIG_FILE" ] || config_write_template
+    while IFS= read -r line; do
+        if [[ "$line" == "$k="* ]]; then
+            echo "$k=$v"
+            found=1
+        else
+            echo "$line"
+        fi
+    done < "$CONFIG_FILE" > "$tmp"
+    [ "$found" -eq 0 ] && echo "$k=$v" >> "$tmp"
+    mv "$tmp" "$CONFIG_FILE"
+    load_config
+    return 0
+}
+
+load_config() {
+    config_defaults
+    [ -f "$CONFIG_FILE" ] || return 0
+    local line k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in \#*) continue;; esac
+        config_valid "$k" "$v" || continue
+        case "$k" in
+            animations)     CFG_ANIMATIONS="$v";;
+            anim_speed)     CFG_ANIM_SPEED="$v";;
+            show_wolf)      CFG_SHOW_WOLF="$v";;
+            menu_compact)   CFG_MENU_COMPACT="$v";;
+            device_scan)    CFG_DEVICE_SCAN="$v";;
+            color)          CFG_COLOR="$v";;
+            confirm_risky)  CFG_CONFIRM_RISKY="$v";;
+            prompt_symbol)  CFG_PROMPT="$v";;
+            loading_time)   CFG_LOADING_TIME="$v";;
+        esac
+    done < "$CONFIG_FILE"
+    # color=off neutralizes the palette so every helper prints plain text
+    if [ "$CFG_COLOR" = "off" ]; then
+        C_WOLF='' C_FROST='' C_DIM='' C_GRN='' C_AMB='' C_RED='' B='' NC=''
+    fi
+}
+load_config
+
+cmd_config() {
+    local sub="${1:-show}"
+    case "$sub" in
+        show|list|"")
+            show_header
+            echo ""
+            section "Config  -  $CONFIG_FILE"
+            [ -f "$CONFIG_FILE" ] || config_write_template
+            printf "  ${C_FROST}%-16s${NC} %-12s %s\n" "key" "value" "what it does"
+            printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 108)"
+            local k d h
+            while IFS='|' read -r k d h; do
+                [ -n "$k" ] || continue
+                printf "  ${C_FROST}%-16s${NC} %-12s %s\n" "$k" "$(config_get "$k")" "$h"
+            done < <(config_schema)
+            echo ""
+            echo -e "  ${C_DIM}usage: config set <key> <value>  ·  config edit  ·  config reset${NC}"
+            echo -e "  ${C_DIM}or edit $CONFIG_FILE directly - it reloads next run${NC}"
+            ;;
+        set)
+            local k="${2:-}" v="${3:-}"
+            if [ -z "$k" ] || [ -z "$v" ]; then
+                err "usage: config set <key> <value>"
+                hint "valid keys: $(config_schema | cut -d'|' -f1 | tr '\n' ' ')"
+                return 1
+            fi
+            if config_set "$k" "$v"; then
+                ok "$k = $v"
+            else
+                err "invalid value: $k = $v"
+            fi
+            ;;
+        edit)
+            local ed="${EDITOR:-vi}"
+            [ -f "$CONFIG_FILE" ] || config_write_template
+            if [ -t 1 ]; then
+                "$ed" "$CONFIG_FILE" < /dev/tty > /dev/tty 2>&1 || "$ed" "$CONFIG_FILE"
+                load_config
+                ok "config reloaded"
+            else
+                hint "not a terminal - edit the file directly: $CONFIG_FILE"
+            fi
+            ;;
+        reset)
+            confirm "Reset config to defaults?" || return 1
+            rm -f "$CONFIG_FILE"
+            load_config
+            ok "config reset to defaults"
+            ;;
+        *) err "usage: config show | set <key> <value> | edit | reset";;
+    esac
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  ANIMATIONS  -  loading screen, matrix rain, wolf reveal
+#  All gated by config + TTY: never fire in --json or piped output.
+# ═══════════════════════════════════════════════════════════════
+
+# 1 when animations are allowed right now (config on + real terminal)
+anim_on() {
+    $JSON_MODE && return 1
+    [ "$CFG_ANIMATIONS" = "on" ] || return 1
+    [ -t 1 ] || return 1
+    return 0
+}
+
+# fractional pause honoring anim_speed (fast halves, slow doubles)
+anim_pause() {
+    local t="${1:-0.05}"
+    case "$CFG_ANIM_SPEED" in
+        fast) t=$(awk "BEGIN{print $t*0.5}");;
+        slow) t=$(awk "BEGIN{print $t*2}");;
+    esac
+    sleep "$t" 2>/dev/null || true
+}
+
+# cmatrix-style rain: a column of random chars scrolls down
+matrix_rain() {
+    local frames="${1:-12}" rows=10 cols=52
+    local chars="ABCDEF0123456789#$%&*+-=<>?/\\|"
+    local -a buf=()
+    local f r c i head line
+    for ((f=0; f<frames; f++)); do
+        head=""
+        for ((c=0; c<cols; c++)); do
+            i=$((RANDOM % ${#chars}))
+            head+="${chars:$i:1}"
+        done
+        for ((r=rows-1; r>0; r--)); do buf[$r]="${buf[$((r-1))]:-}"; done
+        buf[0]="$head"
+        printf "\033[H\033[2J"
+        for ((r=0; r<rows; r++)); do
+            printf "\033[K  ${C_GRN}%s${NC}\n" "${buf[$r]:-}"
+        done
+        anim_pause 0.06
+    done
+}
+
+# typewriter effect for short strings
+type_text() {
+    local s="$1" i
+    for ((i=0; i<${#s}; i++)); do
+        printf "%s" "${s:$i:1}"
+        anim_pause 0.03
+    done
+    printf "\n"
+}
+
+# ═══════════════════════════════════════════════════════════════
 #  GLOBAL FLAGS
 # ═══════════════════════════════════════════════════════════════
 
@@ -207,6 +450,7 @@ EXPLAIN=false
 
 spinner() {
     $JSON_MODE && return 0   # machine-readable output stays clean
+    [ "$CFG_ANIMATIONS" = "on" ] || return 0   # config animations=off
     local msg="${1:-Working}"
     local frames=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
     local end=$((SECONDS * 10 + 5))
@@ -818,6 +1062,57 @@ show_wolf() {
                            ;
 WOLF
     echo -e "${NC}"
+}
+
+# Boot loading screen: matrix rain, then the wolf reveals line by line,
+# then the screen clears so the menu draws text-only. Config-gated.
+show_loading() {
+    anim_on || return 0
+    # rain frames scale with loading_time (default 1.2s -> ~14 frames)
+    local frames
+    frames=$(awk "BEGIN{printf \"%d\", $CFG_LOADING_TIME*12}")
+    [ "$frames" -lt 6 ] && frames=6
+    printf "\033[?25l"   # hide cursor during the animation
+    matrix_rain "$frames"
+    printf "\033[H\033[2J"
+    if [ "$CFG_SHOW_WOLF" != "never" ]; then
+        echo -e "${C_WOLF}"
+        local line
+        while IFS= read -r line; do
+            printf "%s\n" "$line"
+            anim_pause 0.012
+        done << 'WOLF'
+
+                         .d$$b
+                       .' TO$;\
+                      /  : TP._;
+                     / _.;  :Tb|
+                    /   /   ;j$j
+                _.-"       d$$$$
+              .' ..       d$$$$;
+             /  /P'      d$$$$P. |\
+            /   "      .d$$$P' |\^"l
+          .'           `T$P^"""""  :
+      ._.'      _.'                ;
+   `-.-".-'-' ._.       _.-"    .-"
+ `.-" _____  ._              .-"
+-.(g$$$$$$$b.              .'
+  ""^^T$$$P^)            .(:
+    _/  -"  /.'         /:/;
+ ._.'-'`-'  ")/         /;/;
+`-.-"..--""   " /         /  ;
+.-" ..--""        -'          :
+..--""--.-"         (\      .-(\
+  ..--""              `-\(\\/;`
+    _.                      :
+                            ;`-
+                           :\
+                           ;
+WOLF
+        echo -e "${NC}"
+    fi
+    anim_pause 0.3
+    printf "\033[?25h\033[H\033[2J"
 }
 
 show_header() {
@@ -1718,7 +2013,7 @@ EOF
 cmd_experimental() {
     local sub="${1:-list}"
     clear
-    show_wolf "$C_RED"
+    [ "$CFG_SHOW_WOLF" != "never" ] && show_wolf "$C_RED"
     echo ""
     section "Experimental  -  dev section"
     echo -e "  ${C_RED}developer section  -  unfinished exploits, novel chains, verbose output${NC}"
@@ -2558,8 +2853,10 @@ EOF
 
 draw_menu() {
     clear
+    # the wolf lives in the boot loading screen by default (show_wolf=loading);
+    # show_wolf=menu keeps it on the first menu draw too
     if $FIRST_DRAW; then
-        show_wolf
+        [ "$CFG_SHOW_WOLF" = "menu" ] && show_wolf
         FIRST_DRAW=false
     fi
     show_header
@@ -2575,8 +2872,12 @@ draw_menu() {
         echo ""
     fi
 
-    # Scan and display all devices
-    scan_devices
+    # Scan and display all devices (config device_scan=off shows saved device only)
+    if [ "$CFG_DEVICE_SCAN" = "on" ]; then
+        scan_devices
+    else
+        DEV_USB=(); DEV_WIFI=(); DEV_COUNT=0
+    fi
     if [ "$DEV_COUNT" -gt 0 ]; then
         echo -e "  ${C_STEEL}${B}── devices (${DEV_COUNT}) ──${NC}"
         for u in "${DEV_USB[@]}"; do
@@ -2604,13 +2905,13 @@ draw_menu() {
     menu_opt 1 "Quick Exploit"    "build → install → verify, one button"
     menu_opt 2 "Deploy Only"      "install the tweak on the phone"
     menu_opt 3 "Live Monitor"     "watch the phone's log in real time"
-    echo ""
+    [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
 
     menu_group "phone & data"
     menu_opt 4 "Device Manager"   "add / switch / device info"
     menu_opt 5 "Profiles"         "save / load deploy settings"
     menu_opt 6 "History"          "exploit success stats"
-    echo ""
+    [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
 
     menu_group "diagnostics & power"
     menu_opt 7 "Diagnostics"      "doctor · audit · status"
@@ -2618,10 +2919,11 @@ draw_menu() {
     menu_opt n "Chains & CVEs"      "attack chain catalog · CVE tracker (C5)"
     menu_opt o "PoC Lab"            "test found-but-unimplemented bugs (C6)"
     menu_opt ex "Experimental"      "unfinished exploits · novel chains (dev)"
+    menu_opt g "Config"             "animations · colors · menu behavior"
     menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
     menu_opt u "USB Test"         "cable · pairing · data round-trip (harmless)"
     menu_opt p "Panic Analyzer"   "classify .ips crash logs → known CVEs (BB-032..037)"
-    echo ""
+    [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
 
     menu_group "research (device-crashing PoCs)"
     menu_opt 0 "Panic-PoC Lab"    "sep-panic / exr / applejpeg / dirtyslide" "${C_RED}[crashes phone]${NC}"
@@ -2629,14 +2931,14 @@ draw_menu() {
     menu_opt k "Kernelcache Diff" "offline XPF offset research  -  resolve/diff kernelcaches"
     menu_opt w "kcwatch"          "auto kernel-delta watcher  -  poll → fetch → resolve → report"
     menu_opt r "readiness"        "device capability + exploit-readiness report (live probes)"
-    echo ""
+    [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
     printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
-    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}r${NC} readiness  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
+    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}r${NC} readiness  ${C_FROST}g${NC} config  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
     echo ""
-    echo -ne "  ${C_FROST}${B}W0lfSword ▸${NC} "
+    echo -ne "  ${C_FROST}${B}${CFG_PROMPT}${NC} "
 }
 
 # ── First-run guided wizard (K2.4) ────────────────────────────
@@ -2700,6 +3002,7 @@ EOF
 
 run_menu() {
     FIRST_DRAW=true
+    show_loading
     first_run_wizard
     while true; do
         draw_menu
@@ -2731,6 +3034,7 @@ run_menu() {
             cve)          cmd_cve || true;;
             poclab|o)     cmd_poclab || true;;
             experimental|ex) cmd_experimental || true;;
+            g|cfg|config) cmd_config || true;;
             # usbliter8-arctic
             9|ul8|usbliter8)
                 if [ "$EUID" -ne 0 ]; then
@@ -2758,11 +3062,19 @@ run_menu() {
             offsets)      cmd_offsets || true;;
             targets|t)    cmd_targets || true;;
             q|Q|quit|exit)
-                echo ""; echo -e "  ${C_WOLF}~ howl later ~${NC}"; echo ""; exit 0;;
+                echo ""
+                if anim_on; then
+                    printf "  ${C_WOLF}"
+                    type_text "~ howl later ~"
+                    printf "${NC}"
+                else
+                    echo -e "  ${C_WOLF}~ howl later ~${NC}"
+                fi
+                echo ""; exit 0;;
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown  -  try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/ex, or q${NC}";;
+                echo -e "  ${C_RED}Unknown  -  try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/ex/g, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -2772,9 +3084,10 @@ run_menu() {
 #  ADDERALL  -  Fully Automated Exploit Deployment
 # ═══════════════════════════════════════════════════════════════
 
-# Prompt helper  -  respects --yes
+# Prompt helper  -  respects --yes and config confirm_risky=off
 confirm() {
     $YES_MODE && return 0
+    [ "$CFG_CONFIRM_RISKY" = "off" ] && return 0
     local msg="${1:-Continue?}"
     echo -ne "  ${C_AMB}${msg} [y/N]${NC} "; read -r ans
     [ "$ans" = "y" ] || [ "$ans" = "Y" ] && return 0
@@ -3841,6 +4154,22 @@ doctor  -  check the health of YOUR COMPUTER.
   on any new machine.
 EOF
             ;;
+        config)
+            cat <<'EOF'
+config  -  menu behavior, stored in .w0lfsword/config.
+  Plain key=value lines with # comments - edit by hand or via the CLI:
+    config            show current values
+    config set <k> <v>  change one value (validated)
+    config edit       open the file in $EDITOR
+    config reset      back to defaults
+  Keys: animations (on|off), anim_speed (fast|normal|slow),
+  show_wolf (loading|menu|never), menu_compact (on|off),
+  device_scan (on|off), color (on|off), confirm_risky (on|off),
+  prompt_symbol (text), loading_time (seconds).
+  animations=off also disables the boot loading screen; color=off
+  strips all ANSI colors (handy for logs).
+EOF
+            ;;
         status)
             cat <<'EOF'
 status  -  project overview + deploy readiness.
@@ -4161,6 +4490,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check"
     printf "  ${C_EYE}%-14s${NC} %s\n" "doctor"       "Check environment"
     printf "  ${C_EYE}%-14s${NC} %s\n" "offsets"      "iOS version coverage"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "config (g)"   "Menu behavior: animations, colors, wolf, prompt  -  show | set <k> <v> | edit | reset"
     printf "  ${C_EYE}%-14s${NC} %s\n" "exploits (e)" "Exploit technique matrix (K1.5)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "chains"       "Attack chain catalog + stages (C5.3)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "cve [filter]" "CVE tracker: kernel|userspace|sandbox|tcc|ssv|live (C5.1/C5.2)"
@@ -4257,6 +4587,7 @@ main() {
         cve)       cmd_cve "${args[@]}";;
         poclab)    cmd_poclab "${args[@]}";;
         experimental|exp) cmd_experimental "${args[@]}";;
+        config|cfg|g) cmd_config "${args[@]}";;
         poc)       cmd_poc "${args[@]}";;
         fuzz)      cmd_fuzz "${args[@]}";;
         kcwatch)   cmd_kcwatch "${args[@]}";;
