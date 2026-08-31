@@ -212,7 +212,32 @@ static void installWolfEasterEgg(void) {
 static UIView *g_hudContainer = nil;
 static UITextView *g_hudLogView = nil;
 static UILabel *g_hudStatusLabel = nil;
+static NSString *g_hudPlainCache = nil;
 static BOOL g_hudExpanded = NO;
+
+static UIColor *hudColorForLine(NSString *line) {
+    if ([line containsString:@"[FATAL]"] || [line containsString:@"failed"] ||
+        [line containsString:@"FAILED"] || [line containsString:@"gave up"] ||
+        [line containsString:@"✗"]) {
+        return [UIColor colorWithRed:1.0 green:0.42 blue:0.38 alpha:1];
+    }
+    if ([line containsString:@"[+]"] || [line containsString:@"success"] ||
+        [line containsString:@"ready"] || [line containsString:@"escaped"] ||
+        [line containsString:@"succeeded"] || [line containsString:@"OK"] ||
+        [line containsString:@"win"]) {
+        return [UIColor colorWithRed:0.42 green:0.92 blue:0.45 alpha:1];
+    }
+    if ([line containsString:@"[-]"] || [line containsString:@"retry"] ||
+        [line containsString:@"missed"] || [line containsString:@"timeout"] ||
+        [line containsString:@"[i]"] || [line containsString:@"exhausted"] ||
+        [line containsString:@"giving up"] || [line containsString:@"cycle"]) {
+        return [UIColor colorWithRed:1.0 green:0.78 blue:0.35 alpha:1];
+    }
+    if ([line containsString:@"[Stub]"]) {
+        return [UIColor colorWithRed:0.55 green:0.72 blue:1.0 alpha:1];
+    }
+    return [UIColor colorWithWhite:0.75 alpha:1];
+}
 
 static void hudRefresh(void) {
     if (!g_hudContainer) return;
@@ -241,13 +266,26 @@ static void hudRefresh(void) {
     g_hudStatusLabel.text = txt;
     g_hudStatusLabel.textColor = col;
     if (g_hudLogView) {
-        char snap[12288];
+        char snap[32768];
         int n = tweak_log_ring_snapshot(snap, sizeof(snap));
         if (n > 0) {
-            NSString *new = [NSString stringWithUTF8String:snap];
-            if (![g_hudLogView.text isEqualToString:new]) {
-                g_hudLogView.text = new;
-                [g_hudLogView scrollRangeToVisible:NSMakeRange(g_hudLogView.text.length - 1, 1)];
+            NSString *plain = [NSString stringWithUTF8String:snap];
+            if (![g_hudPlainCache isEqualToString:plain]) {
+                g_hudPlainCache = plain;
+                UIFont *mono = [UIFont monospacedSystemFontOfSize:9.0 weight:UIFontWeightRegular];
+                NSMutableAttributedString *as = [[NSMutableAttributedString alloc] init];
+                NSArray *lines = [plain componentsSeparatedByString:@"\n"];
+                for (NSString *line in lines) {
+                    NSDictionary *attrs = @{
+                        NSFontAttributeName: mono,
+                        NSForegroundColorAttributeName: hudColorForLine(line),
+                    };
+                    NSAttributedString *ls = [[NSAttributedString alloc]
+                        initWithString:[line stringByAppendingString:@"\n"] attributes:attrs];
+                    [as appendAttributedString:ls];
+                }
+                g_hudLogView.attributedText = as;
+                [g_hudLogView scrollRangeToVisible:NSMakeRange(as.length - 1, 1)];
             }
         }
     }
@@ -256,12 +294,12 @@ static void hudRefresh(void) {
 static void hudSetExpanded(BOOL expanded) {
     g_hudExpanded = expanded;
     if (!g_hudContainer) return;
-    CGFloat w = g_hudContainer.bounds.size.width;
-    CGFloat winH = [UIApplication sharedApplication].keyWindow.bounds.size.height
-                   ?: g_hudContainer.window.bounds.size.height ?: 700;
-    CGFloat panelH = expanded ? (winH * 0.45) : 0;
-    g_hudContainer.frame = CGRectMake(0, 0, w, 34 + panelH);
-    g_hudLogView.frame = CGRectMake(0, 34, w, panelH);
+    UIWindow *win = g_hudContainer.window ?: [UIApplication sharedApplication].keyWindow;
+    CGFloat winH = win ? win.bounds.size.height : 700;
+    CGFloat winW = win ? win.bounds.size.width : g_hudContainer.bounds.size.width;
+    CGFloat panelH = expanded ? (winH * 0.5) : 0;
+    g_hudContainer.frame = CGRectMake(0, winH - 34 - panelH, winW, 34 + panelH);
+    g_hudLogView.frame = CGRectMake(0, 34, winW, panelH);
     g_hudLogView.hidden = !expanded;
 }
 
@@ -275,9 +313,10 @@ static void hudInstall(void) {
     if (!win) win = [UIApplication sharedApplication].windows.firstObject;
     if (!win) return;
     CGFloat w = win.bounds.size.width;
+    CGFloat winH = win.bounds.size.height;
 
-    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, w, 34)];
-    container.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, winH - 34, w, 34)];
+    container.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
     container.backgroundColor = [UIColor colorWithWhite:0.07 alpha:0.92];
     container.layer.zPosition = 10000;
 
