@@ -918,7 +918,7 @@ static id hook_showAlertWithTitle(id self, SEL _cmd, id title, id text, id cance
         if ([textStr containsString:@"binary was modified"] ||
             [textStr containsString:@"reinstall Filza"]) {
             // Modified binary is by design; log the exploit status so a suppressed
-            // alert never hides a broken state (3 = escaped, otherwise investigate).
+            // alert never hides a broken state (2 = escaped, 3 = failed).
             TweakLog("[Tweak] Suppressed integrity alert (exploit status=%d)", tweak_exploit_status());
             return nil;
         }
