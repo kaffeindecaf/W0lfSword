@@ -77,13 +77,53 @@ with open(path, "wb") as f:
 print(f"  CFBundleIdentifier: {old} -> {ident}")
 PYEOF
 
+# 3b. App-extension bundle IDs must be rewritten too. PlumeImpactor/AltStore
+# register EVERY bundle ID in the IPA with Apple's developer portal; the
+# stock Filza's PlugIns/Sharing.appex still carries com.tigisoftware.Filza.Sharing,
+# which Apple rejects (Developer API error 9401: "An App ID ... is not
+# available") because Tigisoftware's own team owns that identifier. Extensions
+# must be prefixed with the parent app's ID, so derive
+# com.apple.mobile.MobileHouseArrest.<suffix> from each extension.
+for ext_plist in "$APP"/PlugIns/*.appex/Info.plist; do
+    [ -f "$ext_plist" ] || continue
+    python3 - "$ext_plist" "$MHA_ID" <<'PYEOF'
+import plistlib, sys
+path, prefix = sys.argv[1], sys.argv[2]
+with open(path, "rb") as f:
+    d = plistlib.load(f)
+old = d.get("CFBundleIdentifier", "")
+suffix = old.rsplit(".", 1)[-1] if "." in old else ""
+new = f"{prefix}.{suffix}" if suffix else prefix
+d["CFBundleIdentifier"] = new
+with open(path, "wb") as f:
+    plistlib.dump(d, f)
+print(f"  extension CFBundleIdentifier: {old} -> {new}")
+PYEOF
+done
+
 # 4. Re-sign (CodeDirectory identifier must match the bundle id)
 # NOTE: -I takes the value ATTACHED (this ldid build rejects "-I <id>").
 echo "[4/6] Re-signing with ldid (identifier $MHA_ID)..."
+# adhoc-sign the whole bundle FIRST (default identifiers), then re-sign the
+# main binary + every extension binary with -I so their CodeDirectory
+# identifiers match their (rewritten) bundle IDs. Order matters: a plain
+# `ldid -S` at the end would clobber the -I identifiers.
+find "$APP" -type f -perm -u+x -exec ldid -S {} \; 2>/dev/null || true
 ldid -S -I"$MHA_ID" "$BIN"
 ldid -S "$APP/$DYLIB_NAME"
-# everything else that carries an executable bit gets an adhoc signature
-find "$APP" -type f -perm -u+x -exec ldid -S {} \; 2>/dev/null || true
+for ext_plist in "$APP"/PlugIns/*.appex/Info.plist; do
+    [ -f "$ext_plist" ] || continue
+    ext_dir="$(dirname "$ext_plist")"
+    ext_id=$(python3 -c "import plistlib; print(plistlib.load(open('$ext_plist','rb')).get('CFBundleIdentifier',''))" 2>/dev/null)
+    ext_exec=$(python3 -c "import plistlib; print(plistlib.load(open('$ext_plist','rb')).get('CFBundleExecutable',''))" 2>/dev/null)
+    ext_bin="$ext_dir/$ext_exec"
+    if [ -n "$ext_id" ] && [ -n "$ext_exec" ] && [ -f "$ext_bin" ]; then
+        ldid -S -I"$ext_id" "$ext_bin"
+        echo "  re-signed extension: $(basename "$ext_dir") -> $ext_id"
+    else
+        echo "  ⚠ extension binary not found for $ext_plist (id=$ext_id exec=$ext_exec)"
+    fi
+done
 
 # 5. Repackage
 echo "[5/6] Repackaging..."
