@@ -2816,16 +2816,31 @@ cmd_tweak_list() {
     python3 - <<'PYEOF'
 import json
 d = json.load(open('tweaks/catalog.json'))
+print("  No-jailbreak tweaks (userspace exploit, MCM container access):")
 for t in d['tweaks']:
+    if t.get('jailbreak_required', True):
+        continue
     status = t.get('status','?')
     mark = {'available': '\033[0;32m●', 'planned': '\033[0;33m◌'}.get(status, '\033[0;31m?')
     print(f"  {mark}\033[0m  \033[1;38;5;39m{t['name']:<22}\033[0m  "
           f"\033[2m{t['description']}\033[0m")
-    print(f"       \033[2mios {t['ios_min']}–{t['ios_max']}  ·  exploit: {t['required_exploit']:<10}"
-          f"  ·  target: {t['substrate_target']}  ·  {status}\033[0m")
+    print(f"       \033[2mios {t['ios_min']}–{t['ios_max']}  ·  no jailbreak  ·  {status}\033[0m")
+print("")
+print("  Jailbreak-required tweaks (kernel R/W via darksword exploit):")
+for t in d['tweaks']:
+    if not t.get('jailbreak_required', True):
+        continue
+    status = t.get('status','?')
+    mark = {'available': '\033[0;32m●', 'planned': '\033[0;33m◌'}.get(status, '\033[0;31m?')
+    print(f"  {mark}\033[0m  \033[1;38;5;39m{t['name']:<22}\033[0m  "
+          f"\033[2m{t['description']}\033[0m")
+    print(f"       \033[2mios {t['ios_min']}–{t['ios_max']}  ·  jailbreak required  ·  {status}\033[0m")
 PYEOF
     echo ""
     echo -e "  ${C_DIM}Legend: ${C_GRN}●${C_DIM} available  ${C_AMB}◌${C_DIM} planned (no template yet)${NC}"
+    echo -e "  ${C_DIM}No-jailbreak tweaks run via the userspace MCM container-access${NC}"
+    echo -e "  ${C_DIM}path (works on a clean sideload). Jailbreak-required tweaks need${NC}"
+    echo -e "  ${C_DIM}the darksword kernel exploit (capped at iOS 26.0.1).${NC}"
     echo -e "  ${C_DIM}Install: ${C_EYE}./W0lfSword tweaks install <id>${NC}  -  picks the right"
     echo -e "  ${C_DIM}exploit for your device automatically (pe_v1 / pe_v2 / PUAF).${NC}"
     echo ""
@@ -2925,8 +2940,13 @@ PYEOF
             fi
             if [ "$(version_sort_first "$IOS_VER" "26.1")" = "26.1" ]; then
                 warn "DarkSword is patched in iOS 26.1  -  '$T_ID' requires it"
-                err "This tweak needs the kernel exploit, unavailable on iOS $IOS_VER"
-                return 1
+                echo -e "  ${C_DIM}The kernel exploit this tweak needs is fixed on iOS $IOS_VER.${NC}"
+                echo -e "  ${C_DIM}The tweak will build and install, but the kernel stage will refuse to run.${NC}"
+                if ! confirm "Install anyway (build + deploy, exploit will fail)?"; then
+                    err "Aborted - nothing was installed"
+                    return 1
+                fi
+                METHOD_OK=1
             fi
             ;;
         userspace) METHOD_OK=1;;  # MCM container access works without kernel R/W
@@ -2968,9 +2988,15 @@ PYEOF
     if [ "$VERDICT" = "OK" ]; then
         ok "Compatibility: iOS $IOS_VER · $FAMILY · exploit $METHOD"
     else
-        err "Incompatible: $VERDICT"
-        hint "Nothing was installed. Pick a tweak that covers iOS $IOS_VER."
-        return 1
+        warn "Version/SoC compatibility: $VERDICT"
+        echo -e "  ${C_DIM}Your device (iOS $IOS_VER · $FAMILY) is outside the tested range for"
+        echo -e "  ${C_DIM}'$T_NAME' (iOS $T_IOSMIN–$T_IOSMAX). The tweak may misbehave or do nothing.${NC}"
+        if confirm "Install anyway?"; then
+            warn "Installing on untested iOS $IOS_VER — you were warned"
+        else
+            hint "Nothing was installed. Pick a tweak that covers iOS $IOS_VER."
+            return 1
+        fi
     fi
 
     # ── 5. Build the dylib from template (K3.2) ────────────────
