@@ -35,9 +35,24 @@
 // via TGRootFileManager, these lines show exactly what it asked for and what
 // it got back (xpc_null). Read via: afcclient --documents <bundle> cat
 // Documents/FilzaTweak.log, or live: idevicesyslog | grep -i wolfsword.
+// Hot hooks are rate-limited: first 10 calls + every 100th, so a browsing
+// session can't spam the log (or the diskwrites/jetsam monitors).
+
+static _Atomic int g_stubAvailCalls = 0;
+static _Atomic int g_stubSyncCalls = 0;
+
+static void logStubSync(const char *name, id msg) {
+    int n = atomic_fetch_add(&g_stubSyncCalls, 1) + 1;
+    if (n <= 10 || (n % 100) == 0) {
+        TweakLog("[Stub] %s #%d msg=%s -> xpc_null", name, n, tstr([msg description]));
+    }
+}
 
 static BOOL hook_isRootHelperAvailable(id self, SEL _cmd) {
-    TweakLog("[Stub] isRootHelperAvailable -> NO");
+    int n = atomic_fetch_add(&g_stubAvailCalls, 1) + 1;
+    if (n <= 10 || (n % 100) == 0) {
+        TweakLog("[Stub] isRootHelperAvailable #%d -> NO", n);
+    }
     return NO;
 }
 
@@ -67,29 +82,114 @@ static int hook_spawnRoot_args_pid(id self, SEL _cmd, id path, id args, int *pid
 }
 
 static id hook_sendObjectWithReplySync(id self, SEL _cmd, id msg) {
-    TweakLog("[Stub] sendObjectWithReplySync msg=%s -> xpc_null", tstr([msg description]));
+    logStubSync("sendObjectWithReplySync", msg);
     return (id)xpc_null_create();
 }
 
 static id hook_sendObjectWithReplySync_fd(id self, SEL _cmd, id msg, int *fd) {
     if (fd) *fd = -1;
-    TweakLog("[Stub] sendObjectWithReplySync:fileDescriptor: msg=%s -> xpc_null", tstr([msg description]));
+    logStubSync("sendObjectWithReplySync:fileDescriptor:", msg);
     return (id)xpc_null_create();
 }
 
 static id hook_sendObjectWithReplySync_fd_logintty(id self, SEL _cmd, id msg, int *fd, BOOL logintty) {
     if (fd) *fd = -1;
-    TweakLog("[Stub] sendObjectWithReplySync:fileDescriptor:logintty: msg=%s -> xpc_null", tstr([msg description]));
+    logStubSync("sendObjectWithReplySync:fileDescriptor:logintty:", msg);
     return (id)xpc_null_create();
 }
 
 static void hook_sendObjectNoReply(id self, SEL _cmd, id msg) {
-    TweakLog("[Stub] sendObjectNoReply msg=%s (dropped)", tstr([msg description]));
+    logStubSync("sendObjectNoReply", msg);
 }
 
 static void hook_sendObjectWithReplyAsync(id self, SEL _cmd, id msg, id queue, id completion) {
-    TweakLog("[Stub] sendObjectWithReplyAsync msg=%s -> nil completion", tstr([msg description]));
+    logStubSync("sendObjectWithReplyAsync", msg);
     if (completion) { void (^block)(id) = completion; block(nil); }
+}
+
+#pragma mark - Wolf easter egg (background ASCII art)
+
+// Same arctic wolf as the CLI boot banner, rendered faintly behind every
+// file list (collection/table backgroundView). Hidden branding — shows
+// through the empty space between cells.
+static NSArray *wolfArtLines(void) {
+    return @[
+    @"                         .d$$b",
+    @"                       .' TO$;\\",
+    @"                      /  : TP._;",
+    @"                     / _.;  :Tb|",
+    @"                    /   /   ;j$j",
+    @"                _.-\"       d$$$$",
+    @"              .' ..       d$$$$;",
+    @"             /  /P'      d$$$$P. |\\",
+    @"            /   \"      .d$$$P' |\\^\"l",
+    @"          .'           `T$P^\"\"\"\"\"  :",
+    @"      ._.'      _.'                ;",
+    @"   `-.-\".-'-' ._.       _.-\"    .-\"",
+    @" `.-\" _____  ._              .-\"",
+    @"-.(g$$$$$$$b.              .'",
+    @"  \"\"^^T$$$P^)            .(:",
+    @"    _/  -\"  /.'         /:/;",
+    @" ._.'-'`-'  \")/         /;/;",
+    @"`-.-\"..--\"\"   \" /         /  ;",
+    @".-\" ..--\"\"        -'          :",
+    @"..--\"\"--.-\"         (\\      .-(\\",
+    @"  ..--\"\"              `-\\(\\\\/;`",
+    @"    _.                      :",
+    @"                            ;`-",
+    @"                           :\\",
+    @"                           ;",
+    ];
+}
+
+static const char kWolfArtKey;
+
+static void wolfAddBackground(UIViewController *vc) {
+    if (objc_getAssociatedObject(vc, &kWolfArtKey)) return;
+    UIView *list = nil;
+    for (UIView *v in vc.view.subviews) {
+        if ([v isKindOfClass:[UICollectionView class]] || [v isKindOfClass:[UITableView class]]) {
+            list = v;
+            break;
+        }
+    }
+    if (!list) return;
+    NSMutableString *art = [NSMutableString string];
+    for (NSString *line in wolfArtLines()) {
+        [art appendString:line];
+        [art appendString:@"\n"];
+    }
+    UILabel *label = [[UILabel alloc] initWithFrame:list.bounds];
+    label.text = art;
+    label.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightRegular];
+    label.textColor = [UIColor colorWithWhite:0.85 alpha:0.30];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.numberOfLines = 0;
+    label.lineBreakMode = NSLineBreakByCharWrapping;
+    label.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    if ([list isKindOfClass:[UITableView class]]) {
+        ((UITableView *)list).backgroundView = label;
+    } else {
+        ((UICollectionView *)list).backgroundView = label;
+    }
+    objc_setAssociatedObject(vc, &kWolfArtKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    TweakLog("[Wolf] background art added to %s", tstr(NSStringFromClass([vc class])));
+}
+
+static IMP orig_viewDidAppear = NULL;
+static void hook_viewDidAppear(id self, SEL _cmd, BOOL animated) {
+    ((void(*)(id, SEL, BOOL))orig_viewDidAppear)(self, _cmd, animated);
+    wolfAddBackground(self);
+}
+
+static void installWolfEasterEgg(void) {
+    Class vc = [UIViewController class];
+    Method m = class_getInstanceMethod(vc, @selector(viewDidAppear:));
+    if (m) {
+        orig_viewDidAppear = method_getImplementation(m);
+        method_setImplementation(m, (IMP)hook_viewDidAppear);
+    }
+    TweakLog("[Hooks] wolf background easter egg installed");
 }
 
 #pragma mark - Zip/Unzip via minizip C API (linked in Filza binary)
@@ -1162,6 +1262,7 @@ __attribute__((constructor)) void TweakInit(void) {
     probeSystemPaths();
     refreshUIDebugBypassFlag();
     installHooks(!sandboxConfirmedEscaped);
+    installWolfEasterEgg();
 
     // First-launch welcome (UI-only, safe in every state - exploit or not).
     // Fire after the app finishes launching so there's a window to present.

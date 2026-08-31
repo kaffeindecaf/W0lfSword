@@ -11,6 +11,11 @@
 #include <pthread.h>
 #include <errno.h>
 
+#ifdef __OBJC__
+#import <Foundation/Foundation.h>
+#import <os/log.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -76,6 +81,12 @@ static void TweakLog(const char *format, ...) {
         }
     }
     if (docLogPath) {
+        struct stat dst;
+        if (stat([docLogPath UTF8String], &dst) == 0 && dst.st_size > TWEAK_LOG_MAX_SIZE) {
+            NSString *oldDoc = [docLogPath stringByAppendingString:@".old"];
+            unlink([oldDoc UTF8String]);
+            rename([docLogPath UTF8String], [oldDoc UTF8String]);
+        }
         FILE *df = fopen([docLogPath UTF8String], "a");
         if (df) {
             struct tm t;
@@ -97,8 +108,6 @@ static void TweakLog(const char *format, ...) {
 }
 
 #ifdef __OBJC__
-#import <Foundation/Foundation.h>
-#import <os/log.h>
 static void TweakNSLog(NSString *format, ...) {
     if (!format) return;
     va_list args;

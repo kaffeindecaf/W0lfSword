@@ -81,6 +81,15 @@ endif
 
 MHA_DYLIB ?= $(shell ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
 mha:
+	# Force a fresh dylib: a stale per-arch .o/.dylib (e.g. from a build that
+	# was interrupted or whose deps were lost) makes make skip recompiling,
+	# and re-sign_mha.sh would ship the OLD tweak code while the IPA's
+	# Info.plist changes make it look new. rm the intermediates so the
+	# recursive make below MUST rebuild (hit 2026-08-31: verbose-log build
+	# shipped the previous dylib byte-for-byte; device logs stayed empty).
+	rm -f .theos/obj/debug/arm64/*.o .theos/obj/debug/arm64/*.Td \
+	      .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib \
+	      .theos/obj/debug/FilzaApplySandboxExt.dylib*
 	$(MAKE) package MHA_IDENTITY=1
 	@test -n "$(MHA_DYLIB)" || { echo "  ✗ built dylib not found"; exit 1; }
 	@test -n "$(IPA)" || { echo "  ✗ usage: make mha IPA=/path/Filza.ipa [OUT=Filza-MHA.ipa]"; exit 1; }
