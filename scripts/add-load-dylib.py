@@ -11,6 +11,14 @@ valid signature. Fails cleanly if the load-command padding is too small.
 
 Usage: add-load-dylib.py <input> <output> <dylib-path>
   e.g. add-load-dylib.py Filza Filza.patched @executable_path/FilzaApplySandboxExt.dylib
+
+--strip mode removes any existing LC_LOAD_DYLIB whose dylib path ends with the
+given name (e.g. a stale @executable_path/Frameworks/... injection from a
+previous re-sign), so re-running the MHA flow on an already-modified IPA is
+idempotent instead of stacking duplicate load commands.
+
+Usage: add-load-dylib.py --strip <input> <output> <dylib-name>
+  e.g. add-load-dylib.py --strip Filza Filza.clean FilzaApplySandboxExt.dylib
 """
 
 import argparse
@@ -76,16 +84,60 @@ def existing_dylib_name(buf, off, cmdsize):
     return bytes(buf[start:end]).split(b"\0", 1)[0].decode("utf-8", "replace")
 
 
+def strip_load_dylib(data, name_suffix):
+    """Remove every LC_LOAD_DYLIB whose path ends with name_suffix. Returns
+    (new_data, removed_count)."""
+    removed = 0
+    ncmds = u32(data, 16)
+    sizeofcmds = u32(data, 20)
+    off = 32
+    # Collect matching command regions first (data is a bytearray; do the
+    # compaction on a copy so the offsets stay stable while scanning).
+    regions = []
+    for _ in range(ncmds):
+        cmd = u32(data, off)
+        cmdsize = u32(data, off + 4)
+        if cmdsize < 8:
+            raise ValueError(f"bad load command size: {cmdsize}")
+        if cmd == LC_LOAD_DYLIB and existing_dylib_name(data, off, cmdsize).endswith(name_suffix):
+            regions.append((off, cmdsize))
+            removed += 1
+        off += cmdsize
+    if not regions:
+        return data, 0
+    out = bytearray(data)
+    # Remove from the END backwards so earlier offsets stay valid.
+    for start, cmdsize in sorted(regions, reverse=True):
+        del out[start:start + cmdsize]
+    put_u32(out, 16, ncmds - removed)
+    put_u32(out, 20, sizeofcmds - sum(c for _, c in regions))
+    return out, removed
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("input", type=Path)
     ap.add_argument("output", type=Path)
     ap.add_argument("name", help="dylib path, e.g. @executable_path/FilzaApplySandboxExt.dylib")
+    ap.add_argument("--strip", action="store_true",
+                    help="remove existing LC_LOAD_DYLIBs ending with NAME instead of adding")
     args = ap.parse_args()
 
     data = bytearray(args.input.read_bytes())
     if u32(data, 0) != MH_MAGIC_64:
         raise SystemExit("not a 64-bit Mach-O")
+
+    if args.strip:
+        out, removed = strip_load_dylib(data, args.name)
+        if removed == 0:
+            print(f"[=] no LC_LOAD_DYLIB ending in {args.name!r} to strip")
+        else:
+            print(f"[-] stripped {removed} LC_LOAD_DYLIB ending in {args.name!r}")
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_bytes(out)
+        shutil.copymode(args.input, args.output)
+        return 0
+
     for _, off, cmd, cmdsize in load_commands(data):
         if cmd == LC_LOAD_DYLIB and existing_dylib_name(data, off, cmdsize) == args.name:
             raise SystemExit(f"already has LC_LOAD_DYLIB {args.name!r}")

@@ -49,8 +49,16 @@ BIN="$APP/$(basename "$APP" .app)"
 [ -f "$BIN" ] || { echo "  ✗ main binary not found in $APP"; exit 1; }
 echo "  bundle: $(basename "$APP")  binary: $(basename "$BIN")"
 
-# 2. Inject the tweak dylib
-echo "[2/6] Injecting $DYLIB_NAME..."
+# 2. Strip any stale W0lfSword injection from a previous re-sign pass, then
+#    inject the fresh tweak dylib. The source IPA may already carry an old
+#    @executable_path/Frameworks/FilzaApplySandboxExt.dylib (with a hard
+#    /var/jb CydiaSubstrate link) — stacking a second load command would make
+#    dyld try to load BOTH on a non-jailbroken device. Idempotent re-sign:
+echo "[2/6] Stripping stale injections, then injecting $DYLIB_NAME..."
+python3 "$ADD_LC" --strip "$BIN" "$BIN.clean" "FilzaApplySandboxExt.dylib"
+mv "$BIN.clean" "$BIN"
+rm -f "$APP/Frameworks/FilzaApplySandboxExt.dylib"
+rmdir "$APP/Frameworks" 2>/dev/null || true
 cp "$DYLIB" "$APP/$DYLIB_NAME"
 python3 "$ADD_LC" "$BIN" "$BIN.patched" "@executable_path/$DYLIB_NAME"
 mv "$BIN.patched" "$BIN"
@@ -70,8 +78,9 @@ print(f"  CFBundleIdentifier: {old} -> {ident}")
 PYEOF
 
 # 4. Re-sign (CodeDirectory identifier must match the bundle id)
+# NOTE: -I takes the value ATTACHED (this ldid build rejects "-I <id>").
 echo "[4/6] Re-signing with ldid (identifier $MHA_ID)..."
-ldid -S -I "$MHA_ID" "$BIN"
+ldid -S -I"$MHA_ID" "$BIN"
 ldid -S "$APP/$DYLIB_NAME"
 # everything else that carries an executable bit gets an adhoc signature
 find "$APP" -type f -perm -u+x -exec ldid -S {} \; 2>/dev/null || true

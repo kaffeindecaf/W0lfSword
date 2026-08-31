@@ -12,7 +12,16 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = FilzaApplySandboxExt
 
 # --- Tweak + sandbox escape ---
+# FilzaPadlockBypass.xm uses Logos %hook → links CydiaSubstrate from
+# /var/jb. On the non-jailbroken MHA path that path doesn't exist, so dyld
+# would refuse the injected dylib and Filza wouldn't launch. MHA builds
+# drop the padlock bypass (UI edit affordances only; browsing + the kernel
+# escape don't need it).
+ifeq ($(MHA_IDENTITY),1)
 FilzaApplySandboxExt_FILES = Tweak.m sandbox_escape.m TweakExploit.m
+else
+FilzaApplySandboxExt_FILES = Tweak.m sandbox_escape.m TweakExploit.m FilzaPadlockBypass.xm
+endif
 
 # --- kexploit ---
 FilzaApplySandboxExt_FILES += kexploit/kexploit_opa334.m kexploit/krw.m kexploit/kutils.m kexploit/offsets.m kexploit/vnode.m kexploit/file.m kexploit/vnode_research.m kexploit/sandbox.m kexploit/Exception.m kexploit/Thread.m kexploit/VM.m kexploit/MigFilterBypassThread.m kexploit/RemoteCall.m kexploit/PAC.m kexploit/mcm_bridge.m kexploit/container_access.m kexploit/bad_query_escape.m 
@@ -30,7 +39,12 @@ FilzaApplySandboxExt_FILES += kpf/patchfinder.m
 FilzaApplySandboxExt_FILES += XPF/src/xpf.c XPF/src/common.c XPF/src/decompress.c XPF/src/bad_recovery.c XPF/src/non_ppl.c XPF/src/ppl.c
 
 # --- Filza Padlock Bypass ---
+# (excluded on MHA builds — see the FILES conditional above: the Logos
+# %hook generates a hard CydiaSubstrate dependency, and /var/jb doesn't
+# exist on a non-jailbroken device, so dyld would reject the dylib)
+ifneq ($(MHA_IDENTITY),1)
 FilzaApplySandboxExt_FILES += FilzaPadlockBypass.xm
+endif
 
 # --- ChOma ---
 FilzaApplySandboxExt_FILES += XPF/external/ChOma/src/arm64.c XPF/external/ChOma/src/Base64.c XPF/external/ChOma/src/BufferedStream.c XPF/external/ChOma/src/CodeDirectory.c XPF/external/ChOma/src/CSBlob.c XPF/external/ChOma/src/DER.c XPF/external/ChOma/src/DyldSharedCache.c XPF/external/ChOma/src/Entitlements.c XPF/external/ChOma/src/Fat.c XPF/external/ChOma/src/FileStream.c XPF/external/ChOma/src/Host.c XPF/external/ChOma/src/MachO.c XPF/external/ChOma/src/MachOLoadCommand.c XPF/external/ChOma/src/MemoryStream.c XPF/external/ChOma/src/PatchFinder.c XPF/external/ChOma/src/PatchFinder_arm64.c XPF/external/ChOma/src/Util.c
