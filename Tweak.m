@@ -213,6 +213,7 @@ static UIView *g_hudContainer = nil;   // expanded panel (header + log view)
 static UIButton *g_hudArrow = nil;     // collapsed-state arrow button
 static UITextView *g_hudLogView = nil;
 static UILabel *g_hudStatusLabel = nil;
+static UIProgressView *g_hudProgressView = nil;
 // MRC build: an autoreleased NSString cache dangles after the pool drains
 // and crashes the timer callback (objc_msgSend on freed memory). Cache the
 // plain snapshot in a C buffer instead — no ObjC lifetime issues.
@@ -326,28 +327,41 @@ static void hudRefresh(void) {
     if (!g_hudContainer && !g_hudArrow) return;
     int st = tweak_exploit_status();
     int att = tweak_exploit_attempt();
+    int cyc = tweak_exploit_cycle();
     NSString *txt;
     UIColor *col;
+    float progress = 0;
     switch (st) {
         case 1:
-            txt = [NSString stringWithFormat:@"W0lfSword: exploit initializing (attempt %d/5)…", att];
+            txt = [NSString stringWithFormat:@"W0lfSword: exploit initializing (attempt %d/5, cycle %d/3)…", att, cyc];
             col = [UIColor colorWithRed:0.95 green:0.75 blue:0.2 alpha:1];
+            // 5 attempts x 3 cycles = 15 slots; min sliver so it reads as active
+            progress = (float)((att - 1) * 3 + MAX(cyc, 1)) / 15.0f;
+            if (progress > 1.0f) progress = 1.0f;
+            if (progress < 0.03f) progress = 0.03f;
             break;
         case 2:
             txt = @"W0lfSword: exploit ready — sandbox escaped";
             col = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
+            progress = 1.0f;
             break;
         case 3:
             txt = @"W0lfSword: exploit failed — userspace fallback";
             col = [UIColor colorWithRed:1 green:0.4 blue:0.35 alpha:1];
+            progress = 1.0f;
             break;
         default:
             txt = @"W0lfSword: idle";
             col = [UIColor colorWithWhite:0.8 alpha:1];
+            progress = 0;
             break;
     }
     g_hudStatusLabel.text = txt;
     g_hudStatusLabel.textColor = col;
+    if (g_hudProgressView) {
+        g_hudProgressView.progress = progress;
+        g_hudProgressView.progressTintColor = col;
+    }
     // The collapsed arrow carries the status color so the exploit state is
     // readable even with the panel fully closed.
     if (g_hudArrow) {
@@ -435,6 +449,12 @@ static void hudInstall(void) {
     [close addAction:[UIAction actionWithHandler:^(UIAction *a) { hudToggle(); }]
            forControlEvents:UIControlEventTouchUpInside];
 
+    UIProgressView *progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
+    progress.frame = CGRectMake(0, 30, w, 4);
+    progress.trackTintColor = [UIColor colorWithWhite:0.3 alpha:0.6];
+    progress.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    progress.progress = 0;
+
     UITextView *logView = [[UITextView alloc] initWithFrame:CGRectMake(0, 34, w, 0)];
     logView.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.95];
     logView.textColor = [UIColor colorWithWhite:0.75 alpha:1];
@@ -445,6 +465,7 @@ static void hudInstall(void) {
 
     [container addSubview:status];
     [container addSubview:close];
+    [container addSubview:progress];
     [container addSubview:logView];
     [win addSubview:container];
     [win addSubview:arrow];
@@ -453,6 +474,7 @@ static void hudInstall(void) {
     g_hudArrow = arrow;
     g_hudLogView = logView;
     g_hudStatusLabel = status;
+    g_hudProgressView = progress;
     g_hudExpanded = NO;
 
     NSTimer *timer = [NSTimer timerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *t) {
@@ -1159,6 +1181,22 @@ static NSDictionary *hook_attributesOfItemAtPath_error(id self, SEL _cmd, NSStri
     return result;
 }
 
+// Until the exploit wins, the sandbox is not escaped and Filza's attempts to
+// touch /var fail with "You don't have permission" for EVERY operation —
+// hundreds of identical [SSV] ... failed lines drown the log (and read as a
+// wall of red in the HUD). Log the first 10, then every 100th, with a total.
+static _Atomic int g_ssvFailCount = 0;
+static void ssvLogFail(const char *fmt, ...) {
+    int n = atomic_fetch_add(&g_ssvFailCount, 1) + 1;
+    if (n > 10 && (n % 100) != 0) return;
+    char buf[1200];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    TweakLog("%s (fail #%d)", buf, n);
+}
+
 static BOOL hook_createDirectoryAtPath(id self, SEL _cmd, NSString *path, BOOL createIntermediates, NSDictionary *attributes, NSError **error) {
     BOOL protected = ssvProtectedPath(path);
     NSError *localError = nil;
@@ -1181,7 +1219,7 @@ static BOOL hook_createDirectoryAtPath(id self, SEL _cmd, NSString *path, BOOL c
     int savedErrno = errno;
     NSError *e = (errRef ? *errRef : nil);
     if (protected) {
-        TweakLog("[SSV] createDirectoryAtPath failed path=%s errno=%d(%s) nsErr=%ld domain=%s desc=%s",
+        ssvLogFail("[SSV] createDirectoryAtPath failed path=%s errno=%d(%s) nsErr=%ld domain=%s desc=%s",
                  tstr(path),
                  savedErrno,
                  strerror(savedErrno),
@@ -1203,7 +1241,7 @@ static BOOL hook_createDirectoryAtPath(id self, SEL _cmd, NSString *path, BOOL c
             return YES;
         }
         int altErrno = errno;
-        TweakLog("[SSV] createDirectoryAtPath fallback failed alt=%s errno=%d(%s) nsErr=%ld domain=%s desc=%s",
+        ssvLogFail("[SSV] createDirectoryAtPath fallback failed alt=%s errno=%d(%s) nsErr=%ld domain=%s desc=%s",
                  tstr(altPath),
                  altErrno,
                  strerror(altErrno),
@@ -1234,7 +1272,7 @@ static BOOL hook_copyItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, N
     BOOL result = ((BOOL(*)(id,SEL,id,id,NSError**))orig_copyItemAtPath_toPath_error)(self, _cmd, src, dst, errRef);
     if (!result && (ssvProtectedPath(src) || ssvProtectedPath(dst))) {
         NSError *e = (errRef ? *errRef : nil);
-        TweakLog("[SSV] copyItemAtPath failed %s -> %s code=%ld domain=%s desc=%s",
+        ssvLogFail("[SSV] copyItemAtPath failed %s -> %s code=%ld domain=%s desc=%s",
                  tstr(src), tstr(dst),
                  (long)(e ? e.code : 0),
                  e ? [e.domain UTF8String] : "(null)",
@@ -1261,7 +1299,7 @@ static BOOL hook_moveItemAtPath_toPath_error(id self, SEL _cmd, NSString *src, N
     BOOL result = ((BOOL(*)(id,SEL,id,id,NSError**))orig_moveItemAtPath_toPath_error)(self, _cmd, src, dst, errRef);
     if (!result && (ssvProtectedPath(src) || ssvProtectedPath(dst))) {
         NSError *e = (errRef ? *errRef : nil);
-        TweakLog("[SSV] moveItemAtPath failed %s -> %s code=%ld domain=%s desc=%s",
+        ssvLogFail("[SSV] moveItemAtPath failed %s -> %s code=%ld domain=%s desc=%s",
                  tstr(src), tstr(dst),
                  (long)(e ? e.code : 0),
                  e ? [e.domain UTF8String] : "(null)",
@@ -1310,7 +1348,7 @@ static BOOL hook_writeToFile(id self, SEL _cmd, NSString *path, unsigned long lo
     }
     if (!result && ssvProtectedPath(path)) {
         NSError *e = (errRef ? *errRef : nil);
-        TweakLog("[SSV] writeToFile failed path=%s code=%ld domain=%s desc=%s",
+        ssvLogFail("[SSV] writeToFile failed path=%s code=%ld domain=%s desc=%s",
                  tstr(path),
                  (long)(e ? e.code : 0),
                  e ? [e.domain UTF8String] : "(null)",
