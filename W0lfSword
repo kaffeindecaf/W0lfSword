@@ -1589,14 +1589,18 @@ cmd_audit() {
     for f in "${files[@]}"; do
         [ ! -f "$f" ] && continue
         local r; r=$(python3 -c "
-b=p=0
-for c in open('$f').read():
-    if c=='{': b+=1
-    elif c=='}': b-=1
-    elif c=='(' or c==')':
-        p+=1 if c=='(' else -1
+import re
+s=open('$f').read()
+# strip string/char literals and comments before counting - parens and
+# braces inside them (wolf ascii art, log messages) are not code.
+s=re.sub(r'//[^\n]*','',s)
+s=re.sub(r'/\*.*?\*/','',s,flags=re.S)
+s=re.sub(r'\"(\\\\.|[^\"\\\\])*\"','\"\"',s)
+s=re.sub(r\"'(\\\\.|[^'\\\\])*'\",\"''\",s)
+b=s.count('{')-s.count('}')
+p=s.count('(')-s.count(')')
 print(b,p)
-" 2>/dev/null || echo "? ?")
+" 2>/dev/null || echo \"? ?\")
         local b; b=$(echo "$r" | awk '{print $1}')
         local p; p=$(echo "$r" | awk '{print $2}')
         if [ "$b" = "0" ] && [ "$p" = "0" ]; then

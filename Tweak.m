@@ -9,6 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <string.h>
@@ -348,6 +349,11 @@ static void hudRefresh(void) {
         case 3:
             txt = @"W0lfSword: exploit failed — userspace fallback";
             col = [UIColor colorWithRed:1 green:0.4 blue:0.35 alpha:1];
+            progress = 1.0f;
+            break;
+        case 4:
+            txt = @"W0lfSword: jailbroken — Filza helper mode";
+            col = [UIColor colorWithRed:0.55 green:0.72 blue:1.0 alpha:1];
             progress = 1.0f;
             break;
         default:
@@ -1487,6 +1493,12 @@ __attribute__((constructor)) void TweakInit(void) {
     TweakLog("\n=== TWEAK LOADED ===");
     TweakLog("[Tweak] TweakInit started");
     TweakLog("[Tweak] uid=%d euid=%d pid=%d", (int)getuid(), (int)geteuid(), (int)getpid());
+    struct utsname un;
+    if (uname(&un) == 0) {
+        TweakLog("[Tweak] device=%s iOS=%s (jailbroken=%d)", un.machine,
+                 tstr([[UIDevice currentDevice] systemVersion]),
+                 access("/var/jb", F_OK) == 0 ? 1 : 0);
+    }
     TweakLog("[Tweak] bundleID=%s", tstr([[NSBundle mainBundle] bundleIdentifier]));
     TweakLog("[Tweak] home=%s", tstr(NSHomeDirectory()));
     TweakLog("[Tweak] /var/jb exists=%d  /var/mobile accessible=%d  /var/writable=%d",
@@ -1533,11 +1545,27 @@ __attribute__((constructor)) void TweakInit(void) {
         TweakLog("[Tweak] Sandbox not yet escaped, checking UIApplication state");
     }
 
+    // Jailbroken-device helper mode: the sandbox is intact (sideloaded IPA)
+    // but FilzaHelper exists (/var/jb = rootless, or the rootful path), so
+    // the browser can list everything through the helper daemon. Stubbing
+    // TGRootFileManager here would break the browser (empty folders), and
+    // running the kernel exploit on a jailbroken kernel is needless risk.
+    // Reboot into the un-jailbroken state and /var/jb disappears, which
+    // automatically re-arms the kernel exploit path.
+    BOOL helperMode = NO;
+    if (!sandboxConfirmedEscaped) {
+        helperMode = (access("/var/jb/usr/libexec/filza/FilzaHelper", F_OK) == 0)
+                  || (access("/usr/libexec/filza/FilzaHelper", F_OK) == 0);
+        if (helperMode) {
+            TweakLog("[Tweak] Jailbroken device, FilzaHelper present — helper mode (browser via helper, kernel exploit skipped)");
+        }
+    }
+
     // Safe mode: if flag file exists, skip all kernel operations entirely
     if (access("/var/mobile/Documents/.filza_safe_mode", F_OK) == 0) {
         TweakLog("[Tweak] SAFE MODE — skipping exploit, sandbox escape, and kernel writes");
         TweakLog("[Tweak] Only UI hooks active. Delete /var/mobile/Documents/.filza_safe_mode to enable exploit.");
-        installHooks(!sandboxConfirmedEscaped);
+        installHooks(!sandboxConfirmedEscaped && !helperMode);
         TweakLog("[Tweak] Safe mode — probing userspace container access (MCM + bad_query)");
         userspace_container_probe();
         bad_query_probe();
@@ -1570,7 +1598,7 @@ __attribute__((constructor)) void TweakInit(void) {
     TweakLog("[Tweak] Pre-exploit system path probe (baseline):");
     probeSystemPaths();
     refreshUIDebugBypassFlag();
-    installHooks(!sandboxConfirmedEscaped);
+    installHooks(!sandboxConfirmedEscaped && !helperMode);
     installWolfEasterEgg();
 
     // First-launch welcome (UI-only, safe in every state - exploit or not).
@@ -1609,6 +1637,13 @@ __attribute__((constructor)) void TweakInit(void) {
         // On a jailbroken device the sandbox is escaped by the jailbreak
         // itself — record it so the crash counter doesn't auto-disable the
         // tweak after 3 launches (the exploit path never runs here).
+        mark_exploit_success();
+        return;
+    }
+
+    if (helperMode) {
+        TweakLog("[Tweak] Helper mode — kernel exploit skipped, browser powered by FilzaHelper");
+        tweak_exploit_set_status(4);
         mark_exploit_success();
         return;
     }
