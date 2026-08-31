@@ -931,25 +931,35 @@ static BOOL hook_writeToFile(id self, SEL _cmd, NSString *path, unsigned long lo
 
 #pragma mark - Hook Installation
 
-static void installHooks(void) {
-    TweakLog("[Hooks] installHooks start");
+static void installHooks(BOOL stubRootHelper) {
+    TweakLog("[Hooks] installHooks start (stubRootHelper=%d)", stubRootHelper);
     Class rfm = NSClassFromString(@"TGRootFileManager");
     if (rfm) {
-        TweakLog("[Hooks] hooking TGRootFileManager root helper methods");
-        Class meta = object_getClass(rfm);
-        class_replaceMethod(meta, NSSelectorFromString(@"isRootHelperAvailable"), (IMP)hook_isRootHelperAvailable, "B@:");
-        class_replaceMethod(rfm, NSSelectorFromString(@"spawnRootHelper"), (IMP)hook_spawnRootHelper, "i@:");
-        class_replaceMethod(rfm, NSSelectorFromString(@"spawnRootHelperIfNeeds"), (IMP)hook_spawnRootHelperIfNeeds, "i@:");
-        class_replaceMethod(rfm, NSSelectorFromString(@"respawnRootHelper"), (IMP)hook_respawnRootHelper, "i@:");
-        class_replaceMethod(rfm, NSSelectorFromString(@"tryLoadFilzaHelper"), (IMP)hook_tryLoadFilzaHelper, "v@:");
-        class_replaceMethod(rfm, NSSelectorFromString(@"createHelperConnectionIfNeeds"), (IMP)hook_createHelperConnectionIfNeeds, "v@:");
-        class_replaceMethod(rfm, NSSelectorFromString(@"spawnRoot:args:pid:"), (IMP)hook_spawnRoot_args_pid, "i@:@@^i");
-        class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectWithReplySync:"), (IMP)hook_sendObjectWithReplySync, "@@:@");
-        class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectWithReplySync:fileDescriptor:"), (IMP)hook_sendObjectWithReplySync_fd, "@@:@^i");
-        class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectWithReplySync:fileDescriptor:logintty:"), (IMP)hook_sendObjectWithReplySync_fd_logintty, "@@:@^iB");
-        class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectNoReply:"), (IMP)hook_sendObjectNoReply, "v@:@");
-        class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectWithReplyAsync:queue:completion:"), (IMP)hook_sendObjectWithReplyAsync, "v@:@@?");
-        TweakLog("[Hooks] TGRootFileManager hooks installed");
+        if (stubRootHelper) {
+            TweakLog("[Hooks] hooking TGRootFileManager root helper methods");
+            Class meta = object_getClass(rfm);
+            class_replaceMethod(meta, NSSelectorFromString(@"isRootHelperAvailable"), (IMP)hook_isRootHelperAvailable, "B@:");
+            class_replaceMethod(rfm, NSSelectorFromString(@"spawnRootHelper"), (IMP)hook_spawnRootHelper, "i@:");
+            class_replaceMethod(rfm, NSSelectorFromString(@"spawnRootHelperIfNeeds"), (IMP)hook_spawnRootHelperIfNeeds, "i@:");
+            class_replaceMethod(rfm, NSSelectorFromString(@"respawnRootHelper"), (IMP)hook_respawnRootHelper, "i@:");
+            class_replaceMethod(rfm, NSSelectorFromString(@"tryLoadFilzaHelper"), (IMP)hook_tryLoadFilzaHelper, "v@:");
+            class_replaceMethod(rfm, NSSelectorFromString(@"createHelperConnectionIfNeeds"), (IMP)hook_createHelperConnectionIfNeeds, "v@:");
+            class_replaceMethod(rfm, NSSelectorFromString(@"spawnRoot:args:pid:"), (IMP)hook_spawnRoot_args_pid, "i@:@@^i");
+            class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectWithReplySync:"), (IMP)hook_sendObjectWithReplySync, "@@:@");
+            class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectWithReplySync:fileDescriptor:"), (IMP)hook_sendObjectWithReplySync_fd, "@@:@^i");
+            class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectWithReplySync:fileDescriptor:logintty:"), (IMP)hook_sendObjectWithReplySync_fd_logintty, "@@:@^iB");
+            class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectNoReply:"), (IMP)hook_sendObjectNoReply, "v@:@");
+            class_replaceMethod(rfm, NSSelectorFromString(@"sendObjectWithReplyAsync:queue:completion:"), (IMP)hook_sendObjectWithReplyAsync, "v@:@@?");
+            TweakLog("[Hooks] TGRootFileManager hooks installed");
+        } else {
+            // Already-escaped path (jailbroken device): the sandbox is escaped
+            // by the jailbreak itself, so the kernel exploit never runs — but
+            // Filza's file browser is powered by its OWN root helper daemon
+            // (FilzaHelper). Stubbing it here makes every folder appear EMPTY
+            // (browse) and produces zips with folder entries but no files
+            // (zip uses the same privileged read path). Leave it intact.
+            TweakLog("[Hooks] root helper left intact (already-escaped path — Filza browser needs it)");
+        }
     }
     Class zipper = NSClassFromString(@"Zipper");
     if (zipper) {
@@ -1042,11 +1052,36 @@ __attribute__((constructor)) void TweakInit(void) {
     TweakLog("[Tweak] MHA identity build (K4.12) — signed as com.apple.mobile.MobileHouseArrest; "
              "containermanagerd trusts this identity, userspace container access expected pre-exploit");
 #endif
+
+    // Sandbox state is decided FIRST because it controls whether Filza's root
+    // helper gets stubbed. On a jailbroken device the sandbox is already
+    // escaped by the jailbreak, the kernel exploit path never runs, and
+    // Filza's own root-helper daemon (FilzaHelper) powers the file browser —
+    // stubbing TGRootFileManager there makes every folder appear EMPTY. The
+    // stubs are only correct on the non-jailbroken exploit path, where the
+    // kernel escape gives the Filza process itself full access.
+    // A stale .sbx_check (left by a crash between open() and unlink() in a
+    // previous run) must NOT skip the exploit — only a confirmed rw check may
+    // (A2.11).
+    int fd = open("/var/mobile/.sbx_check", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    BOOL sandboxConfirmedEscaped = NO;
+    if (fd >= 0) {
+        close(fd); unlink("/var/mobile/.sbx_check");
+        if (check_sandbox_var_rw() == 0) {
+            TweakLog("[Tweak] Sandbox already escaped + rw confirmed");
+            sandboxConfirmedEscaped = YES;
+        } else {
+            TweakLog("[Tweak] .sbx_check present but rw NOT confirmed (stale flag?) — continuing to exploit");
+        }
+    } else {
+        TweakLog("[Tweak] Sandbox not yet escaped, checking UIApplication state");
+    }
+
     // Safe mode: if flag file exists, skip all kernel operations entirely
     if (access("/var/mobile/Documents/.filza_safe_mode", F_OK) == 0) {
         TweakLog("[Tweak] SAFE MODE — skipping exploit, sandbox escape, and kernel writes");
         TweakLog("[Tweak] Only UI hooks active. Delete /var/mobile/Documents/.filza_safe_mode to enable exploit.");
-        installHooks();
+        installHooks(!sandboxConfirmedEscaped);
         TweakLog("[Tweak] Safe mode — probing userspace container access (MCM + bad_query)");
         userspace_container_probe();
         bad_query_probe();
@@ -1079,7 +1114,7 @@ __attribute__((constructor)) void TweakInit(void) {
     TweakLog("\n=== TWEAK LOADED ===");
     TweakLog("[Tweak] TweakInit started");
     refreshUIDebugBypassFlag();
-    installHooks();
+    installHooks(!sandboxConfirmedEscaped);
 
     // First-launch welcome (UI-only, safe in every state - exploit or not).
     // Fire after the app finishes launching so there's a window to present.
@@ -1108,30 +1143,16 @@ __attribute__((constructor)) void TweakInit(void) {
         }];
     });
 
-    // Check if sandbox is already escaped. A stale .sbx_check (left by a
-    // crash between open() and unlink() in a previous run) must NOT skip the
-    // exploit — only a confirmed rw check may (A2.11).
-    int fd = open("/var/mobile/.sbx_check", O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    BOOL sandboxConfirmedEscaped = NO;
-    if (fd >= 0) {
-        close(fd); unlink("/var/mobile/.sbx_check");
-        if (check_sandbox_var_rw() == 0) {
-            TweakLog("[Tweak] Sandbox already escaped + rw confirmed, running diagnostics");
-            runSSVDiagnosticsOnce();
-            // On a jailbroken device the sandbox is escaped by the jailbreak
-            // itself — record it so the crash counter doesn't auto-disable the
-            // tweak after 3 launches (the exploit path never runs here).
-            mark_exploit_success();
-            sandboxConfirmedEscaped = YES;
-        } else {
-            TweakLog("[Tweak] .sbx_check present but rw NOT confirmed (stale flag?) — continuing to exploit");
-        }
-    } else {
-        TweakLog("[Tweak] Sandbox not yet escaped, checking UIApplication state");
+    if (sandboxConfirmedEscaped) {
+        TweakLog("[Tweak] Sandbox already escaped + rw confirmed, running diagnostics");
+        runSSVDiagnosticsOnce();
+        // On a jailbroken device the sandbox is escaped by the jailbreak
+        // itself — record it so the crash counter doesn't auto-disable the
+        // tweak after 3 launches (the exploit path never runs here).
+        mark_exploit_success();
+        return;
     }
 
-    if (sandboxConfirmedEscaped) return;
-    
     dispatch_async(dispatch_get_main_queue(), ^{
         UIApplication *app = [UIApplication sharedApplication];
         if (app.applicationState == UIApplicationStateActive) {
