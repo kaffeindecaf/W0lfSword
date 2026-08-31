@@ -1557,7 +1557,19 @@ __attribute__((constructor)) void TweakInit(void) {
         helperMode = (access("/var/jb/usr/libexec/filza/FilzaHelper", F_OK) == 0)
                   || (access("/usr/libexec/filza/FilzaHelper", F_OK) == 0);
         if (helperMode) {
-            TweakLog("[Tweak] Jailbroken device, FilzaHelper present — helper mode (browser via helper, kernel exploit skipped)");
+            // Debug override: drop a file named "force_exploit_jb" in the app
+            // Documents dir (via afcclient put) to run the kernel race on the
+            // jailbroken kernel anyway — lets us test the primitive when a
+            // clean boot isn't available. The race machinery is unaffected by
+            // the JB's userland patches; the win is just less likely.
+            NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+            NSString *flagPath = [docs stringByAppendingPathComponent:@"force_exploit_jb"];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:flagPath]) {
+                TweakLog("[Tweak] FORCE EXPLOIT flag present — running kernel exploit on jailbroken kernel (debug override)");
+                helperMode = NO;
+            } else {
+                TweakLog("[Tweak] Jailbroken device, FilzaHelper present — helper mode (browser via helper, kernel exploit skipped)");
+            }
         }
     }
 
