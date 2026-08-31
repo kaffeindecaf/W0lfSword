@@ -88,7 +88,12 @@ static inline bool ptr_in_kernel(uint64_t p) {
 // other, while garbage in uninitialized struct fields essentially never
 // lands inside the window. Anchor = a known-mapped address (proc_ro, or the
 // parent object once its own read succeeded).
-#define KPTR_WINDOW 0x40000000ULL  // 1 GiB each direction
+// WIDENED 2026-09-01: on 18.4.1 the sandbox→ext_set hop legitimately spans
+// ~5.7GiB (sandbox at 0xffffffde…, ext_set at 0xffffffe1… — different heap
+// regions), and the ±1GiB window rejected the real pointer every run
+// ("ext_set invalid" + retry → jetsam). 16GiB covers the whole heap span
+// while still rejecting arbitrary garbage.
+#define KPTR_WINDOW 0x400000000ULL  // 16 GiB each direction
 
 static inline bool ptr_in_kernel_mapped(uint64_t p, uint64_t anchor) {
     if (!ptr_in_kernel(p)) return false;
