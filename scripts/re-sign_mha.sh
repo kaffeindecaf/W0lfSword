@@ -189,9 +189,17 @@ with open(path, "rb") as f:
     d = plistlib.load(f)
 old = d.get("CFBundleIdentifier", "?")
 d["CFBundleIdentifier"] = ident
+# UIFileSharingEnabled: lets the host read the app's Documents over USB via
+# house_arrest (afcclient --documents <bundle>), which is the ONLY log
+# read-back path on a non-jailbroken device (the tweak writes
+# Documents/FilzaTweak.log there). Without it afcclient fails with
+# ApplicationLookupFailed.
+d["UIFileSharingEnabled"] = True
+d["LSSupportsOpeningDocumentsInPlace"] = True
 with open(path, "wb") as f:
     plistlib.dump(d, f)
 print(f"  CFBundleIdentifier: {old} -> {ident}")
+print(f"  UIFileSharingEnabled: True (host log read-back via afcclient --documents)")
 PYEOF
 
 # 3b. App-extension bundle IDs must be rewritten too. PlumeImpactor/AltStore
@@ -272,3 +280,6 @@ echo "  Install on the phone (TrollStore or Sileo):"
 echo "    open Filza-MHA.ipa in TrollStore, or: scp $OUT root@<ip>:/var/mobile/ && ssh root@<ip> 'installer ...'"
 echo "  After launch, Filza runs with the MHA identity — check /tmp/FilzaTweak.log for"
 echo "  '[MCM] *** CONTAINER ACCESS ACTIVE' (pre-exploit container access, K4.12)."
+echo "  Non-jailbroken log read-back (no SSH needed):"
+echo "    afcclient --documents $BUNDLE_ID cat Documents/FilzaTweak.log"
+echo "    idevicesyslog | grep -i wolfsword"

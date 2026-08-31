@@ -30,38 +30,65 @@
 
 #pragma mark - Root Helper Hooks
 
+// VERBOSE LOGGING: every stub invocation is logged so a non-jailbroken
+// sideload can be diagnosed from the log alone — if Filza's browser lists
+// via TGRootFileManager, these lines show exactly what it asked for and what
+// it got back (xpc_null). Read via: afcclient --documents <bundle> cat
+// Documents/FilzaTweak.log, or live: idevicesyslog | grep -i wolfsword.
+
 static BOOL hook_isRootHelperAvailable(id self, SEL _cmd) {
+    TweakLog("[Stub] isRootHelperAvailable -> NO");
     return NO;
 }
 
-static int hook_spawnRootHelper(id self, SEL _cmd) { return 0; }
-static int hook_spawnRootHelperIfNeeds(id self, SEL _cmd) { return 0; }
-static int hook_respawnRootHelper(id self, SEL _cmd) { return 0; }
-static void hook_tryLoadFilzaHelper(id self, SEL _cmd) {}
-static void hook_createHelperConnectionIfNeeds(id self, SEL _cmd) {}
+static int hook_spawnRootHelper(id self, SEL _cmd) {
+    TweakLog("[Stub] spawnRootHelper -> 0 (no helper spawned)");
+    return 0;
+}
+static int hook_spawnRootHelperIfNeeds(id self, SEL _cmd) {
+    TweakLog("[Stub] spawnRootHelperIfNeeds -> 0");
+    return 0;
+}
+static int hook_respawnRootHelper(id self, SEL _cmd) {
+    TweakLog("[Stub] respawnRootHelper -> 0");
+    return 0;
+}
+static void hook_tryLoadFilzaHelper(id self, SEL _cmd) {
+    TweakLog("[Stub] tryLoadFilzaHelper (no-op)");
+}
+static void hook_createHelperConnectionIfNeeds(id self, SEL _cmd) {
+    TweakLog("[Stub] createHelperConnectionIfNeeds (no-op)");
+}
 
 static int hook_spawnRoot_args_pid(id self, SEL _cmd, id path, id args, int *pid) {
     if (pid) *pid = 0;
+    TweakLog("[Stub] spawnRoot:args:pid: path=%s -> -1", tstr(path));
     return -1;
 }
 
 static id hook_sendObjectWithReplySync(id self, SEL _cmd, id msg) {
+    TweakLog("[Stub] sendObjectWithReplySync msg=%s -> xpc_null", tstr([msg description]));
     return (id)xpc_null_create();
 }
 
 static id hook_sendObjectWithReplySync_fd(id self, SEL _cmd, id msg, int *fd) {
     if (fd) *fd = -1;
+    TweakLog("[Stub] sendObjectWithReplySync:fileDescriptor: msg=%s -> xpc_null", tstr([msg description]));
     return (id)xpc_null_create();
 }
 
 static id hook_sendObjectWithReplySync_fd_logintty(id self, SEL _cmd, id msg, int *fd, BOOL logintty) {
     if (fd) *fd = -1;
+    TweakLog("[Stub] sendObjectWithReplySync:fileDescriptor:logintty: msg=%s -> xpc_null", tstr([msg description]));
     return (id)xpc_null_create();
 }
 
-static void hook_sendObjectNoReply(id self, SEL _cmd, id msg) {}
+static void hook_sendObjectNoReply(id self, SEL _cmd, id msg) {
+    TweakLog("[Stub] sendObjectNoReply msg=%s (dropped)", tstr([msg description]));
+}
 
 static void hook_sendObjectWithReplyAsync(id self, SEL _cmd, id msg, id queue, id completion) {
+    TweakLog("[Stub] sendObjectWithReplyAsync msg=%s -> nil completion", tstr([msg description]));
     if (completion) { void (^block)(id) = completion; block(nil); }
 }
 
@@ -1048,6 +1075,23 @@ static void installHooks(BOOL stubRootHelper) {
 #pragma mark - Entry Point
 
 __attribute__((constructor)) void TweakInit(void) {
+    TweakLog("\n=== TWEAK LOADED ===");
+    TweakLog("[Tweak] TweakInit started");
+    TweakLog("[Tweak] uid=%d euid=%d pid=%d", (int)getuid(), (int)geteuid(), (int)getpid());
+    TweakLog("[Tweak] bundleID=%s", tstr([[NSBundle mainBundle] bundleIdentifier]));
+    TweakLog("[Tweak] home=%s", tstr(NSHomeDirectory()));
+    TweakLog("[Tweak] /var/jb exists=%d  /var/mobile accessible=%d  /var/writable=%d",
+             access("/var/jb", F_OK) == 0 ? 1 : 0,
+             access("/var/mobile", F_OK) == 0 ? 1 : 0,
+             access("/var", W_OK) == 0 ? 1 : 0);
+    int tfd = open("/tmp/.ws_tmp_probe", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int terrno = errno;
+    if (tfd >= 0) { close(tfd); unlink("/tmp/.ws_tmp_probe"); }
+    TweakLog("[Tweak] /tmp writable=%d (errno=%d %s)", tfd >= 0 ? 1 : 0, terrno, strerror(terrno));
+    NSString *docDir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    int dfd = docDir ? open([docDir UTF8String], O_WRONLY, 0) : -1;
+    TweakLog("[Tweak] Documents=%s writable=%d", tstr(docDir), dfd >= 0 ? 1 : 0);
+    if (dfd >= 0) close(dfd);
 #ifdef MHA_IDENTITY
     TweakLog("[Tweak] MHA identity build (K4.12) — signed as com.apple.mobile.MobileHouseArrest; "
              "containermanagerd trusts this identity, userspace container access expected pre-exploit");
@@ -1067,13 +1111,16 @@ __attribute__((constructor)) void TweakInit(void) {
     BOOL sandboxConfirmedEscaped = NO;
     if (fd >= 0) {
         close(fd); unlink("/var/mobile/.sbx_check");
-        if (check_sandbox_var_rw() == 0) {
+        int rw = check_sandbox_var_rw();
+        TweakLog("[Tweak] .sbx_check created OK, check_sandbox_var_rw=%d (0=rw confirmed)", rw);
+        if (rw == 0) {
             TweakLog("[Tweak] Sandbox already escaped + rw confirmed");
             sandboxConfirmedEscaped = YES;
         } else {
             TweakLog("[Tweak] .sbx_check present but rw NOT confirmed (stale flag?) — continuing to exploit");
         }
     } else {
+        TweakLog("[Tweak] .sbx_check open FAILED errno=%d (%s) — sandbox not escaped", errno, strerror(errno));
         TweakLog("[Tweak] Sandbox not yet escaped, checking UIApplication state");
     }
 
@@ -1111,8 +1158,8 @@ __attribute__((constructor)) void TweakInit(void) {
         TweakLog("[Tweak] Disabled by flag file — unloading");
         return;
     }
-    TweakLog("\n=== TWEAK LOADED ===");
-    TweakLog("[Tweak] TweakInit started");
+    TweakLog("[Tweak] Pre-exploit system path probe (baseline):");
+    probeSystemPaths();
     refreshUIDebugBypassFlag();
     installHooks(!sandboxConfirmedEscaped);
 
