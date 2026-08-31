@@ -12,14 +12,22 @@
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+# Bundle ID for the re-signed app. Default = MHA identity (K4.12 research /
+# TrollStore path, where Apple registration is never involved).
+# Pass a 4th arg (or BUNDLE_ID=) for Apple-ID sideloading: Apple refuses to
+# register ANY com.apple.* App ID for third parties (Developer API error
+# 9400), so PlumeImpactor/AltStore installs need a registerable ID like
+# com.kaffeindecaf.w0lfsword.filza. The kernel R/W works from any bundle ID.
 MHA_ID="com.apple.mobile.MobileHouseArrest"
+DEFAULT_ID="com.kaffeindecaf.w0lfsword.filza"
+BUNDLE_ID="${4:-${BUNDLE_ID:-$MHA_ID}}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ADD_LC="$DIR/add-load-dylib.py"
 
 IPA="${1:-}"
 DYLIB="${2:-}"
 OUT="${3:-Filza-MHA.ipa}"
-[ -n "$IPA" ] && [ -f "$IPA" ] || { echo "  ✗ usage: re-sign_mha.sh <Filza.ipa> <tweak.dylib> [out.ipa]"; exit 1; }
+[ -n "$IPA" ] && [ -f "$IPA" ] || { echo "  ✗ usage: re-sign_mha.sh <Filza.ipa> <tweak.dylib> [out.ipa] [bundle-id]"; echo "    bundle-id default: $MHA_ID (MHA identity, TrollStore path)"; echo "    for Apple-ID sideloading pass a registerable id, e.g. $DEFAULT_ID"; exit 1; }
 [ -f "$DYLIB" ] || { echo "  ✗ tweak dylib not found: $DYLIB (build first: make package, then extract W0lfSword.dylib)"; exit 1; }
 
 command -v ldid    >/dev/null || { echo "  ✗ ldid not found — install: apt install ldid (Linux) / brew install ldid (macOS)"; exit 1; }
@@ -32,9 +40,9 @@ trap 'rm -rf "$TMP"' EXIT
 DYLIB_NAME="$(basename "$DYLIB")"
 
 echo "╔════════════════════════════════════════════════════════════╗"
-echo "║  MobileHouseArrest re-sign (K4.12)                          ║"
+echo "║  W0lfSword Filza re-sign + dylib injection                  ║"
 echo "╚════════════════════════════════════════════════════════════╝"
-echo "  identity: $MHA_ID"
+echo "  identity: $BUNDLE_ID"
 echo "  ipa:      $IPA"
 echo "  dylib:    $DYLIB_NAME"
 echo ""
@@ -63,9 +71,9 @@ cp "$DYLIB" "$APP/$DYLIB_NAME"
 python3 "$ADD_LC" "$BIN" "$BIN.patched" "@executable_path/$DYLIB_NAME"
 mv "$BIN.patched" "$BIN"
 
-# 3. Re-bundle as MHA
-echo "[3/6] Setting bundle identifier → $MHA_ID"
-python3 - "$APP/Info.plist" "$MHA_ID" <<'PYEOF'
+# 3. Re-bundle
+echo "[3/6] Setting bundle identifier → $BUNDLE_ID"
+python3 - "$APP/Info.plist" "$BUNDLE_ID" <<'PYEOF'
 import plistlib, sys
 path, ident = sys.argv[1], sys.argv[2]
 with open(path, "rb") as f:
@@ -83,10 +91,10 @@ PYEOF
 # which Apple rejects (Developer API error 9401: "An App ID ... is not
 # available") because Tigisoftware's own team owns that identifier. Extensions
 # must be prefixed with the parent app's ID, so derive
-# com.apple.mobile.MobileHouseArrest.<suffix> from each extension.
+# <parent>.<suffix> from each extension.
 for ext_plist in "$APP"/PlugIns/*.appex/Info.plist; do
     [ -f "$ext_plist" ] || continue
-    python3 - "$ext_plist" "$MHA_ID" <<'PYEOF'
+    python3 - "$ext_plist" "$BUNDLE_ID" <<'PYEOF'
 import plistlib, sys
 path, prefix = sys.argv[1], sys.argv[2]
 with open(path, "rb") as f:
@@ -103,13 +111,13 @@ done
 
 # 4. Re-sign (CodeDirectory identifier must match the bundle id)
 # NOTE: -I takes the value ATTACHED (this ldid build rejects "-I <id>").
-echo "[4/6] Re-signing with ldid (identifier $MHA_ID)..."
+echo "[4/6] Re-signing with ldid (identifier $BUNDLE_ID)..."
 # adhoc-sign the whole bundle FIRST (default identifiers), then re-sign the
 # main binary + every extension binary with -I so their CodeDirectory
 # identifiers match their (rewritten) bundle IDs. Order matters: a plain
 # `ldid -S` at the end would clobber the -I identifiers.
 find "$APP" -type f -perm -u+x -exec ldid -S {} \; 2>/dev/null || true
-ldid -S -I"$MHA_ID" "$BIN"
+ldid -S -I"$BUNDLE_ID" "$BIN"
 ldid -S "$APP/$DYLIB_NAME"
 for ext_plist in "$APP"/PlugIns/*.appex/Info.plist; do
     [ -f "$ext_plist" ] || continue

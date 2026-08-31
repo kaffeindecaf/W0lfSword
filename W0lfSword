@@ -4128,9 +4128,10 @@ your iOS is in the supported range, builds a substrate-free Filza with the
 DarkSword kernel exploit dylib injected, installs it over USB, and tells
 you to open Filza - which then runs with kernel-level file access.
 
-No jailbreak is used or required. The MHA identity (MobileHouseArrest)
-tricks containermanagerd into granting container access, and DarkSword
-provides the kernel R/W. Nothing persists across a reboot.
+No jailbreak is used or required. The app is re-signed with a registerable
+bundle id (com.kaffeindecaf.w0lfsword.filza) so Apple-ID sideloaders
+accept it; DarkSword provides the kernel R/W from inside the app.
+Nothing persists across a reboot.
 EOF
     log_script "nojailbreak started"
 
@@ -4395,9 +4396,13 @@ EOF
     [ -n "$dylib" ] || { err "Built dylib not found in .theos"; return 1; }
     ok "Built tweak dylib ($(du -h "$dylib" | cut -f1))"
 
-    stage "2/3" "Re-signing as MobileHouseArrest + injecting dylib..."
+    stage "2/3" "Re-signing + injecting dylib (registerable bundle id)..."
     local out_ipa="$PROJECT_DIR/packages/Filza-MHA.ipa"
-    bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$out_ipa" >/tmp/mha_resign.log 2>&1
+    # Apple refuses to register com.apple.* App IDs for third parties (Dev
+    # API error 9400), so the Apple-ID sideload path uses a registerable
+    # bundle id. The kernel R/W works from any bundle id; the MHA identity
+    # (com.apple.mobile.MobileHouseArrest) is only for the TrollStore path.
+    bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$out_ipa" "com.kaffeindecaf.w0lfsword.filza" >/tmp/mha_resign.log 2>&1
     if [ $? -ne 0 ] || [ ! -f "$out_ipa" ]; then
         err "MHA re-sign failed"
         $VERBOSE && tail -10 /tmp/mha_resign.log
@@ -4805,8 +4810,10 @@ nojailbreak  -  USB install Filza with kernel R/W, no jailbreak.
   5. Checks if Filza is already installed (over USB, via ideviceinstaller)
   6. Builds a SUBSTRATE-FREE tweak (MHA_IDENTITY=1, no CydiaSubstrate
      dependency - dyld would reject /var/jb on a clean phone)
-  7. Re-signs Filza.ipa as com.apple.mobile.MobileHouseArrest (MHA) with
-     the dylib injected (scripts/re-sign_mha.sh)
+  7. Re-signs Filza.ipa with a registerable bundle id
+     (com.kaffeindecaf.w0lfsword.filza) + the dylib injected
+     (scripts/re-sign_mha.sh; Apple refuses com.apple.* App IDs for
+     third-party registration, so the MHA identity is TrollStore-only)
   8. Installs over USB with ideviceinstaller
 
   No jailbreak, no SSH, no WiFi. The phone needs a Filza.ipa source
