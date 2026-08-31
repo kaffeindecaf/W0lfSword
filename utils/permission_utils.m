@@ -90,10 +90,22 @@ static int apply_permissions_kernel(const char *path, uid_t uid, gid_t gid, mode
         return -1;
     }
 
-    // Sanity check: read the current mode to verify fsnode offset is valid (BB-012)
+    // Sanity check: read the current mode to verify fsnode offset is valid (BB-012).
+    // APFS modes carry S_IFMT type bits (dirs read 040777, files 0100644), so the
+    // old `currentMode > 0777` guard compared type bits against a permission mask:
+    // it ALWAYS aborted on real paths (kernel chmod/chown dead on every device)
+    // while still passing any small garbage value if the offset were wrong — the
+    // worst possible guard. Validate the type bits and cross-check uid/gid so a
+    // wrong offset must fail BOTH plausibility tests before any write happens.
     uint16_t currentMode = kread16(v_data + off_apfs_fsnode_mode);
-    if (currentMode > 0777) {
-        TweakLog("APFS fsnode offset mismatch: currentMode=0%o (expected 0-0777) — aborting write to avoid corruption", currentMode);
+    uint32_t curUid = kread32(v_data + off_apfs_fsnode_uid);
+    uint32_t curGid = kread32(v_data + off_apfs_fsnode_gid);
+    uint32_t typeBits = currentMode & 0170000;
+    bool typeOk = typeBits == 0 || typeBits == 0010000 || typeBits == 0020000 ||
+                  typeBits == 0040000 || typeBits == 0060000 || typeBits == 0100000 ||
+                  typeBits == 0120000 || typeBits == 0140000;
+    if (!typeOk || curUid > 65535 || curGid > 65535) {
+        TweakLog("APFS fsnode offset mismatch: mode=0%o type=0%o uid=%u gid=%u — aborting write to avoid corruption", currentMode, typeBits, curUid, curGid);
         return -1;
     }
 
