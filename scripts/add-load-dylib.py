@@ -86,13 +86,23 @@ def existing_dylib_name(buf, off, cmdsize):
 
 def strip_load_dylib(data, name_suffix):
     """Remove every LC_LOAD_DYLIB whose path ends with name_suffix. Returns
-    (new_data, removed_count)."""
+    (new_data, removed_count).
+
+    CRITICAL: only the load-command region is compacted. The segment data
+    (__TEXT/__DATA/__LINKEDIT) must NOT shift — bind_off/rebase_off and all
+    segment file offsets stay valid only if file bytes after the load
+    commands never move. So we move later load commands UP within the
+    command region and leave the tail as padding (ncmds/sizeofcmds shrink,
+    file length unchanged). A naive `del` on the bytearray shifts everything
+    after the deletion and corrupts the bind table (dyld: "bad bind opcode
+    0xFF" at launch)."""
     removed = 0
     ncmds = u32(data, 16)
     sizeofcmds = u32(data, 20)
+    load_end = 32 + sizeofcmds
     off = 32
-    # Collect matching command regions first (data is a bytearray; do the
-    # compaction on a copy so the offsets stay stable while scanning).
+    # Collect matching command regions first (do the compaction on a copy so
+    # the offsets stay stable while scanning).
     regions = []
     for _ in range(ncmds):
         cmd = u32(data, off)
@@ -106,9 +116,17 @@ def strip_load_dylib(data, name_suffix):
     if not regions:
         return data, 0
     out = bytearray(data)
-    # Remove from the END backwards so earlier offsets stay valid.
+    # Compact the load-command region: for each removed command, shift the
+    # commands that FOLLOW it up by cmdsize. Iterate in reverse so earlier
+    # offsets stay valid.
     for start, cmdsize in sorted(regions, reverse=True):
-        del out[start:start + cmdsize]
+        end = start + cmdsize
+        # move everything after this command up by cmdsize, only within the
+        # load-command region (never touch segment data past load_end)
+        out[start:load_end - cmdsize] = out[end:load_end]
+        # the vacated tail stays as padding; zero it for cleanliness
+        out[load_end - cmdsize:load_end] = b"\0" * cmdsize
+        load_end -= cmdsize
     put_u32(out, 16, ncmds - removed)
     put_u32(out, 20, sizeofcmds - sum(c for _, c in regions))
     return out, removed

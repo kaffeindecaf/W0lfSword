@@ -47,6 +47,85 @@ echo "  ipa:      $IPA"
 echo "  dylib:    $DYLIB_NAME"
 echo ""
 
+# Guard: verify the bind table of a Mach-O is intact (classic opcodes).
+# A corrupted LC_DYLD_INFO_ONLY bind table makes dyld die at launch with
+# "bad bind opcode 0xFF" — cheap to catch here instead of on the device.
+# NOTE: this walks the opcode stream properly (skipping ULEB/SLEB values and
+# symbol strings). A naive "any byte with top nibble 0xE/0xF" scan flags
+# legitimate data bytes inside ULEB values and false-positives on good files.
+check_bind_table() {
+    python3 - "$1" <<'PYEOF'
+import struct, sys
+data = open(sys.argv[1], 'rb').read()
+ncmds, _ = struct.unpack('<II', data[16:24])
+off = 32
+for _ in range(ncmds):
+    cmd, cs = struct.unpack('<II', data[off:off+8])
+    if cmd == 0x80000022:  # LC_DYLD_INFO_ONLY
+        r, ro, rs, bs, bw, bz, ls, lz = struct.unpack('<8I', data[off+8:off+40])
+        stream = data[rs:rs+bs]
+
+        def uleb(pos):
+            v = 0; sh = 0
+            while pos < len(stream):
+                b = stream[pos]; pos += 1
+                v |= (b & 0x7f) << sh
+                if not (b & 0x80): break
+                sh += 7
+            return v, pos
+
+        def sleb(pos):
+            v = 0; sh = 0; b = 0
+            while pos < len(stream):
+                b = stream[pos]; pos += 1
+                v |= (b & 0x7f) << sh
+                sh += 7
+                if not (b & 0x80): break
+            if b & 0x40: v |= -(1 << sh)
+            return v, pos
+
+        pos = 0; invalid = []
+        while pos < len(stream):
+            byte = stream[pos]; op = byte & 0xF0
+            if op in (0xE0, 0xF0):
+                invalid.append((pos, byte)); pos += 1; continue
+            if op == 0x00: pos += 1; break                      # DONE
+            elif op in (0x10, 0x30, 0x50, 0x90, 0xB0): pos += 1  # imm ops
+            elif op in (0x20, 0x80, 0xA0):                       # ULEB
+                pos += 1; _, pos = uleb(pos)
+            elif op == 0x60:                                     # SLEB
+                pos += 1; _, pos = sleb(pos)
+            elif op == 0x70:                                     # seg+off ULEB
+                pos += 1; _, pos = uleb(pos)
+            elif op == 0x40:                                     # symbol string
+                pos += 1
+                end = stream.find(b'\0', pos)
+                pos = len(stream) if end == -1 else end + 1
+            elif op == 0xC0:                                     # ULEB x2
+                pos += 1; _, pos = uleb(pos); _, pos = uleb(pos)
+            elif op == 0xD0:                                     # THREADED
+                pos += 1
+                if pos < len(stream):
+                    sub = stream[pos]; pos += 1
+                    if sub in (0x10, 0x60, 0x70, 0xA0, 0xC0):
+                        _, pos = uleb(pos)
+                    elif sub in (0x20, 0x30, 0x40, 0x50, 0x80, 0x90, 0xB0, 0xE0):
+                        pass
+                    else:
+                        invalid.append((pos-1, sub))
+            else:
+                invalid.append((pos, byte)); pos += 1
+        if invalid:
+            print(f"    ✗ bind table corrupt: {len(invalid)} invalid opcode bytes (first: {invalid[:3]})")
+            sys.exit(1)
+        print(f"    ✓ bind table ok ({len(stream)} bytes)")
+        sys.exit(0)
+    off += cs
+print("    ⚠ no LC_DYLD_INFO_ONLY (chained-fixups binary, skipping)")
+sys.exit(0)
+PYEOF
+}
+
 # 1. Extract
 [ -f "$DYLIB" ] || { echo "  ✗ tweak dylib not found: $DYLIB (build first: make package, then extract W0lfSword.dylib)"; exit 1; }
 # Guard: the injected dylib must be SUBSTRATE-FREE. A plain `make package`
@@ -162,6 +241,13 @@ for ext_plist in "$APP"/PlugIns/*.appex/Info.plist; do
         echo "  ⚠ extension binary not found for $ext_plist (id=$ext_id exec=$ext_exec)"
     fi
 done
+
+# 4b. Post-sign integrity: bind tables must be intact. A buggy load-command
+# edit (e.g. a naive byte-array delete in the strip pass) shifts segment data
+# and corrupts LC_DYLD_INFO_ONLY — dyld dies with "bad bind opcode 0xFF".
+echo "[4b] Verifying bind tables..."
+check_bind_table "$BIN" || { echo "  ✗ main binary bind table corrupt — aborting"; exit 1; }
+check_bind_table "$APP/$DYLIB_NAME" || { echo "  ✗ dylib bind table corrupt — aborting"; exit 1; }
 
 # 5. Repackage
 echo "[5/6] Repackaging..."
