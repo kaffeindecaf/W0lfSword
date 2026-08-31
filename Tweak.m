@@ -200,16 +200,17 @@ static void installWolfEasterEgg(void) {
     TweakLog("[Hooks] wolf background easter egg installed");
 }
 
-#pragma mark - Exploit debug HUD (status banner + live log)
+#pragma mark - Exploit debug HUD (collapsible log panel above the menu)
 
-// On-screen status banner + collapsible live log fed by the in-memory ring
-// buffer. Non-jailbroken sideloads have no readable /tmp and no SSH, so this
-// is the only on-device way to watch the exploit initialize: the banner says
-// "exploit initializing (attempt N/5)…", flips green on escape success, red
-// when all attempts are exhausted; tapping the "log" button expands the last
-// 400 log lines live.
+// Collapsible debug panel that floats ABOVE Filza's bottom menu (tab bar)
+// instead of covering it. Collapsed: a single small arrow button in the
+// bottom-right corner (tinted by exploit status). Tapping it expands a
+// header + live log panel whose bottom edge sits exactly on top of the
+// menu, so the menu stays visible and tappable. Layout is recomputed every
+// refresh tick, which handles rotation and menu show/hide.
 
-static UIView *g_hudContainer = nil;
+static UIView *g_hudContainer = nil;   // expanded panel (header + log view)
+static UIButton *g_hudArrow = nil;     // collapsed-state arrow button
 static UITextView *g_hudLogView = nil;
 static UILabel *g_hudStatusLabel = nil;
 // MRC build: an autoreleased NSString cache dangles after the pool drains
@@ -218,6 +219,84 @@ static UILabel *g_hudStatusLabel = nil;
 static char g_hudPlainCache[32768];
 static BOOL g_hudPlainCacheValid = NO;
 static BOOL g_hudExpanded = NO;
+
+static UIWindow *hudWindow(void) {
+    UIWindow *win = g_hudContainer ? g_hudContainer.window : nil;
+    if (!win && g_hudArrow) win = g_hudArrow.window;
+    if (!win) win = [UIApplication sharedApplication].keyWindow;
+    if (!win) win = [UIApplication sharedApplication].windows.firstObject;
+    return win;
+}
+
+// Top edge of Filza's bottom menu in window coordinates. The panel sits on
+// top of this line so everything below it (the menu) stays usable. Three
+// strategies: a real UITabBar anywhere in the hierarchy, then any generic
+// bar-like view pinned to the window bottom (Filza may use a custom menu
+// class), then the bottom safe area (home indicator) as fallback.
+static CGFloat hudMenuTopY(void) {
+    UIWindow *win = hudWindow();
+    if (!win) return 0;
+    const CGFloat winH = win.bounds.size.height;
+    const CGFloat winW = win.bounds.size.width;
+
+    __block UIView *foundTabBar = nil;
+    __block void (^scanTab)(UIView *);
+    scanTab = ^(UIView *v) {
+        if (foundTabBar) return;
+        if (v == g_hudContainer || v == g_hudArrow || v.hidden) return;
+        if ([v isKindOfClass:[UITabBar class]]) { foundTabBar = v; return; }
+        for (UIView *s in v.subviews) scanTab(s);
+    };
+    scanTab(win);
+    if (foundTabBar) {
+        return [foundTabBar convertRect:foundTabBar.bounds toView:win].origin.y;
+    }
+
+    // Generic bottom bar (custom Filza menu class): a wide view whose bottom
+    // edge is the window bottom, taller than 20pt but not a full screen.
+    __block CGFloat topOfBars = CGFLOAT_MAX;
+    __block void (^scanBar)(UIView *);
+    scanBar = ^(UIView *v) {
+        if (v == g_hudContainer || v == g_hudArrow || v.hidden) return;
+        CGRect f = [v convertRect:v.bounds toView:win];
+        if (f.origin.y > winH * 0.5 && f.size.height >= 20 && f.size.height <= 160 &&
+            f.size.width >= winW * 0.8 && fabs((f.origin.y + f.size.height) - winH) < 2.0) {
+            if (f.origin.y < topOfBars) topOfBars = f.origin.y;
+        }
+        for (UIView *s in v.subviews) scanBar(s);
+    };
+    scanBar(win);
+    if (topOfBars != CGFLOAT_MAX) return topOfBars;
+
+    return winH - win.safeAreaInsets.bottom;
+}
+
+// Re-apply all HUD frames. Called on every refresh tick so rotation and
+// menu visibility changes are picked up automatically.
+static void hudLayout(void) {
+    UIWindow *win = hudWindow();
+    if (!win) return;
+    const CGFloat winW = win.bounds.size.width;
+    const CGFloat winH = win.bounds.size.height;
+    CGFloat menuTop = hudMenuTopY();
+    if (menuTop < 34) menuTop = 34;
+
+    if (g_hudExpanded) {
+        const CGFloat headerH = 34;
+        CGFloat totalH = MIN(winH * 0.5 + headerH, menuTop);
+        if (totalH < headerH) totalH = headerH;
+        g_hudContainer.frame = CGRectMake(0, menuTop - totalH, winW, totalH);
+        g_hudLogView.frame = CGRectMake(0, headerH, winW, totalH - headerH);
+        g_hudLogView.hidden = NO;
+        g_hudContainer.hidden = NO;
+        g_hudArrow.hidden = YES;
+    } else {
+        g_hudContainer.hidden = YES;
+        g_hudLogView.hidden = YES;
+        g_hudArrow.hidden = NO;
+        g_hudArrow.frame = CGRectMake(winW - 42, menuTop - 40, 34, 34);
+    }
+}
 
 static UIColor *hudColorForLine(NSString *line) {
     if ([line containsString:@"[FATAL]"] || [line containsString:@"failed"] ||
@@ -244,7 +323,7 @@ static UIColor *hudColorForLine(NSString *line) {
 }
 
 static void hudRefresh(void) {
-    if (!g_hudContainer) return;
+    if (!g_hudContainer && !g_hudArrow) return;
     int st = tweak_exploit_status();
     int att = tweak_exploit_attempt();
     NSString *txt;
@@ -269,6 +348,13 @@ static void hudRefresh(void) {
     }
     g_hudStatusLabel.text = txt;
     g_hudStatusLabel.textColor = col;
+    // The collapsed arrow carries the status color so the exploit state is
+    // readable even with the panel fully closed.
+    if (g_hudArrow) {
+        [g_hudArrow setTitleColor:col forState:UIControlStateNormal];
+        g_hudArrow.tintColor = col;
+    }
+    hudLayout();
     if (g_hudLogView) {
         char snap[32768];
         int n = tweak_log_ring_snapshot(snap, sizeof(snap));
@@ -300,15 +386,10 @@ static void hudRefresh(void) {
 }
 
 static void hudSetExpanded(BOOL expanded) {
+    if (g_hudExpanded == expanded) return;
     g_hudExpanded = expanded;
-    if (!g_hudContainer) return;
-    UIWindow *win = g_hudContainer.window ?: [UIApplication sharedApplication].keyWindow;
-    CGFloat winH = win ? win.bounds.size.height : 700;
-    CGFloat winW = win ? win.bounds.size.width : g_hudContainer.bounds.size.width;
-    CGFloat panelH = expanded ? (winH * 0.5) : 0;
-    g_hudContainer.frame = CGRectMake(0, winH - 34 - panelH, winW, 34 + panelH);
-    g_hudLogView.frame = CGRectMake(0, 34, winW, panelH);
-    g_hudLogView.hidden = !expanded;
+    hudLayout();
+    TweakLog("[HUD] panel %s", expanded ? "expanded" : "collapsed");
 }
 
 static void hudToggle(void) {
@@ -316,15 +397,26 @@ static void hudToggle(void) {
 }
 
 static void hudInstall(void) {
-    if (g_hudContainer) return;
+    if (g_hudContainer || g_hudArrow) return;
     UIWindow *win = [UIApplication sharedApplication].keyWindow;
     if (!win) win = [UIApplication sharedApplication].windows.firstObject;
     if (!win) return;
     CGFloat w = win.bounds.size.width;
-    CGFloat winH = win.bounds.size.height;
 
-    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, winH - 34, w, 34)];
-    container.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
+    // Collapsed state: one small arrow, bottom-right, tinted by status.
+    UIButton *arrow = [UIButton buttonWithType:UIButtonTypeSystem];
+    arrow.frame = CGRectMake(w - 42, win.bounds.size.height - 80, 34, 34);
+    arrow.backgroundColor = [UIColor colorWithWhite:0.07 alpha:0.92];
+    arrow.layer.cornerRadius = 17;
+    arrow.layer.zPosition = 10000;
+    arrow.titleLabel.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightBold];
+    [arrow setTitle:@"▲" forState:UIControlStateNormal];
+    [arrow setTitleColor:[UIColor colorWithWhite:0.8 alpha:1] forState:UIControlStateNormal];
+    [arrow addAction:[UIAction actionWithHandler:^(UIAction *a) { hudToggle(); }]
+           forControlEvents:UIControlEventTouchUpInside];
+
+    // Expanded state: header (status + collapse button) over the log view.
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, win.bounds.size.height - 34, w, 34)];
     container.backgroundColor = [UIColor colorWithWhite:0.07 alpha:0.92];
     container.layer.zPosition = 10000;
 
@@ -334,13 +426,13 @@ static void hudInstall(void) {
     status.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     status.userInteractionEnabled = NO;
 
-    UIButton *toggle = [UIButton buttonWithType:UIButtonTypeSystem];
-    toggle.frame = CGRectMake(w - 68, 0, 68, 34);
-    toggle.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
-    [toggle setTitle:@"log" forState:UIControlStateNormal];
-    [toggle setTitleColor:[UIColor colorWithWhite:0.85 alpha:1] forState:UIControlStateNormal];
-    toggle.titleLabel.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightSemibold];
-    [toggle addAction:[UIAction actionWithHandler:^(UIAction *a) { hudToggle(); }]
+    UIButton *close = [UIButton buttonWithType:UIButtonTypeSystem];
+    close.frame = CGRectMake(w - 68, 0, 68, 34);
+    close.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [close setTitle:@"▼" forState:UIControlStateNormal];
+    [close setTitleColor:[UIColor colorWithWhite:0.85 alpha:1] forState:UIControlStateNormal];
+    close.titleLabel.font = [UIFont monospacedSystemFontOfSize:14.0 weight:UIFontWeightBold];
+    [close addAction:[UIAction actionWithHandler:^(UIAction *a) { hudToggle(); }]
            forControlEvents:UIControlEventTouchUpInside];
 
     UITextView *logView = [[UITextView alloc] initWithFrame:CGRectMake(0, 34, w, 0)];
@@ -349,24 +441,26 @@ static void hudInstall(void) {
     logView.font = [UIFont monospacedSystemFontOfSize:9.0 weight:UIFontWeightRegular];
     logView.editable = NO;
     logView.indicatorStyle = UIScrollViewIndicatorStyleWhite;
-    logView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     logView.hidden = YES;
 
     [container addSubview:status];
-    [container addSubview:toggle];
+    [container addSubview:close];
     [container addSubview:logView];
     [win addSubview:container];
+    [win addSubview:arrow];
 
     g_hudContainer = container;
+    g_hudArrow = arrow;
     g_hudLogView = logView;
     g_hudStatusLabel = status;
+    g_hudExpanded = NO;
 
     NSTimer *timer = [NSTimer timerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *t) {
         hudRefresh();
     }];
     [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
     hudRefresh();
-    TweakLog("[HUD] exploit status banner + live log installed");
+    TweakLog("[HUD] collapsible log panel installed (arrow to open)");
 }
 
 #pragma mark - Zip/Unzip via minizip C API (linked in Filza binary)
