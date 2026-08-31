@@ -1882,72 +1882,134 @@ print(json.dumps({"version_blocks": blocks, "soc_coverage": socs, "total_blocks"
 # ═══════════════════════════════════════════════════════════════
 
 cmd_readiness() {
-    local ip; ip=$(get_device_ip "${1:-}")
-    [ -z "$ip" ] && { err "No device IP"; hint "Connect via USB or: ./W0lfSword device add <ip>"; return 1; }
-
-    section "Readiness Report  -  $ip"
+    # USB-first, SSH-optional readiness report. Device identity comes from
+    # libimobiledevice (no SSH needed); app/tweak state comes from the
+    # tweak's own log (SSH tail or AFC pull of Documents/FilzaTweak.log);
+    # host state covers builds, the GitHub release and offset coverage.
+    # 2026-09-01 rewrite: SSH is often dead on dopamine test beds (sshd
+    # removed by "remove jailbreak"), so the report must not depend on it.
+    section "Readiness Report"
     echo ""
     local missing=""
 
-    # ── SSH + identity ──
-    if ! ssh_safe "root@$ip" "echo ok" >/dev/null 2>&1; then
-        err "SSH unreachable  -  is OpenSSH installed/running on the phone?"
-        hint "Fix connectivity first: ./W0lfSword usbtest  or  ./W0lfSword device add <ip>"
-        return 1
-    fi
-    ok "SSH key auth"
-    local ios_ver arch uid jb
-    ios_ver=$(ssh_safe "root@$ip" "sw_vers -productVersion" 2>/dev/null)
-    arch=$(ssh_safe "root@$ip" "uname -m" 2>/dev/null)
-    uid=$(ssh_safe "root@$ip" "id -u" 2>/dev/null)
-    jb=$(ssh_safe "root@$ip" "[ -d /var/jb ] && echo yes || echo no" 2>/dev/null)
-    printf "  ${C_GREY}%-22s${NC} %s\n" "device" "iOS $ios_ver ($arch)"
-    if [ "$uid" = "0" ]; then
-        ok "root shell (uid=0)"
+    # ── 1. Device discovery (USB first, then saved WiFi IP) ──
+    local ip; ip=$(get_device_ip "${1:-}")
+    local usb_uuid; usb_uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
+    local dev_model="?" dev_ver="?" dev_name="?"
+    if [ -n "$usb_uuid" ]; then
+        dev_name=$(ideviceinfo -u "$usb_uuid" -k DeviceName 2>/dev/null || echo "iPhone")
+        dev_model=$(ideviceinfo -u "$usb_uuid" -k ProductType 2>/dev/null || echo "?")
+        dev_ver=$(ideviceinfo -u "$usb_uuid" -k ProductVersion 2>/dev/null || echo "?")
+        ok "USB device: $dev_name ($dev_model)  -  iOS $dev_ver"
     else
-        warn "SSH user is not root (uid=$uid)"
-        missing="$missing root-shell"
-    fi
-    if [ "$jb" = "yes" ]; then
-        ok "jailbroken (rootless /var/jb)"
-    else
-        info "not jailbroken  -  DarkSword kernel exploit path applies"
+        warn "no device on USB"
+        if [ -n "$ip" ]; then
+            info "saved WiFi device: $ip (SSH-based checks only)"
+        else
+            hint "Plug the phone in (USB) or: ./W0lfSword device add <ip>"
+            missing="$missing device"
+        fi
     fi
 
-    # ── on-device checks ──
-    local filza tweak sucflag
-    filza=$(ssh_safe "root@$ip" "ls -d /var/jb/Applications/Filza.app 2>/dev/null; ls -d /var/containers/Bundle/Application/*/Filza.app 2>/dev/null" 2>/dev/null)
-    if [ -n "$filza" ]; then
-        ok "Filza present"
+    # ── 2. SSH (optional on the sideload path) ──
+    local ssh_ok=false ios_ver="$dev_ver" arch="" uid="" jb=""
+    if [ -n "$ip" ] && ssh_safe "root@$ip" "echo ok" >/dev/null 2>&1; then
+        ssh_ok=true
+        ok "SSH key auth ($ip)"
+        ios_ver=$(ssh_safe "root@$ip" "sw_vers -productVersion" 2>/dev/null)
+        arch=$(ssh_safe "root@$ip" "uname -m" 2>/dev/null)
+        uid=$(ssh_safe "root@$ip" "id -u" 2>/dev/null)
+        jb=$(ssh_safe "root@$ip" "[ -d /var/jb ] && echo yes || echo no" 2>/dev/null)
+        [ -n "$ios_ver" ] && printf "  ${C_GREY}%-22s${NC} %s\n" "ssh device" "iOS $ios_ver ($arch)"
+        if [ "$uid" = "0" ]; then
+            ok "root shell (uid=0)"
+        else
+            warn "SSH user is not root (uid=$uid)"
+            missing="$missing root-shell"
+        fi
+        if [ "$jb" = "yes" ]; then
+            ok "jailbroken (rootless /var/jb)"
+        else
+            info "not jailbroken  -  DarkSword kernel exploit path applies"
+        fi
     else
-        warn "Filza not found  -  install it first (TrollStore/Sileo)"
-        missing="$missing filza"
-    fi
-    tweak=$(ssh_safe "root@$ip" "dpkg -l com.kaffeindecaf.w0lfsword 2>/dev/null | tail -1 | tr -s ' ' | cut -d' ' -f3" 2>/dev/null)
-    if [ -n "$tweak" ]; then
-        ok "W0lfSword tweak installed ($tweak)"
-    else
-        warn "tweak not installed  -  run: ./W0lfSword adderall"
-        missing="$missing tweak"
-    fi
-    sucflag=$(ssh_safe "root@$ip" "cat /var/mobile/Documents/.filza_last_success 2>/dev/null" 2>/dev/null)
-    if [ -n "$sucflag" ]; then
-        ok "exploit success recorded on device"
-    else
-        info "no success flag yet  -  exploit hasn't run on this device"
+        info "no SSH  -  USB/AFC state below (sshd is often dead on dopamine after 'remove jailbreak')"
     fi
 
-    # ── live capability probes ──
-    if ssh_safe "root@$ip" "touch /var/tmp/.w0lf_probe 2>/dev/null && rm -f /var/tmp/.w0lf_probe" >/dev/null 2>&1; then
-        ok "sandbox-free write: /var/tmp"
-    else
-        warn "/var/tmp write failed"
-        missing="$missing tmp-write"
+    # ── 3. App + tweak state (multi-source log pull) ──
+    local tlog=""
+    if $ssh_ok; then
+        tlog=$(ssh_safe "root@$ip" "cat /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null)
     fi
-    if ssh_safe "root@$ip" "touch /System/Library/.w0lf_probe 2>/dev/null && rm -f /System/Library/.w0lf_probe" >/dev/null 2>&1; then
-        ok "SSV-protected write: /System/Library (bypass active)"
+    if [ -z "$tlog" ] && [ -n "$usb_uuid" ] && command -v afcclient &>/dev/null; then
+        # afcclient get downloads to a LOCAL file named after the remote
+        # (stdout carries errors only; it refuses to overwrite an existing
+        # local file), so pull into an empty temp dir and cat it. The log
+        # rotates on relaunch (FilzaTweak.log.old holds the previous run),
+        # so fetch both and concatenate — the [Tweak] init line lives in .old.
+        local td; td=$(mktemp -d /tmp/ws_readiness.XXXXXX 2>/dev/null || echo /tmp)
+        local bid
+        for bid in "com.kaffeindecaf.w0lfsword.filza" "com.kaffeindecaf.w0lfsword.filza.J8T95UQMW2"; do
+            (cd "$td" && afcclient --documents "$bid" get Documents/FilzaTweak.log.old >/dev/null 2>&1)
+            (cd "$td" && afcclient --documents "$bid" get Documents/FilzaTweak.log >/dev/null 2>&1)
+            [ -s "$td/FilzaTweak.log" ] && break
+        done
+        tlog=$(cat "$td/FilzaTweak.log.old" "$td/FilzaTweak.log" 2>/dev/null || true)
+        rm -rf "$td"
+    fi
+    if [ -z "$tlog" ]; then
+        info "no tweak log reachable  -  install + open Filza first (sideload the IPA), then re-run"
+        missing="$missing app-log"
     else
-        info "SSV-protected write blocked (expected)  -  Filza + tweak's SSV bypass enables it"
+        if grep -qF "[Tweak] device=" <<< "$tlog"; then
+            ok "tweak loaded in Filza"
+            if grep -q "jailbroken=1" <<< "$tlog"; then
+                info "device reports jailbroken  -  helper/force logic applies"
+                if grep -qE "FORCE EXPLOIT" <<< "$tlog"; then
+                    ok "exploit forced on the JB kernel (override active)"
+                elif grep -q "helper mode" <<< "$tlog"; then
+                    warn "helper mode  -  kernel exploit SKIPPED (drop force_exploit_jb or remove FilzaHelper)"
+                    missing="$missing helper-mode"
+                fi
+            else
+                ok "non-jailbroken  -  kernel exploit path armed"
+            fi
+        else
+            warn "tweak log has no init line  -  dylib may not be injected in the running app"
+            missing="$missing tweak-init"
+        fi
+        local spray; spray=$(echo "$tlog" | grep -oE "socketPortsCount: [0-9]+" | tail -1 | awk '{print $2}')
+        if [ -n "$spray" ]; then
+            if [ "$spray" -gt 0 ] 2>/dev/null; then
+                ok "socket spray healthy ($spray sockets)"
+            else
+                warn "socket spray produced 0 sockets  -  check spray_socket diagnostics in the log"
+                missing="$missing spray"
+            fi
+        fi
+        if grep -q "pcbStartOffset" <<< "$tlog"; then ok "race found a PCB page  -  scan is alive"; fi
+        if grep -q "target corrupted" <<< "$tlog"; then ok "socket corruption succeeded  -  kernel r/w primitive is live"; fi
+        if grep -q "SANDBOX ESCAPED" <<< "$tlog"; then
+            ok "*** SANDBOX ESCAPED (R+W) on device ***"
+        elif grep -q "check_sandbox_var_rw confirmed" <<< "$tlog"; then
+            ok "sandbox escape confirmed  -  /var read/write verified"
+        else
+            info "no escape confirmed in the log yet  -  exploit running or waiting for launch"
+        fi
+        local lands; lands=$(echo "$tlog" | grep -c "OOB READ LANDED" || true)
+        [ -n "$lands" ] && [ "$lands" -gt 0 ] 2>/dev/null && info "race activity: $lands OOB reads landed in the app log"
+    fi
+
+    # ── 4. Host-side: builds + release ──
+    local ipas; ipas=$(ls -1 packages/*.ipa 2>/dev/null | xargs -n1 basename 2>/dev/null | tr '\n' ' ')
+    if [ -n "$ipas" ]; then
+        info "local IPA builds: $ipas"
+    else
+        warn "no local IPA builds (packages/)  -  run: make mha IPA=<Filza.ipa>"
+    fi
+    if command -v gh &>/dev/null; then
+        local rel; rel=$(gh release view v1.3.0-mha --json assets --jq '.assets[].name' 2>/dev/null | tr '\n' ' ' || true)
+        [ -n "$rel" ] && info "release v1.3.0-mha assets: $rel"
     fi
 
     # ── host-side: offset coverage for this iOS version ──
@@ -3263,7 +3325,7 @@ EOF
 
     stage "4/4" "Verifying... (reading phone logs)"
     local log; log=$(ssh_safe "root@$ip" "tail -20 /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null || echo "")
-    if echo "$log" | grep -q "ESCAPED"; then
+    if grep -q "ESCAPED" <<< "$log"; then
         echo ""
         banner "$C_GRN" "SANDBOX ESCAPED - SUCCESS" 36
         echo ""
@@ -3631,11 +3693,21 @@ cmd_adderall() {
     # Parse adderall-specific flags
     local SAFE_MODE=false
     local USB_ONLY=false
+    local FORCE_JB=false
     local args_clean=()
     for a in "$@"; do
-        case "$a" in --safe|--safe-mode) SAFE_MODE=true;; --usb|--USB) USB_ONLY=true;; *) args_clean+=("$a");; esac
+        case "$a" in --safe|--safe-mode) SAFE_MODE=true;; --usb|--USB) USB_ONLY=true;; --force-jb) FORCE_JB=true;; *) args_clean+=("$a");; esac
     done
     set -- "${args_clean[@]}"
+    # --force-jb: compile the helper-mode bypass in (W0LF_FORCE_EXPLOIT_JB)
+    # for JB test beds where the flag file can't be dropped (AFC writes are
+    # denied on some 18.x installs). The Makefile picks it up for both the
+    # deb and the mha IPA builds.
+    if $FORCE_JB; then
+        export W0LF_FORCE_JB=1
+    else
+        export W0LF_FORCE_JB=0
+    fi
 
     show_header
     echo ""
@@ -3643,6 +3715,9 @@ cmd_adderall() {
         banner "$C_AMB" "W0lfSword ADDERALL - SAFE MODE (no exploit)" 44
     else
         banner "$C_AMB" "W0lfSword ADDERALL - Auto Exploit" 44
+    fi
+    if $FORCE_JB; then
+        echo -e "  ${C_AMB}--force-jb: exploit will run on the jailbroken kernel (compile-time override)${NC}"
     fi
     echo ""
     echo -e "  ${C_DIM}Fully automated: install missing tools, find your phone, pair it, check the${NC}"
@@ -4189,14 +4264,29 @@ EOF
 
     stage "4/5" "Verifying sandbox escape... (reading phone logs)"
     local log; log=$(ssh_safe "root@$IP" "tail -30 /tmp/FilzaTweak.log 2>/dev/null" 2>/dev/null || echo "")
+    # Sideload-path fallback: pull the app's own log over AFC (SSH is often
+    # dead on dopamine test beds; the tweak's /tmp sink is sandbox-denied
+    # before the escape, but Documents/FilzaTweak.log is always written).
+    if [ -z "$log" ] && command -v afcclient &>/dev/null; then
+        local td; td=$(mktemp -d /tmp/ws_adderall.XXXXXX 2>/dev/null || echo /tmp)
+        local bid
+        for bid in "com.kaffeindecaf.w0lfsword.filza" "com.kaffeindecaf.w0lfsword.filza.J8T95UQMW2"; do
+            (cd "$td" && afcclient --documents "$bid" get Documents/FilzaTweak.log.old >/dev/null 2>&1)
+            (cd "$td" && afcclient --documents "$bid" get Documents/FilzaTweak.log >/dev/null 2>&1)
+            [ -s "$td/FilzaTweak.log" ] && break
+        done
+        log=$(cat "$td/FilzaTweak.log.old" "$td/FilzaTweak.log" 2>/dev/null || true)
+        rm -rf "$td"
+        [ -n "$log" ] && info "log pulled via AFC (sideload path)"
+    fi
     $DEBUG && echo -e "  ${C_DIM}── Log tail ──${NC}\n$log\n  ${C_DIM}──────────────${NC}"
 
     stage "5/5" "Final result..."
     echo ""
 
-    if echo "$log" | grep -qE "ESCAPED|already escaped"; then
+    if grep -qE "ESCAPED|already escaped|check_sandbox_var_rw confirmed" <<< "$log"; then
         local already_escaped=false
-        echo "$log" | grep -q "already escaped" && ! echo "$log" | grep -q "ESCAPED" && already_escaped=true
+        grep -q "already escaped" <<< "$log" && ! grep -q "ESCAPED" <<< "$log" && already_escaped=true
         if $already_escaped; then
             banner "$C_GRN" "SANDBOX ALREADY ESCAPED (jailbroken)" 44
         else
@@ -4229,9 +4319,18 @@ EOF
         banner "$C_RED" "ESCAPE NOT CONFIRMED" 44
         echo ""
         echo -e "  ${C_AMB}Tips:${NC}"
+        echo -e "  • Run the full report:  ${C_FROST}./W0lfSword r${NC}  (device + app + exploit state)"
         echo -e "  • Check offsets:  ${C_FROST}./W0lfSword offsets $IOS_VER${NC}"
         echo -e "  • View full log:  ${C_FROST}./W0lfSword log 100${NC}"
         echo -e "  • Verify offsets.m covers iOS $IOS_VER and $DEV_MODEL"
+        if grep -q "target corrupted" <<< "$log"; then
+            echo -e "  ${C_GRN}• Log shows the corruption landed -  kernel r/w is live; failure is in the"
+            echo -e "    escape chain (SMR decode / ext_set window). The escape-only retry (attemptEscape)"
+            echo -e "    re-walks the live primitive -  run the exploit again, do NOT re-spray manually.${NC}"
+        fi
+        if grep -q "socketPortsCount: 0" <<< "$log"; then
+            echo -e "  ${C_RED}• Log shows 0 sockets -  spray regression (proc_info r<0 check).${NC}"
+        fi
         echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$IP\",\"ios\":\"$IOS_VER\",\"result\":\"fail\"}" >> "$DATA_DIR/history.json"
         log_script "adderall FAIL: $DEV_MODEL iOS $IOS_VER @ $IP"
         crit "adderall: escape not confirmed on $DEV_MODEL iOS $IOS_VER"
@@ -5388,11 +5487,11 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "poc dirtyslide" "dyld slide OOB  -  macOS/Xcode only (CVE-2026-43724)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "fuzz (f)"      "ImageIO fuzz harness: mutate → push → open → crash capture (K4.2)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "kcwatch (w)"   "auto kernel-delta watcher: poll → ranged-fetch → XPF → report"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "readiness (r)" "device capability + exploit-readiness report: SSH/root/jailbreak, Filza + tweak state, live R/W probes, offset coverage, kcwatch verdict"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "readiness (r)" "full device report, no SSH needed: USB identity, app/tweak state (AFC log pull: spray/PCB/corrupt/escape), builds, release, offsets, kcwatch"
     printf "  ${C_EYE}%-14s${NC} %s\n" "mha <ipa>"    "Re-sign Filza as MobileHouseArrest → pre-exploit container access (K4.12)"
     echo ""
     section "Exploit Workflow"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "adderall (a)" "Auto-discover → build → deploy → verify${C_AMB} [root]${NC}"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "adderall (a)" "Auto-discover → build → deploy → verify${C_AMB} [root]${NC}  --force-jb: compile-time override for JB testbeds"
     printf "  ${C_EYE}%-14s${NC} %s\n" "nojailbreak (nj)" "USB install Filza + kernel R/W, no jailbreak (iOS 18-26.0.1)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "quick"        "One-shot exploit chain"
     printf "  ${C_EYE}%-14s${NC} %s\n" "update"       "Git pull + rebuild + redeploy"
@@ -5476,13 +5575,13 @@ main() {
         poc)       cmd_poc "${args[@]}";;
         fuzz)      cmd_fuzz "${args[@]}";;
         kcwatch)   cmd_kcwatch "${args[@]}";;
-        readiness) cmd_readiness "${args[@]}";;
+        readiness|r) cmd_readiness "${args[@]}";;
         mha)       cmd_mha "${args[@]}";;
         tweaks)    cmd_tweaks "${args[@]}";;
         clean)     cmd_clean "${args[@]}";;
         doctor)    cmd_doctor "${args[@]}";;
         quick)     cmd_quick "${args[@]}";;
-        adderall)  cmd_adderall "${args[@]}";;
+        adderall|a) cmd_adderall "${args[@]}";;
         nojailbreak|nj) cmd_nojailbreak "${args[@]}";;
         safe)      cmd_safe "${args[@]}";;
         crashlog)  cmd_crashlog "${args[@]}";;
