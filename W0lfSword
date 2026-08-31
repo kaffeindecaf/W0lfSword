@@ -145,14 +145,18 @@ ssh_safe() {
     fi
 }
 scp_safe() {
-    local remote="${1:-}"
-    shift
+    local a1="${1:-}" a2="${2:-}"
     if [ -n "$SSH_TUNNEL_PORT" ]; then
+        # Tunnel mode: rewrite whichever arg carries the remote host:path
+        # side (upload: <local> <host:path>; download: <host:path> <local>)
+        # to root@localhost:<path>. Never touch the local side.
+        case "$a1" in *:*) a1="root@localhost:${a1##*:}";; esac
+        case "$a2" in *:*) a2="root@localhost:${a2##*:}";; esac
         scp -i "$SSH_KEY" -P "$SSH_TUNNEL_PORT" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-            "root@localhost:${remote#*:}" "$@" 2>/dev/null
+            "$a1" "$a2" 2>/dev/null
     else
         scp -i "$SSH_KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-            "$remote" "$@" 2>/dev/null
+            "$a1" "$a2" 2>/dev/null
     fi
 }
 # A6.6: array-based command execution  -  no eval, no shell-string injection
@@ -3488,7 +3492,7 @@ cmd_adderall() {
     local USB_ONLY=false
     local args_clean=()
     for a in "$@"; do
-        case "$a" in --safe|--safe-mode) SAFE_MODE=true;; --usb) USB_ONLY=true;; *) args_clean+=("$a");; esac
+        case "$a" in --safe|--safe-mode) SAFE_MODE=true;; --usb|--USB) USB_ONLY=true;; *) args_clean+=("$a");; esac
     done
     set -- "${args_clean[@]}"
 
