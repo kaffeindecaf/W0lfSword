@@ -48,6 +48,36 @@ echo "  dylib:    $DYLIB_NAME"
 echo ""
 
 # 1. Extract
+[ -f "$DYLIB" ] || { echo "  ✗ tweak dylib not found: $DYLIB (build first: make package, then extract W0lfSword.dylib)"; exit 1; }
+# Guard: the injected dylib must be SUBSTRATE-FREE. A plain `make package`
+# (build/quick/adderall) rebuilds the shared .theos dylib WITH
+# FilzaPadlockBypass.xm, which reintroduces the /var/jb CydiaSubstrate load
+# command — dyld then kills Filza at launch on a non-jailbroken device
+# ("Library not loaded: /var/jb/.../CydiaSubstrate"). Only the
+# MHA_IDENTITY=1 build drops the .xm. Fail loudly instead of shipping a
+# broken IPA.
+if python3 - "$DYLIB" <<'PYEOF'
+import struct, sys
+data = open(sys.argv[1], 'rb').read()
+ncmds, _ = struct.unpack('<II', data[16:24])
+off = 32
+for _ in range(ncmds):
+    cmd, cs = struct.unpack('<II', data[off:off+8])
+    if cmd == 0xc:  # LC_LOAD_DYLIB
+        no = struct.unpack('<I', data[off+8:off+12])[0]
+        if b'CydiaSubstrate' in data[off+no:off+cs]:
+            sys.exit(1)
+    off += cs
+sys.exit(0)
+PYEOF
+then
+    echo "  ✓ dylib substrate-free (no /var/jb CydiaSubstrate dependency)"
+else
+    echo "  ✗ dylib links CydiaSubstrate from /var/jb — a plain 'make package' overwrote the MHA build."
+    echo "    Rebuild with:  make package MHA_IDENTITY=1   (or: ./W0lfSword nojailbreak)"
+    echo "    Then re-run this re-sign."
+    exit 1
+fi
 echo "[1/6] Extracting IPA..."
 ( cd "$TMP" && unzip -q "$(cd "$(dirname "$IPA")" && pwd)/$(basename "$IPA")" )
 APP="$(find "$TMP" -maxdepth 3 -name '*.app' -type d | head -1)"
