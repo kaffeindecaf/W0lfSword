@@ -200,6 +200,128 @@ static void installWolfEasterEgg(void) {
     TweakLog("[Hooks] wolf background easter egg installed");
 }
 
+#pragma mark - Exploit debug HUD (status banner + live log)
+
+// On-screen status banner + collapsible live log fed by the in-memory ring
+// buffer. Non-jailbroken sideloads have no readable /tmp and no SSH, so this
+// is the only on-device way to watch the exploit initialize: the banner says
+// "exploit initializing (attempt N/5)…", flips green on escape success, red
+// when all attempts are exhausted; tapping the "log" button expands the last
+// 400 log lines live.
+
+static UIView *g_hudContainer = nil;
+static UITextView *g_hudLogView = nil;
+static UILabel *g_hudStatusLabel = nil;
+static BOOL g_hudExpanded = NO;
+
+static void hudRefresh(void) {
+    if (!g_hudContainer) return;
+    int st = tweak_exploit_status();
+    int att = tweak_exploit_attempt();
+    NSString *txt;
+    UIColor *col;
+    switch (st) {
+        case 1:
+            txt = [NSString stringWithFormat:@"W0lfSword: exploit initializing (attempt %d/5)…", att];
+            col = [UIColor colorWithRed:0.95 green:0.75 blue:0.2 alpha:1];
+            break;
+        case 2:
+            txt = @"W0lfSword: exploit ready — sandbox escaped";
+            col = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
+            break;
+        case 3:
+            txt = @"W0lfSword: exploit failed — userspace fallback";
+            col = [UIColor colorWithRed:1 green:0.4 blue:0.35 alpha:1];
+            break;
+        default:
+            txt = @"W0lfSword: idle";
+            col = [UIColor colorWithWhite:0.8 alpha:1];
+            break;
+    }
+    g_hudStatusLabel.text = txt;
+    g_hudStatusLabel.textColor = col;
+    if (g_hudLogView) {
+        char snap[12288];
+        int n = tweak_log_ring_snapshot(snap, sizeof(snap));
+        if (n > 0) {
+            NSString *new = [NSString stringWithUTF8String:snap];
+            if (![g_hudLogView.text isEqualToString:new]) {
+                g_hudLogView.text = new;
+                [g_hudLogView scrollRangeToVisible:NSMakeRange(g_hudLogView.text.length - 1, 1)];
+            }
+        }
+    }
+}
+
+static void hudSetExpanded(BOOL expanded) {
+    g_hudExpanded = expanded;
+    if (!g_hudContainer) return;
+    CGFloat w = g_hudContainer.bounds.size.width;
+    CGFloat winH = [UIApplication sharedApplication].keyWindow.bounds.size.height
+                   ?: g_hudContainer.window.bounds.size.height ?: 700;
+    CGFloat panelH = expanded ? (winH * 0.45) : 0;
+    g_hudContainer.frame = CGRectMake(0, 0, w, 34 + panelH);
+    g_hudLogView.frame = CGRectMake(0, 34, w, panelH);
+    g_hudLogView.hidden = !expanded;
+}
+
+static void hudToggle(void) {
+    hudSetExpanded(!g_hudExpanded);
+}
+
+static void hudInstall(void) {
+    if (g_hudContainer) return;
+    UIWindow *win = [UIApplication sharedApplication].keyWindow;
+    if (!win) win = [UIApplication sharedApplication].windows.firstObject;
+    if (!win) return;
+    CGFloat w = win.bounds.size.width;
+
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, w, 34)];
+    container.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    container.backgroundColor = [UIColor colorWithWhite:0.07 alpha:0.92];
+    container.layer.zPosition = 10000;
+
+    UILabel *status = [[UILabel alloc] initWithFrame:CGRectMake(8, 0, w - 76, 34)];
+    status.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightSemibold];
+    status.textColor = [UIColor colorWithWhite:0.8 alpha:1];
+    status.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    status.userInteractionEnabled = NO;
+
+    UIButton *toggle = [UIButton buttonWithType:UIButtonTypeSystem];
+    toggle.frame = CGRectMake(w - 68, 0, 68, 34);
+    toggle.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [toggle setTitle:@"log" forState:UIControlStateNormal];
+    [toggle setTitleColor:[UIColor colorWithWhite:0.85 alpha:1] forState:UIControlStateNormal];
+    toggle.titleLabel.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightSemibold];
+    [toggle addAction:[UIAction actionWithHandler:^(UIAction *a) { hudToggle(); }]
+           forControlEvents:UIControlEventTouchUpInside];
+
+    UITextView *logView = [[UITextView alloc] initWithFrame:CGRectMake(0, 34, w, 0)];
+    logView.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.95];
+    logView.textColor = [UIColor colorWithWhite:0.75 alpha:1];
+    logView.font = [UIFont monospacedSystemFontOfSize:9.0 weight:UIFontWeightRegular];
+    logView.editable = NO;
+    logView.indicatorStyle = UIScrollViewIndicatorStyleWhite;
+    logView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    logView.hidden = YES;
+
+    [container addSubview:status];
+    [container addSubview:toggle];
+    [container addSubview:logView];
+    [win addSubview:container];
+
+    g_hudContainer = container;
+    g_hudLogView = logView;
+    g_hudStatusLabel = status;
+
+    NSTimer *timer = [NSTimer timerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *t) {
+        hudRefresh();
+    }];
+    [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+    hudRefresh();
+    TweakLog("[HUD] exploit status banner + live log installed");
+}
+
 #pragma mark - Zip/Unzip via minizip C API (linked in Filza binary)
 
 // minizip C functions — statically linked in Filza, resolve via dlsym at runtime
@@ -1277,6 +1399,7 @@ __attribute__((constructor)) void TweakInit(void) {
     // showWelcomeOnce is dispatch_once'd, so multiple triggers are harmless.
     dispatch_async(dispatch_get_main_queue(), ^{
         UIApplication *app = [UIApplication sharedApplication];
+        hudInstall(); // no-op until the key window exists; retried below
         if (app.applicationState == UIApplicationStateActive) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                 dispatch_get_main_queue(), ^{
@@ -1285,6 +1408,7 @@ __attribute__((constructor)) void TweakInit(void) {
         }
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
             object:nil queue:nil usingBlock:^(NSNotification *note) {
+            hudInstall();
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                 dispatch_get_main_queue(), ^{
                 showWelcomeOnce();
@@ -1292,6 +1416,7 @@ __attribute__((constructor)) void TweakInit(void) {
         }];
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
             object:nil queue:nil usingBlock:^(NSNotification *note) {
+            hudInstall();
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                 dispatch_get_main_queue(), ^{
                 showWelcomeOnce();

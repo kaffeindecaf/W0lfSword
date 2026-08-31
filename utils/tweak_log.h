@@ -25,6 +25,15 @@ extern "C" {
 
 extern pthread_mutex_t g_log_mutex;
 
+// In-memory ring buffer of recent log lines — feeds the on-screen debug HUD
+// (exploit status banner + live log panel). Shared across translation units
+// (defined in tweak_log.m, not per-TU static), so every TweakLog call lands
+// in the same ring regardless of which file logged it.
+void tweak_log_ring_append(const char *line);
+// Copies up to outsz-1 bytes of the most recent lines (oldest first,
+// NUL-terminated) into out; returns the number of lines copied.
+int tweak_log_ring_snapshot(char *out, size_t outsz);
+
 // TweakLog writes every line to up to four sinks so the tweak is debuggable
 // on BOTH a jailbroken phone (read /tmp/FilzaTweak.log over SSH) and a clean
 // non-jailbroken sideload (no SSH, no /var access):
@@ -44,6 +53,10 @@ static void TweakLog(const char *format, ...) {
     va_start(args, format);
     vsnprintf(buf, sizeof(buf), format, args);
     va_end(args);
+
+    // Always land in the ring (before the mutex trylock so a contended log
+    // still reaches the on-screen HUD).
+    tweak_log_ring_append(buf);
 
     fprintf(stderr, "[tweak] %s\n", buf);
     fflush(stderr);
