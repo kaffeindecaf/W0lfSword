@@ -341,7 +341,9 @@ CRIT_CMD=""   # set in main() to the invoked subcommand
 
 # Collect a full verbose report of the failure; echoes the file path.
 error_report_collect() {
-    local msg="$1" file="$REPORT_DIR/crash-$(date '+%Y%m%d-%H%M%S')-$$.txt"
+    local msg="$1"
+    local file
+    file="$REPORT_DIR/crash-$(date '+%Y%m%d-%H%M%S')-$$.txt"
     mkdir -p "$REPORT_DIR"
     local gitrev="" branch=""
     if git -C "$PROJECT_DIR" rev-parse --short HEAD &>/dev/null; then
@@ -389,8 +391,7 @@ report_to_github() {
     local title="[auto-report] ${CRIT_CMD:-menu}: ${msg:0:72}"
     title=$(printf '%s' "$title" | tr '\n\r' '  ')
     local issue_url
-    issue_url=$(gh issue create --repo kaffeindecaf/W0lfSword --title "$title" --body-file "$file" 2>&1)
-    if [ $? -eq 0 ] && [ -n "$issue_url" ]; then
+    if issue_url=$(gh issue create --repo kaffeindecaf/W0lfSword --title "$title" --body-file "$file" 2>&1) && [ -n "$issue_url" ]; then
         ok "issue filed: $issue_url"
         log_script "github issue filed: $title -> $issue_url"
         return 0
@@ -580,10 +581,10 @@ spinner() {
     $JSON_MODE && return 0   # machine-readable output stays clean
     [ "$CFG_ANIMATIONS" = "on" ] || return 0   # config animations=off
     local msg="${1:-Working}"
-    local frames=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
+    local spinframes=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
     local end=$((SECONDS * 10 + 5))
     while [ $((SECONDS * 10)) -lt $end ]; do
-        for f in "${frames[@]}"; do
+        for f in "${spinframes[@]}"; do
             [ $((SECONDS * 10)) -ge $end ] && break
             printf "\r  ${C_EYE}%s${NC} ${C_GREY}%s...${NC}" "$f" "$msg"
             sleep 0.05
@@ -1267,16 +1268,16 @@ show_loading() {
 # that wraps would leave frame fragments behind.
 reveal_lines() {
     printf "\033[?25l"
-    local -a lines=()
+    local -a rlines=()
     local line
-    while IFS= read -r line; do lines+=("$line"); done
-    local n=${#lines[@]}
+    while IFS= read -r line; do rlines+=("$line"); done
+    local n=${#rlines[@]}
     local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+-=<>?/\\|"
     local i j len out ch r p plain cols
     cols=$(stty size 2>/dev/null | awk '{print $2}')
     [ -n "$cols" ] && [ "$cols" -gt 20 ] || cols=80
     for ((i=0; i<n; i++)); do
-        line="${lines[$i]}"
+        line="${rlines[$i]}"
         # strip ANSI codes to get the visible text for scrambling
         plain=$(printf '%s' "$line" | sed $'s/\033\\[[0-9;]*m//g')
         # character count, not bytes: multibyte glyphs (─, ·, →) are 1 char
@@ -1604,23 +1605,49 @@ print(b,p)
         fi
         results="$results$f|$b|$p"$'\n'
     done
+    # -- shellcheck over the main script (AUD.5). Optional: skipped (with a hint)
+    #    when shellcheck is not installed. Exclusions = categories that have their
+    #    own queued AUD tickets - drop an exclusion when its item lands:
+    #      SC2059 -> AUD.3 (colors-in-printf-format is the repo-wide convention)
+    #      SC2012 -> AUD.2 (ls -t listings, low risk)
+    #      SC2086 -> AUD.1 (intentional word-splitting for multi-package installs)
+    local sc_warns=0 sc_out=""
+    if command -v shellcheck &>/dev/null; then
+        sc_out=$(shellcheck -s bash -e SC2059,SC2012,SC2086 W0lfSword 2>&1)
+        sc_warns=$(printf '%s\n' "$sc_out" | grep -c '^W0lfSword:' || true)
+    fi
     # --json (J6.2): machine-readable audit result
     if $JSON_MODE; then
-        printf '%s' "$results" | python3 -c '
-import sys, json
+        printf '%s' "$results" | SC_WARNS="$sc_warns" python3 -c '
+import sys, json, os, shutil
 rows = []
 for line in sys.stdin.read().splitlines():
     f, b, p = line.split("|")
     rows.append({"file": f, "braces": int(b), "parens": int(p), "ok": b == "0" and p == "0"})
-print(json.dumps({"files": rows, "issues": sum(1 for r in rows if not r["ok"]), "passed": all(r["ok"] for r in rows)}, indent=2))
+sc_w = int(os.environ.get("SC_WARNS", "0"))
+print(json.dumps({"files": rows, "issues": sum(1 for r in rows if not r["ok"]) + sc_w,
+                  "passed": all(r["ok"] for r in rows) and sc_w == 0,
+                  "shellcheck": {"installed": shutil.which("shellcheck") is not None, "warnings": sc_w, "ok": sc_w == 0}},
+                 indent=2))
 '
         return 0
+    fi
+    if command -v shellcheck &>/dev/null; then
+        if [ "$sc_warns" -eq 0 ]; then
+            ok "W0lfSword (shellcheck clean)"
+        else
+            echo -e "  ${C_RED}✗${NC} W0lfSword ${C_RED}(shellcheck: $sc_warns finding(s))${NC}"
+            $VERBOSE && printf '%s\n' "$sc_out" | sed 's/^/      /'
+            issues=$((issues + sc_warns))
+        fi
+    else
+        echo -e "  ${C_DIM}─${NC} shellcheck ${C_DIM}(not installed - optional step, skipped)${NC}"
     fi
     if [ "$issues" -eq 0 ]; then
         echo ""; echo -e "  ${C_GRN}${B}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  AUDIT PASSED${NC}"
     else
         echo ""; echo -e "  ${C_RED}${B}$issues issue(s) found${NC}"
-        crit "audit found $issues issue(s) in the exploit sources"
+        crit "audit found $issues issue(s) in sources/script"
     fi
 }
 
@@ -2486,8 +2513,11 @@ poc_sep_panic() {
         "$ldid" -S "$bin" 2>/dev/null
         local ch; ch=$("$ldid" -h "$bin" 2>/dev/null | grep -oE "CandidateCDHash sha256=[a-f0-9]+" | awk -F= '{print $2}')
         if [ -n "$ch" ]; then
-            ssh_safe "root@$ip" "[ -x /var/jb/usr/bin/jbctl ] && /var/jb/usr/bin/jbctl trustcache add $ch" 2>/dev/null \
-                && ok "signed + trustcache added ($ch)" || warn "sign ok but trustcache add failed  -  exec may be killed"
+            if ssh_safe "root@$ip" "[ -x /var/jb/usr/bin/jbctl ] && /var/jb/usr/bin/jbctl trustcache add $ch" 2>/dev/null; then
+                ok "signed + trustcache added ($ch)"
+            else
+                warn "sign ok but trustcache add failed  -  exec may be killed"
+            fi
         else
             warn "cdhash extraction failed  -  binary may not exec"
         fi
@@ -2626,12 +2656,12 @@ cmd_doctor() {
     else
         echo -e "  ${C_RED}✗${NC} THEOS          ${C_DIM}export THEOS=~/theos (Linux) / /opt/theos (macOS)${NC}"; ok=false
     fi
-    command -v clang    &>/dev/null && echo -e "  ${C_GRN}✓${NC} clang"          || { echo -e "  ${C_RED}✗${NC} clang"; ok=false; }
-    command -v dpkg-deb &>/dev/null && echo -e "  ${C_GRN}✓${NC} dpkg-deb"       || { echo -e "  ${C_RED}✗${NC} dpkg-deb ${C_DIM}(brew install dpkg / apt install dpkg)${NC}"; ok=false; }
-    command -v git      &>/dev/null && echo -e "  ${C_GRN}✓${NC} git"            || { echo -e "  ${C_AMB}⚠${NC} git (recommended)"; }
-    command -v ssh      &>/dev/null && echo -e "  ${C_GRN}✓${NC} ssh"            || { echo -e "  ${C_AMB}⚠${NC} ssh (for deployment)"; }
-    command -v python3  &>/dev/null && echo -e "  ${C_GRN}✓${NC} python3"        || { echo -e "  ${C_AMB}⚠${NC} python3 (for audit)"; }
-    command -v ldid     &>/dev/null && echo -e "  ${C_GRN}✓${NC} ldid"           || { echo -e "  ${C_DIM}─${NC} ldid (optional)"; }
+    if command -v clang &>/dev/null;    then echo -e "  ${C_GRN}✓${NC} clang";          else echo -e "  ${C_RED}✗${NC} clang"; ok=false; fi
+    if command -v dpkg-deb &>/dev/null; then echo -e "  ${C_GRN}✓${NC} dpkg-deb";       else echo -e "  ${C_RED}✗${NC} dpkg-deb ${C_DIM}(brew install dpkg / apt install dpkg)${NC}"; ok=false; fi
+    if command -v git &>/dev/null;      then echo -e "  ${C_GRN}✓${NC} git";            else echo -e "  ${C_AMB}⚠${NC} git (recommended)"; fi
+    if command -v ssh &>/dev/null;      then echo -e "  ${C_GRN}✓${NC} ssh";            else echo -e "  ${C_AMB}⚠${NC} ssh (for deployment)"; fi
+    if command -v python3 &>/dev/null;  then echo -e "  ${C_GRN}✓${NC} python3";        else echo -e "  ${C_AMB}⚠${NC} python3 (for audit)"; fi
+    if command -v ldid &>/dev/null;     then echo -e "  ${C_GRN}✓${NC} ldid";           else echo -e "  ${C_DIM}─${NC} ldid (optional)"; fi
     if [ "$IS_MACOS" -eq 1 ]; then
         if xcode-select -p &>/dev/null && xcrun --sdk iphoneos --show-sdk-path &>/dev/null; then
             echo -e "  ${C_GRN}✓${NC} Xcode iPhoneOS SDK  ${C_DIM}$(xcrun --sdk iphoneos --show-sdk-path)${NC}"
@@ -3318,11 +3348,11 @@ run_menu() {
             2) cmd_deploy || true;;
             3) cmd_monitor || true;;
             4) echo -e "  ${C_FROST}Device commands:${NC} list | add <ip> | switch <ip> | info [ip]"
-               echo -ne "  ${C_FROST}device ▸${NC} "; read -r dcmd || true
-               echo ""; cmd_device $dcmd || true;;
+               echo -ne "  ${C_FROST}device ▸${NC} "; read -r -a dargs || true
+               echo ""; cmd_device "${dargs[@]}" || true;;
             5) echo -e "  ${C_FROST}Profile commands:${NC} list | save <name> | load <name>"
-               echo -ne "  ${C_FROST}profile ▸${NC} "; read -r pcmd || true
-               echo ""; cmd_profile $pcmd || true;;
+               echo -ne "  ${C_FROST}profile ▸${NC} "; read -r -a pargs || true
+               echo ""; cmd_profile "${pargs[@]}" || true;;
             6) { cmd_history stats; echo ""; cmd_history show; } || true;;
             7) { cmd_doctor; echo ""; cmd_audit; echo ""; cmd_status; } || true;;
             8) { cmd_targets || true; echo ""; cmd_exploits || true; };;
@@ -4283,9 +4313,11 @@ EOF
             if [ "$IS_MACOS" -eq 1 ]; then
                 # macOS: /opt/theos is the default theos.dev location
                 if command -v brew &>/dev/null && [ ! -d /opt/theos ]; then
-                    bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" 2>/dev/null \
-                        && export THEOS=/opt/theos \
-                        || { $SUDO mkdir -p /opt/theos && $SUDO chown "$(id -u)" /opt/theos && git clone --recursive https://github.com/theos/theos.git /opt/theos && export THEOS=/opt/theos; }
+                    if bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" 2>/dev/null; then
+                        export THEOS=/opt/theos
+                    else
+                        $SUDO mkdir -p /opt/theos && $SUDO chown "$(id -u)" /opt/theos && git clone --recursive https://github.com/theos/theos.git /opt/theos && export THEOS=/opt/theos
+                    fi
                 else
                     bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" 2>/dev/null \
                         && export THEOS=/opt/theos
@@ -4807,7 +4839,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "tweaks (tw)"  "Tweak catalog  -  'tweaks install <id>' builds + deploys"
     echo ""
     section "Analysis & Config"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check + shellcheck"
     printf "  ${C_EYE}%-14s${NC} %s\n" "doctor"       "Check environment"
     printf "  ${C_EYE}%-14s${NC} %s\n" "offsets"      "iOS version coverage"
     printf "  ${C_EYE}%-14s${NC} %s\n" "config (g)"   "Menu behavior: animations, colors, wolf, prompt  -  show | set <k> <v> | edit | reset"
