@@ -1152,6 +1152,115 @@ FILZA_NOTE="W0lfSword expects Filza to already be installed on the phone. It doe
 JAILBREAK_NOTE="The phone needs to be jailbroken (Dopamine, palera1n, etc.) with MobileSubstrate, and OpenSSH running, or the tweak can never inject."
 PERSIST_NOTE="Nothing is permanent. Reboot the phone and everything resets  -  the exploit simply runs again the next time Filza opens."
 
+# ── PlumeImpactor helpers ────────────────────────────────────
+# adderall K1.2+: when Filza is missing from the device, offer to install
+# it via PlumeImpactor instead of just warning. PlumeImpactor is a GUI
+# app (iced/winit) with no CLI install mode, so the best we can do is
+# locate the binary, build the re-signed Filza-MHA.ipa (same artifact
+# cmd_nojailbreak produces), and launch the GUI with clear instructions.
+
+plumeimpactor_bin() {
+    # Returns a runnable PlumeImpactor invocation, or empty. Checks, in
+    # order: flatpak install, repo source build, AppImage in Downloads.
+    if flatpak list --app 2>/dev/null | grep -qi 'PlumeImpactor'; then
+        echo "flatpak run dev.khcrysalis.PlumeImpactor"
+        return 0
+    fi
+    if [ -x "$PROJECT_DIR/scripts/plumeimpactor" ]; then
+        echo "$PROJECT_DIR/scripts/plumeimpactor"
+        return 0
+    fi
+    for cand in "$HOME/Downloads/Impactor-linux-x86_64.appimage" \
+                "$HOME/Downloads/PlumeImpactor-linux-x86_64.AppImage"; do
+        [ -x "$cand" ] && { echo "$cand"; return 0; }
+    done
+    return 1
+}
+
+# Build the re-signed Filza-MHA.ipa (registerable bundle id) so the user
+# has something to drop into PlumeImpactor. Mirrors cmd_nojailbreak
+# phases 7-8. Sets OUT_IPA on success, returns 1 on failure.
+build_mha_ipa() {
+    local IPA_SRC=""
+    for cand in "$PROJECT_DIR/Filza.ipa" "$HOME/Downloads/Filza.ipa" "$PROJECT_DIR/packages/Filza.ipa"; do
+        [ -f "$cand" ] && { IPA_SRC="$cand"; break; }
+    done
+    if [ -z "$IPA_SRC" ]; then
+        err "No Filza.ipa found - put it in $PROJECT_DIR or $HOME/Downloads"
+        return 1
+    fi
+    check_theos || { err "THEOS not set"; return 1; }
+    local dylib
+    dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null \
+         || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
+    if [ -z "$dylib" ]; then
+        stage "build" "Building tweak dylib (MHA_IDENTITY=1)..."
+        local log; log=$(make all MHA_IDENTITY=1 2>&1); local ec=$?
+        if [ $ec -ne 0 ]; then err "Build failed (exit=$ec)"; return 1; fi
+        dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
+        [ -n "$dylib" ] || { err "Built dylib not found in .theos"; return 1; }
+    fi
+    # ldid is required by re-sign_mha.sh; prefer the repo build.
+    if ! command -v ldid &>/dev/null && [ -x "$PROJECT_DIR/scripts/ldid" ]; then
+        export PATH="$PROJECT_DIR/scripts:$PATH"
+    fi
+    OUT_IPA="$PROJECT_DIR/packages/Filza-MHA.ipa"
+    stage "re-sign" "Re-signing Filza with the tweak injected..."
+    bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$OUT_IPA" \
+        "com.kaffeindecaf.w0lfsword.filza" >/tmp/mha_resign_adderall.log 2>&1
+    if [ $? -ne 0 ] || [ ! -f "$OUT_IPA" ]; then
+        err "MHA re-sign failed - see /tmp/mha_resign_adderall.log"
+        return 1
+    fi
+    return 0
+}
+
+# Prompt + launch PlumeImpactor so the user can install Filza. Returns 0
+# if the GUI was launched (user takes it from there), 1 if unavailable.
+plumeimpactor_install() {
+    section "Filza Install  -  PlumeImpactor"
+    echo ""
+    if ! confirm "Filza is not installed. Launch PlumeImpactor to install it?"; then
+        echo -e "  ${C_DIM}Skipped - the deploy can continue, but the tweak will never run without Filza.${NC}"
+        return 1
+    fi
+    local PI; PI=$(plumeimpactor_bin)
+    if [ -z "$PI" ]; then
+        warn "PlumeImpactor not found"
+        echo -e "  ${C_DIM}Install it first (flatpak: flatpak install flathub dev.khcrysalis.PlumeImpactor),${NC}"
+        echo -e "  ${C_DIM}then re-run adderall. Meanwhile I can still build the .ipa for you.${NC}"
+    fi
+    if build_mha_ipa; then
+        ok "Ready: $OUT_IPA"
+    else
+        warn "Could not build the re-signed Filza .ipa - install stock Filza manually."
+    fi
+    if [ -n "$PI" ]; then
+        echo -e "  ${C_FROST}Launching PlumeImpactor...${NC}"
+        echo -e "  ${C_DIM}  In PlumeImpactor: sign in with your Apple ID, then drag${NC}"
+        if [ -n "$OUT_IPA" ] && [ -f "$OUT_IPA" ]; then
+            echo -e "  ${C_DIM}  ${C_EYE}$OUT_IPA${NC}${C_DIM} onto the window and install.${NC}"
+        else
+            echo -e "  ${C_DIM}  the Filza.ipa you have into the window and install.${NC}"
+        fi
+        echo -e "  ${C_DIM}  Wait for the install to finish, then press Enter here to continue.${NC}"
+        # Launch in the background; GUI needs a display. If we have none
+        # (headless run), tell the user to launch it themselves.
+        if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+            ( $PI >/dev/null 2>&1 & )
+            read -r -p "  " _ans
+        else
+            echo -e "  ${C_AMB}⚠${NC} No display in this shell - launch PlumeImpactor yourself:"
+            echo -e "    ${C_FROST}$PI${NC}"
+            echo -e "  ${C_DIM}  Install $OUT_IPA, then press Enter to continue.${NC}"
+            read -r -p "  " _ans
+        fi
+        ok "Proceeding - verify Filza is installed on the device now."
+        return 0
+    fi
+    return 1
+}
+
 # ── Verbose relay ─────────────────────────────────────────────
 
 vlog() { $VERBOSE && printf "  ${C_DIM}[v] %s${NC}\n" "$*" || true; }
@@ -3769,11 +3878,13 @@ EOF
         echo -e "  ${C_GRN}✓${NC} Filza found on device  -  ready to inject"
     elif [ -n "$IP" ]; then
         warn "Filza was NOT found on the device"
-        echo -e "  ${C_DIM}W0lfSword does not sideload Filza  -  install it first (TrollStore, Sileo, Cydia).${NC}"
-        echo -e "  ${C_DIM}The deploy can still succeed, but the tweak will never run without Filza.${NC}"
+        # K1.2: instead of just warning, offer to install via PlumeImpactor.
+        # Installing an app is a side effect the user should confirm, so
+        # always prompt here even in --yes mode.
+        plumeimpactor_install
     else
         echo -e "  ${C_DIM}ℹ USB-only connection  -  couldn't check if Filza is installed.${NC}"
-        echo -e "  ${C_DIM}  Remember: W0lfSword does not install Filza. Get it from TrollStore or your package manager.${NC}"
+        echo -e "  ${C_DIM}  If Filza is missing, run adderall over WiFi/SSH, or install it via PlumeImpactor.${NC}"
     fi
 
     # Determine SoC CPU family for exploit method (shared selector, K1.7/K3.3)
