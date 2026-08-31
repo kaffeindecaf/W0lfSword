@@ -212,7 +212,11 @@ static void installWolfEasterEgg(void) {
 static UIView *g_hudContainer = nil;
 static UITextView *g_hudLogView = nil;
 static UILabel *g_hudStatusLabel = nil;
-static NSString *g_hudPlainCache = nil;
+// MRC build: an autoreleased NSString cache dangles after the pool drains
+// and crashes the timer callback (objc_msgSend on freed memory). Cache the
+// plain snapshot in a C buffer instead — no ObjC lifetime issues.
+static char g_hudPlainCache[32768];
+static BOOL g_hudPlainCacheValid = NO;
 static BOOL g_hudExpanded = NO;
 
 static UIColor *hudColorForLine(NSString *line) {
@@ -269,9 +273,11 @@ static void hudRefresh(void) {
         char snap[32768];
         int n = tweak_log_ring_snapshot(snap, sizeof(snap));
         if (n > 0) {
-            NSString *plain = [NSString stringWithUTF8String:snap];
-            if (![g_hudPlainCache isEqualToString:plain]) {
-                g_hudPlainCache = plain;
+            if (!g_hudPlainCacheValid || strcmp(g_hudPlainCache, snap) != 0) {
+                g_hudPlainCacheValid = YES;
+                strncpy(g_hudPlainCache, snap, sizeof(g_hudPlainCache) - 1);
+                g_hudPlainCache[sizeof(g_hudPlainCache) - 1] = '\0';
+                NSString *plain = [NSString stringWithUTF8String:snap];
                 UIFont *mono = [UIFont monospacedSystemFontOfSize:9.0 weight:UIFontWeightRegular];
                 NSMutableAttributedString *as = [[NSMutableAttributedString alloc] init];
                 NSArray *lines = [plain componentsSeparatedByString:@"\n"];
@@ -283,9 +289,11 @@ static void hudRefresh(void) {
                     NSAttributedString *ls = [[NSAttributedString alloc]
                         initWithString:[line stringByAppendingString:@"\n"] attributes:attrs];
                     [as appendAttributedString:ls];
+                    [ls release]; // MRC
                 }
                 g_hudLogView.attributedText = as;
-                [g_hudLogView scrollRangeToVisible:NSMakeRange(as.length - 1, 1)];
+                [as release]; // MRC: the view retained its own copy
+                [g_hudLogView scrollRangeToVisible:NSMakeRange(g_hudLogView.attributedText.length - 1, 1)];
             }
         }
     }
