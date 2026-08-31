@@ -21,7 +21,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR" || { echo "cannot cd to $PROJECT_DIR" >&2; exit 1; }
 
 # ── Sudo check ───────────────────────────────────────────────
-SUDO_NEEDED_COMMANDS="adderall setup usbliter8"
+SUDO_NEEDED_COMMANDS="adderall nojailbreak setup usbliter8"
 SUDO_UNSAFE_COMMANDS="build deploy monitor log status targets doctor offsets"  # work fine without
 JSON_MODE=false
 for _a in "$@"; do [ "$_a" = "--json" ] && JSON_MODE=true; done
@@ -3178,7 +3178,7 @@ menu_body() {
 
     # ── Sudo status banner ────────────────────────────────────
     if [ "$EUID" -ne 0 ]; then
-        echo -e "  ${C_AMB}${B}⚠  NOT running as root${NC}  ${C_DIM}- adderall / setup / usbliter8 need sudo, all other commands work fine${NC}"
+        echo -e "  ${C_AMB}${B}⚠  NOT running as root${NC}  ${C_DIM}- adderall / nojailbreak / setup / usbliter8 need sudo, all other commands work fine${NC}"
         echo -e "  ${C_DIM}  Re-run: ${C_FROST}sudo ./W0lfSword${NC}"
         echo ""
     else
@@ -3244,11 +3244,12 @@ menu_body() {
     menu_opt k "Kernelcache Diff" "offline XPF offset research  -  resolve/diff kernelcaches"
     menu_opt w "kcwatch"          "auto kernel-delta watcher  -  poll → fetch → resolve → report"
     menu_opt r "readiness"        "device capability + exploit-readiness report (live probes)"
+    menu_opt nj "NoJailbreak"     "USB install Filza + kernel R/W, no jailbreak needed (18-26.0.1)"
     menu_opt ex "Experimental"    "unfinished exploits · novel chains (dev)" "${C_AMB}[beta]${NC}"
     [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
-    printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
+    printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}nj${NC} nojailbreak  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
     printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}r${NC} readiness  ${C_FROST}g${NC} config  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
     echo ""
@@ -3387,6 +3388,7 @@ run_menu() {
             b|B|build)    cmd_build || true;;
             d|D|deploy)   cmd_deploy || true;;
             a|A|adderall) cmd_adderall || true;;
+            nj|nojailbreak) cmd_nojailbreak || true;;
             update|up)   cmd_update || true;;
             setup|install) cmd_setup || true;;
             reboot)       cmd_reboot || true;;
@@ -3412,7 +3414,7 @@ run_menu() {
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown  -  try 1-9, b/d/a/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/ex/g, or q${NC}";;
+                echo -e "  ${C_RED}Unknown  -  try 1-9, b/d/a/nj/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/ex/g, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -4097,6 +4099,360 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════
+#  NOJAILBREAK  -  USB-only Filza install + exploit, no jailbreak
+# ═══════════════════════════════════════════════════════════════
+
+cmd_nojailbreak() {
+    # Parse flags: --ipa <path> overrides the Filza.ipa source
+    local IPA_SRC=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --ipa) IPA_SRC="${2:-}"; shift 2;;
+            --ipa=*) IPA_SRC="${1#--ipa=}"; shift;;
+            *) shift;;
+        esac
+    done
+
+    show_header
+    echo ""
+    banner "$C_AMB" "W0lfSword NOJAILBREAK - USB install, kernel R/W" 50
+    echo ""
+    echo -e "  ${C_DIM}Builds a substrate-free Filza with the DarkSword dylib injected, installs${NC}"
+    echo -e "  ${C_DIM}it over USB, and launches it. No jailbreak, no SSH, no WiFi needed.${NC}"
+    echo -e "  ${C_DIM}Works on iOS 18.0-26.0.1 (A12+). Filza runs with full kernel R/W while open.${NC}"
+    echo ""
+    disclaimer <<EOF
+What this does, step by step: checks this computer's build tools, finds
+your phone over USB (tap TRUST when asked), tests the USB cable, verifies
+your iOS is in the supported range, builds a substrate-free Filza with the
+DarkSword kernel exploit dylib injected, installs it over USB, and tells
+you to open Filza - which then runs with kernel-level file access.
+
+No jailbreak is used or required. The MHA identity (MobileHouseArrest)
+tricks containermanagerd into granting container access, and DarkSword
+provides the kernel R/W. Nothing persists across a reboot.
+EOF
+    log_script "nojailbreak started"
+
+    # ── Phase 0: Sudo check (same policy as adderall) ─────────
+    local SUDO=""
+    if [ "$EUID" -ne 0 ]; then
+        if [ "$IS_MACOS" -eq 1 ]; then
+            SUDO="sudo"
+        else
+            local need_root=false
+            command -v clang &>/dev/null      || need_root=true
+            command -v dpkg-deb &>/dev/null   || need_root=true
+            command -v git &>/dev/null        || need_root=true
+            command -v python3 &>/dev/null    || need_root=true
+            command -v idevice_id &>/dev/null || need_root=true
+            command -v ideviceinstaller &>/dev/null || need_root=true
+            check_theos || need_root=true
+            if $need_root; then
+                echo -e "  ${C_RED}✗ nojailbreak needs root to auto-install packages. Re-run with:${NC}"
+                echo -e "    ${C_FROST}sudo ./W0lfSword nojailbreak${NC}"
+                return 1
+            fi
+            echo -e "  ${C_DIM}All dependencies present  -  running as $USER (auto-install skipped)${NC}"
+        fi
+    fi
+
+    # ── Phase 1: Auto-install dependencies ────────────────────
+    section "Phase 1  -  Dependencies (on this computer, fully automatic)"
+    echo ""
+    local pkg_manager=""
+    if [ "$IS_MACOS" -eq 1 ]; then pkg_manager="brew"
+    elif command -v apt &>/dev/null; then pkg_manager="apt"
+    elif command -v pacman &>/dev/null; then pkg_manager="pacman"
+    else warn "No package manager detected  -  see BUILD.md for manual install"; fi
+
+    if [ "$IS_MACOS" -eq 1 ] && ! xcode-select -p &>/dev/null; then
+        echo -e "  ${C_AMB}Installing Xcode Command Line Tools (a system dialog will appear)${NC}"
+        xcode-select --install 2>/dev/null || true
+        echo -e "  ${C_DIM}  → Let that finish, then re-run: ./W0lfSword nojailbreak${NC}"
+        return 1
+    fi
+
+    local to_install=""
+    command -v clang &>/dev/null    || { [ "$pkg_manager" != "brew" ] && to_install="$to_install clang"; }
+    command -v dpkg-deb &>/dev/null || to_install="$to_install dpkg"
+    command -v git &>/dev/null      || to_install="$to_install git"
+    command -v python3 &>/dev/null  || to_install="$to_install python3"
+    command -v curl &>/dev/null     || to_install="$to_install curl"
+    command -v unzip &>/dev/null    || to_install="$to_install unzip"
+    command -v zip &>/dev/null      || to_install="$to_install zip"
+    command -v idevice_id &>/dev/null || {
+        [ "$pkg_manager" = "apt" ]    && to_install="$to_install libimobiledevice-utils"
+        [ "$pkg_manager" = "brew" ]   && to_install="$to_install libimobiledevice"
+        [ "$pkg_manager" = "pacman" ] && to_install="$to_install libimobiledevice"
+    }
+    command -v ideviceinstaller &>/dev/null || {
+        [ "$pkg_manager" = "apt" ]    && to_install="$to_install ideviceinstaller"
+        [ "$pkg_manager" = "brew" ]   && to_install="$to_install ideviceinstaller"
+        [ "$pkg_manager" = "pacman" ] && to_install="$to_install ideviceinstaller"
+    }
+
+    if [ -n "$to_install" ]; then
+        echo -e "  ${C_AMB}Installing missing packages:${NC} ${C_RED}${to_install}${NC}"
+        start_pulse "installing packages" & PULSE_PID=$!
+        case "$pkg_manager" in
+            apt)    apt update -qq >/dev/null 2>&1; apt install -y $to_install >/dev/null 2>&1 || true;;
+            brew)   brew install $to_install >/dev/null 2>&1 || true;;
+            pacman) pacman -Sy --noconfirm $to_install >/dev/null 2>&1 || true;;
+        esac
+        stop_pulse
+        command -v ideviceinstaller &>/dev/null && ok "ideviceinstaller ready  -  USB app install active"
+    else
+        ok "All system packages present"
+    fi
+
+    # THEOS
+    if check_theos; then
+        ok "THEOS found at ${THEOS}"
+    else
+        echo -e "  ${C_AMB}Installing THEOS automatically...${NC}"
+        bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" >/dev/null 2>&1 || true
+        if [ "$IS_MACOS" -eq 1 ] && ! check_theos; then
+            $SUDO mkdir -p /opt/theos 2>/dev/null || true
+            $SUDO chown "$(id -u)" /opt/theos 2>/dev/null || true
+            git clone --recursive https://github.com/theos/theos.git /opt/theos >/dev/null 2>&1 || true
+        fi
+        if check_theos; then
+            export THEOS="${THEOS}"
+            ok "THEOS installed at ${THEOS}"
+        else
+            warn "THEOS auto-install failed  -  follow BUILD.md, then re-run nojailbreak"
+            return 1
+        fi
+    fi
+    echo ""
+
+    # ldid is REQUIRED here (not optional like adderall) - the MHA re-sign
+    # uses it. The repo's Procursus build at scripts/ldid is the fallback.
+    if command -v ldid &>/dev/null; then
+        ok "ldid found"
+    elif [ -x "$PROJECT_DIR/scripts/ldid" ]; then
+        ok "ldid found (repo build: scripts/ldid)"
+        export PATH="$PROJECT_DIR/scripts:$PATH"
+    else
+        err "ldid not found  -  install it (apt install ldid / brew install ldid)"
+        return 1
+    fi
+
+    # ── Phase 2: Device Discovery (USB ONLY) ──────────────────
+    section "Phase 2  -  Device Discovery (USB required)"
+    echo ""
+    local usb_uuid=""
+    if command -v idevice_id &>/dev/null; then
+        usb_uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
+        if [ -n "$usb_uuid" ]; then
+            if ! idevicepair validate >/dev/null 2>&1; then
+                echo -e "  ${C_AMB}Pairing with device  -  tap TRUST on the phone if it asks${NC}"
+                start_pulse "pairing" & PULSE_PID=$!
+                idevicepair pair 2>/dev/null || true
+                stop_pulse
+                sleep 1
+            fi
+            echo -e "  ${C_GRN}✓${NC} USB device detected: ${C_EYE}$usb_uuid${NC}"
+            DEV_MODEL=$(ideviceinfo -k ProductType 2>/dev/null || ideviceinfo -k HardwareModel 2>/dev/null || echo "unknown")
+            IOS_VER=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
+            DEV_NAME=$(ideviceinfo -k DeviceName 2>/dev/null || echo "iPhone")
+            vlog "nojailbreak: model=$DEV_MODEL ios=$IOS_VER name=$DEV_NAME"
+            [ -z "$IOS_VER" ] && echo -e "  ${C_AMB}⚠${NC} Couldn't read device info yet  -  tap TRUST on the phone, then re-run nojailbreak"
+        fi
+    fi
+
+    if [ -z "$usb_uuid" ]; then
+        echo -e "  ${C_RED}✗ No USB device found${NC}"
+        echo -e "  ${C_DIM}  Plug the phone in with a USB cable and tap TRUST on the phone${NC}"
+        return 1
+    fi
+    if [ -z "$IOS_VER" ]; then
+        echo -e "  ${C_RED}✗ Couldn't read device info - is the phone unlocked and trusted?${NC}"
+        return 1
+    fi
+
+    echo ""
+    echo -e "  ${C_EYE}${B}$DEV_NAME${NC}  -  ${C_GRN}iOS $IOS_VER${NC} • ${C_EYE}$DEV_MODEL${NC}"
+    log_script "nojailbreak device: $DEV_NAME ($DEV_MODEL) iOS $IOS_VER"
+
+    # ── Phase 3: iOS range gate (18.0 - 26.0.1) ───────────────
+    section "Phase 3  -  iOS Range Check"
+    echo ""
+    if [ "$(version_sort_first "$IOS_VER" "18.0")" != "18.0" ]; then
+        err "iOS $IOS_VER is below 18.0 - the MHA container-access trick needs iOS 18+"
+        echo -e "  ${C_DIM}  Supported for nojailbreak: iOS 18.0 - 26.0.1${NC}"
+        return 1
+    fi
+    if [ "$(version_sort_first "$IOS_VER" "26.1")" = "26.1" ]; then
+        err "iOS $IOS_VER is above 26.0.1 - DarkSword kernel exploit is patched in 26.1"
+        echo -e "  ${C_DIM}  Supported for nojailbreak: iOS 18.0 - 26.0.1${NC}"
+        return 1
+    fi
+    ok "iOS $IOS_VER in supported range (18.0 - 26.0.1)"
+
+    # SoC gate via the shared selector
+    local METHOD_CHK; METHOD_CHK=$(select_exploit "$DEV_MODEL")
+    if [ "$METHOD_CHK" = "mte" ]; then
+        err "MTE device (A19/M5): Memory Tagging Extension kills this exploit class"
+        return 1
+    fi
+    if [ "$METHOD_CHK" = "unknown" ]; then
+        err "Unsupported device: $DEV_MODEL  -  no exploit path for this SoC"
+        return 1
+    fi
+    ok "SoC supported: $(soc_family "$DEV_MODEL")"
+    echo ""
+
+    # ── Phase 4: USB Cable Check ──────────────────────────────
+    section "Phase 4  -  USB Cable Check"
+    echo ""
+    test_usb_cable "$usb_uuid" || {
+        err "USB is the only connection here  -  fix the cable/port, then re-run nojailbreak"
+        return 1
+    }
+    local ctype; ctype=$(ideviceinfo -k ConnectionType 2>/dev/null || echo "")
+    [ "$ctype" = "USB" ] && echo -e "  ${C_DIM}connection: USB (Lightning)${NC}"
+    if command -v idevicediagnostics &>/dev/null && idevicediagnostics diagnostics All >/dev/null 2>&1; then
+        echo -e "  ${C_GRN}✓${NC} USB data round-trip OK"
+    else
+        warn "USB diagnostics round-trip failed  -  install may be flaky"
+    fi
+    echo ""
+
+    # ── Phase 5: Offset Coverage ──────────────────────────────
+    section "Phase 5  -  Offset Coverage"
+    echo ""
+    local highest_th=""
+    while IFS= read -r th; do
+        [ -z "$th" ] && continue
+        if [ "$(version_sort_first "$th" "$IOS_VER")" = "$th" ]; then
+            highest_th="$th"
+        fi
+    done < <(grep -oE 'SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO\(@\"[0-9.]+\"\)' kexploit/offsets.m \
+             | sed 's/.*(@"\([0-9.]*\)").*/\1/' | sort -u -t. -k1,1n -k2,2n -k3,3n)
+    if [ -n "$highest_th" ]; then
+        ok "iOS $IOS_VER covered - offsets from iOS $highest_th onward"
+    else
+        warn "iOS $IOS_VER below the lowest offset threshold in offsets.m"
+    fi
+    echo ""
+
+    # ── Phase 6: Filza installed check ────────────────────────
+    section "Phase 6  -  Filza Status (over USB)"
+    echo ""
+    local installed=""
+    if command -v ideviceinstaller &>/dev/null; then
+        installed=$(ideviceinstaller -l 2>/dev/null | grep -iE "Filza|MobileHouseArrest" | head -3 || echo "")
+    fi
+    if [ -n "$installed" ]; then
+        echo -e "  ${C_GRN}✓${NC} Filza / MHA build found on device:"
+        echo "$installed" | sed 's/^/    /'
+        echo ""
+        if confirm "Filza is already installed. Launch it and verify kernel R/W?"; then
+            # Can't uiopen without SSH; just tell the user what to do.
+            echo -e "  ${C_FROST}Open Filza on the phone.${NC}"
+            echo -e "  ${C_DIM}If folders show real contents (not empty), kernel R/W is live.${NC}"
+            echo -e "  ${C_DIM}Check /tmp/FilzaTweak.log on a jailbroken device, or just browse /var/mobile.${NC}"
+            log_script "nojailbreak: Filza already installed, user verifying"
+            return 0
+        fi
+    else
+        echo -e "  ${C_AMB}ℹ Filza is NOT installed on the device.${NC}"
+        echo -e "  ${C_DIM}  Building a fresh MHA Filza with the exploit dylib injected...${NC}"
+    fi
+    echo ""
+
+    # ── Phase 7: Find the Filza.ipa source ────────────────────
+    section "Phase 7  -  Filza.ipa Source"
+    echo ""
+    if [ -z "$IPA_SRC" ]; then
+        for cand in "$PROJECT_DIR/Filza.ipa" "$HOME/Downloads/Filza.ipa" "$PROJECT_DIR/packages/Filza.ipa"; do
+            [ -f "$cand" ] && { IPA_SRC="$cand"; break; }
+        done
+    fi
+    if [ -z "$IPA_SRC" ] || [ ! -f "$IPA_SRC" ]; then
+        err "No Filza.ipa found"
+        echo -e "  ${C_DIM}  Put Filza.ipa in $PROJECT_DIR or pass it: --ipa /path/to/Filza.ipa${NC}"
+        echo -e "  ${C_DIM}  (Filza is a paid app - download it from the official site)${NC}"
+        return 1
+    fi
+    ok "Using: $IPA_SRC"
+
+    # ── Phase 8: Build + re-sign ──────────────────────────────
+    section "Phase 8  -  Build & Re-sign (on this computer)"
+    echo ""
+    stage "1/3" "Building tweak (MHA_IDENTITY=1, substrate-free)..."
+    check_theos || { err "THEOS not set"; hint "Install it with: sudo ./W0lfSword setup"; return 1; }
+    local build_log; build_log=$(make package MHA_IDENTITY=1 2>&1)
+    local ec=$?
+    $VERBOSE && echo "$build_log" | tail -5
+    if [ $ec -ne 0 ]; then
+        err "Build failed (exit=$ec)"
+        return 1
+    fi
+    local dylib; dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
+    [ -n "$dylib" ] || { err "Built dylib not found in .theos"; return 1; }
+    ok "Built tweak dylib ($(du -h "$dylib" | cut -f1))"
+
+    stage "2/3" "Re-signing as MobileHouseArrest + injecting dylib..."
+    local out_ipa="$PROJECT_DIR/packages/Filza-MHA.ipa"
+    bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$out_ipa" >/tmp/mha_resign.log 2>&1
+    if [ $? -ne 0 ] || [ ! -f "$out_ipa" ]; then
+        err "MHA re-sign failed"
+        $VERBOSE && tail -10 /tmp/mha_resign.log
+        return 1
+    fi
+    ok "Built $out_ipa ($(du -h "$out_ipa" | cut -f1))"
+
+    # ── Phase 9: Install over USB ─────────────────────────────
+    stage "3/3" "Installing over USB..."
+    if ! command -v ideviceinstaller &>/dev/null; then
+        err "ideviceinstaller missing  -  install it, then re-run nojailbreak"
+        return 1
+    fi
+    local inst_out
+    inst_out=$(ideviceinstaller -i "$out_ipa" 2>&1)
+    local irc=$?
+    if [ $irc -eq 0 ]; then
+        ok "Filza-MHA installed over USB"
+    else
+        echo -e "  ${C_AMB}⚠ ideviceinstaller install failed:${NC}"
+        echo "$inst_out" | tail -3 | sed 's/^/    /'
+        echo ""
+        echo -e "  ${C_AMB}The IPA is adhoc-signed (ldid)  -  stock iOS may reject it.${NC}"
+        echo -e "  ${C_DIM}  Option A: sign it with your Apple ID first, then re-run:${NC}"
+        echo -e "    ${C_FROST}./W0lfSword nojailbreak --ipa /path/signed.ipa${NC}"
+        echo -e "  ${C_DIM}  Option B: sideload $out_ipa with PlumeImpactor / AltStore / TrollStore,${NC}"
+        echo -e "    then re-run ${C_FROST}./W0lfSword nojailbreak${NC} to verify.${NC}"
+        log_script "nojailbreak: install failed (rc=$irc), handing off to external sideloader"
+        return 1
+    fi
+
+    # ── Phase 10: Verify + handoff ────────────────────────────
+    echo ""
+    section "Phase 10  -  Done"
+    echo ""
+    installed=$(ideviceinstaller -l 2>/dev/null | grep -iE "Filza|MobileHouseArrest" | head -3 || echo "")
+    if [ -n "$installed" ]; then
+        ok "Verified on device:"
+        echo "$installed" | sed 's/^/    /'
+    fi
+    echo ""
+    banner "$C_GRN" "INSTALLED - OPEN FILZA ON THE PHONE" 44
+    echo ""
+    echo -e "  ${C_FROST}1. Open Filza on the phone (first launch takes a few seconds).${NC}"
+    echo -e "  ${C_FROST}2. Browse to /var and /var/mobile.${NC}"
+    echo -e "  ${C_FROST}3. Real contents = kernel R/W is live.${NC}"
+    echo -e "  ${C_DIM}    (empty folders would mean the root-helper stubs misfired - tell me)${NC}"
+    echo -e "  ${C_DIM}Nothing persists across a reboot; the exploit re-runs on each launch.${NC}"
+    echo ""
+    log_script "nojailbreak SUCCESS: $DEV_MODEL iOS $IOS_VER (USB install)"
+    echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$DEV_MODEL\",\"ios\":\"$IOS_VER\",\"mode\":\"nojailbreak\",\"result\":\"installed\"}" >> "$DATA_DIR/history.json"
+    return 0
+}
+
+# ═══════════════════════════════════════════════════════════════
 #  SAFETY COMMANDS
 # ═══════════════════════════════════════════════════════════════
 
@@ -4436,6 +4792,27 @@ adderall  -  the everything command.
   It does NOT install Filza (you sideload that yourself), and it does
   NOT jailbreak the phone (that must already be done). Everything it
   does is undone by a reboot. Safe mode (--safe) skips the exploit.
+EOF
+            ;;
+        nojailbreak|nj)
+            cat <<'EOF'
+nojailbreak  -  USB install Filza with kernel R/W, no jailbreak.
+  1. Installs missing build tools AUTOMATICALLY (clang, dpkg, THEOS,
+     libimobiledevice, ideviceinstaller, ldid)  -  zero questions
+  2. Finds your phone over USB and pairs it (tap TRUST on the phone)
+  3. Tests the USB cable (10 rapid reads)
+  4. Gates on iOS 18.0 - 26.0.1 (DarkSword + MHA container trick range)
+  5. Checks if Filza is already installed (over USB, via ideviceinstaller)
+  6. Builds a SUBSTRATE-FREE tweak (MHA_IDENTITY=1, no CydiaSubstrate
+     dependency - dyld would reject /var/jb on a clean phone)
+  7. Re-signs Filza.ipa as com.apple.mobile.MobileHouseArrest (MHA) with
+     the dylib injected (scripts/re-sign_mha.sh)
+  8. Installs over USB with ideviceinstaller
+
+  No jailbreak, no SSH, no WiFi. The phone needs a Filza.ipa source
+  (paid app). If stock iOS rejects the adhoc signature, sign the IPA
+  with your Apple ID first (PlumeImpactor / AltStore) and pass it with
+  --ipa. Nothing persists across a reboot.
 EOF
             ;;
         deploy)
@@ -4868,6 +5245,7 @@ cmd_help() {
     echo ""
     section "Exploit Workflow"
     printf "  ${C_EYE}%-14s${NC} %s\n" "adderall (a)" "Auto-discover → build → deploy → verify${C_AMB} [root]${NC}"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "nojailbreak (nj)" "USB install Filza + kernel R/W, no jailbreak (iOS 18-26.0.1)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "quick"        "One-shot exploit chain"
     printf "  ${C_EYE}%-14s${NC} %s\n" "update"       "Git pull + rebuild + redeploy"
     printf "  ${C_EYE}%-14s${NC} %s\n" "setup/install" "Install build tools for your OS${C_AMB} [root]${NC}"
@@ -4957,6 +5335,7 @@ main() {
         doctor)    cmd_doctor "${args[@]}";;
         quick)     cmd_quick "${args[@]}";;
         adderall)  cmd_adderall "${args[@]}";;
+        nojailbreak|nj) cmd_nojailbreak "${args[@]}";;
         safe)      cmd_safe "${args[@]}";;
         crashlog)  cmd_crashlog "${args[@]}";;
         update)    cmd_update "${args[@]}";;
