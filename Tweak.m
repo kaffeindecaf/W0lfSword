@@ -162,7 +162,15 @@ static void wolfAddBackground(UIViewController *vc) {
     UILabel *label = [[UILabel alloc] initWithFrame:list.bounds];
     label.text = art;
     label.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightRegular];
-    label.textColor = [UIColor colorWithWhite:0.85 alpha:0.30];
+    // Adaptive: dark gray on light backgrounds (visible against white),
+    // white in dark mode — follows Filza's theme automatically via the
+    // dynamic color (UILabel re-renders on trait collection changes).
+    label.textColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+        if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
+            return [UIColor colorWithWhite:0.95 alpha:0.30];
+        }
+        return [UIColor colorWithWhite:0.22 alpha:0.35];
+    }];
     label.textAlignment = NSTextAlignmentCenter;
     label.numberOfLines = 0;
     label.lineBreakMode = NSLineBreakByCharWrapping;
