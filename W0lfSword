@@ -835,7 +835,7 @@ cmd_usbtest() {
         err "No device on USB"
         hint "Plug the phone in with its Lightning cable (SE/8/X/11 era  -  not USB-C)"
         hint "Straight into the computer, no hub. Charging-but-invisible = cable or port."
-        if lsusb 2>/dev/null | grep -qi "05ac"; then
+        if grep -qi "05ac" < <(lsusb 2>/dev/null); then
             hint "USB sees an Apple device but usbmuxd doesn't  -  restart: sudo systemctl restart usbmuxd"
         fi
         return 1
@@ -1162,7 +1162,7 @@ PERSIST_NOTE="Nothing is permanent. Reboot the phone and everything resets  -  t
 plumeimpactor_bin() {
     # Returns a runnable PlumeImpactor invocation, or empty. Checks, in
     # order: flatpak install, repo source build, AppImage in Downloads.
-    if flatpak list --app 2>/dev/null | grep -qi 'PlumeImpactor'; then
+    if grep -qi 'PlumeImpactor' < <(flatpak list --app 2>/dev/null); then
         echo "flatpak run dev.khcrysalis.PlumeImpactor"
         return 0
     fi
@@ -1480,7 +1480,7 @@ scan_devices() {
     # USB devices via libimobiledevice
     if command -v idevice_id &>/dev/null; then
         local uuids; uuids=$(idevice_id -l 2>/dev/null || echo "")
-        if [ -z "$uuids" ] && lsusb 2>/dev/null | grep -qi "05ac"; then
+        if [ -z "$uuids" ] && grep -qi "05ac" < <(lsusb 2>/dev/null); then
             warn "Apple device on USB but usbmuxd can't see it  -  restart: sudo systemctl restart usbmuxd"
         fi
         if [ -n "$uuids" ]; then
@@ -2001,7 +2001,7 @@ cmd_readiness() {
     fi
 
     # ── 4. Host-side: builds + release ──
-    local ipas; ipas=$(ls -1 packages/*.ipa 2>/dev/null | xargs -n1 basename 2>/dev/null | tr '\n' ' ')
+    local ipas; ipas=$(find packages -maxdepth 1 -name '*.ipa' -printf '%f ' 2>/dev/null)
     if [ -n "$ipas" ]; then
         info "local IPA builds: $ipas"
     else
