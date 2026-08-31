@@ -71,6 +71,12 @@ endif
 # Use:  make mha IPA=/path/Filza.ipa [OUT=Filza-MHA.ipa]
 ifeq ($(MHA_IDENTITY),1)
 FilzaApplySandboxExt_CFLAGS += -DMHA_IDENTITY
+# Classic bind opcodes, NOT chained fixups (LC_DYLD_CHAINED_FIXUPS).
+# Sideload re-signers (PlumeImpactor/AltStore) don't understand chained
+# fixups and corrupt the LINKEDIT; dyld then dies at launch with
+# "bad bind opcode 0xFF". -no_fixup_chains forces LC_DYLD_INFO_ONLY with
+# classic bind info that every signer handles.
+FilzaApplySandboxExt_LDFLAGS += -Wl,-no_fixup_chains
 endif
 
 MHA_DYLIB ?= $(shell ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
