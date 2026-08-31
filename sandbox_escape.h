@@ -10,4 +10,10 @@
 // Returns 0 on success, -1 on failure.
 int sandbox_escape(uint64_t self_proc);
 
+// L5.1 (hub app): read back the current proc's kernel-side posix creds
+// (uid/gid/groups[0]) after an escape — the same verification
+// set_root_credentials performs internally. Returns 0 on success.
+int sandbox_escape_read_posix_creds(uint64_t self_proc,
+                                    uint32_t *uid, uint32_t *gid, uint32_t *groups0);
+
 #endif

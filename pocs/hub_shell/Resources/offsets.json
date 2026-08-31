@@ -108,7 +108,7 @@
     "off_proc_p_fd": 208,
     "off_proc_p_flag": 1108,
     "off_proc_p_textvp": 1352,
-    "off_proc_p_name": 1401,
+    "off_proc_p_name": 1312,
     "off_proc_ro_pr_task": 8,
     "off_proc_ro_p_ucred": 32,
     "off_task_itk_space": 768,

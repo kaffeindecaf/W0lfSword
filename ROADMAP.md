@@ -1367,7 +1367,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `L3.1` 🔴 — Boot path in-app: on launch, resolve offsets for the running iOS version (port the offsets.m threshold logic — reuse `scripts/test_offsets.py`'s parse output at build time to generate a compact `offsets.json`).
   _Done 2026-08-29: scripts/gen_offsets_json.py (make offsets-json) parses kexploit/offsets.m threshold blocks (test_offsets.py logic), drops 0xdeaddead sentinels, emits cumulative effective tables → pocs/hub_shell/Resources/offsets.json (8 thresholds 17.0→26.0, 72 unique offsets; itk_space 0x310 at 26.0 verified). Bundled into the app by Theos (offsets.json in the .app wrapper, verified). In-app boot path in AppDelegate.m resolveOffsetsInfo: picks highest threshold <= running iOS, reports offset count + itk_space; unsupported iOS handled._
 - [ ] `L3.2` 🟠 — XPF integration: embed the XPF-verified offset table (kcwatch data; export via `kcwatch index --json` when available). If the running version has no table entry → show "unsupported iOS" and disable kernel paths.
-- [ ] `L3.3` 🟠 — Engine entry: `kexploit_opa334()` + `sandbox_escape()` + `patch_sandbox_ext()` callable from the app with the same error codes (utils/errors.h — TWEAK_ERR_*).
+- [x] `L3.3` 🟠 — Engine entry: `kexploit_opa334()` + `sandbox_escape()` + `patch_sandbox_ext()` callable from the app with the same error codes (utils/errors.h — TWEAK_ERR_*).
+  _Done 2026-08-31: hub_shell links libw0lfengine.a (Makefile LDFLAGS + CFLAGS include paths + IOSurface/z/sandbox); kexploit_opa334/kread64/sandbox_escape_read_posix_creds symbols verified in the app binary via llvm-nm. engine_stubs.m supplies no-op tweak_exploit_* UI callbacks (excluded from the engine by L2.2)._
 - [ ] `L3.4` 🟡 — Keep the crash-safety from the tweak: port the A3.1 crash counter + auto-disable flag + success flag into the engine (app-scoped paths: Library/Application Support/ instead of /var/mobile/Documents).
 - [ ] `L3.5` 🟡 — Log plumbing: route TweakLog (utils/tweak_log.h) to BOTH the app log store and (optionally) a file export. `tstr()` + mutex already in place.
 
@@ -1385,8 +1386,10 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 
 ## L5 — Privilege Escalation
 
-- [ ] `L5.1` 🔴 — Root credentials check: after a successful escape, read back uid/gid/groups[0] (the set_root_credentials read-back path) and show "root:wheel active" in the UI.
-- [ ] `L5.2` 🔴 — Kernel R/W status: `kread64` smoke test on a known-safe address (own proc chain) → show "kernel r/w: live" or "not acquired".
+- [x] `L5.1` 🔴 — Root credentials check: after a successful escape, read back uid/gid/groups[0] (the set_root_credentials read-back path) and show "root:wheel active" in the UI.
+  _Done 2026-08-31: sandbox_escape_read_posix_creds() exported from sandbox_escape.m (find_ucred_in_proc_ro helper extracted from the sandbox_escape() scan; read-only, gated on exploit_is_done()). Hub AppDelegate shows credentials row: "root:wheel active" / user creds / "not acquired (exploit not run)"._
+- [x] `L5.2` 🔴 — Kernel R/W status: `kread64` smoke test on a known-safe address (own proc chain) → show "kernel r/w: live" or "not acquired".
+  _Done 2026-08-31: kernelRWStatus() in AppDelegate.m — exploit_is_done() gate, proc_self() → kread64(p + off_proc_p_pid) == getpid() → "live". Verified linked: llvm-nm shows _kread64/_proc_self/_sandbox_escape_read_posix_creds in W0lfSwordHubShell. Both probes run on a background queue; results publish on main._
 - [ ] `L5.3` 🟠 — SSV bypass panel: run `patch_sandbox_ext()` + `check_sandbox_var_rw()`; show SSV-protected-write test result before/after.
 - [ ] `L5.4` 🟠 — Privilege escalation test suite: ucred patch verify, container access via MCM bridge (`container_access.m`) and bad_query traversal (`bad_query_escape.m`) — port the probes from safe mode.
 - [ ] `L5.5` 🟡 — Escalation report: one-screen summary (sandbox: escaped/failed, creds: root/user, kernel: r/w or none, SSV: on/off) with the raw log behind it.
