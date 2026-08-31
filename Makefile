@@ -11,6 +11,13 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = FilzaApplySandboxExt
 
+# Test-bed override: make W0LF_FORCE_JB=1 compiles the helper-mode bypass in
+# (Tweak.m force_exploit_jb gate) for devices where the flag file can't be
+# dropped (AFC writes denied on some 18.x installs).
+ifeq ($(W0LF_FORCE_JB),1)
+ADDITIONAL_CFLAGS += -DW0LF_FORCE_EXPLOIT_JB=1
+endif
+
 # --- Tweak + sandbox escape ---
 # FilzaPadlockBypass.xm uses Logos %hook → links CydiaSubstrate from
 # /var/jb. On the non-jailbroken MHA path that path doesn't exist, so dyld

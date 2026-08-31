@@ -1562,10 +1562,33 @@ __attribute__((constructor)) void TweakInit(void) {
             // jailbroken kernel anyway — lets us test the primitive when a
             // clean boot isn't available. The race machinery is unaffected by
             // the JB's userland patches; the win is just less likely.
+            // W0LF_FORCE_EXPLOIT_JB=1 (make W0LF_FORCE_JB=1) compiles the
+            // override in for test beds where AFC writes are denied (seen on
+            // 18.4.1: FILE_OPEN status 10 even via pymobiledevice3).
+#ifndef W0LF_FORCE_EXPLOIT_JB
+#define W0LF_FORCE_EXPLOIT_JB 0
+#endif
             NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
             NSString *flagPath = [docs stringByAppendingPathComponent:@"force_exploit_jb"];
-            if ([[NSFileManager defaultManager] fileExistsAtPath:flagPath]) {
-                TweakLog("[Tweak] FORCE EXPLOIT flag present — running kernel exploit on jailbroken kernel (debug override)");
+            BOOL forceFlag = W0LF_FORCE_EXPLOIT_JB;
+            if (!forceFlag && ![[NSFileManager defaultManager] fileExistsAtPath:flagPath]) {
+                // AFC writes into Documents are denied on some 18.x installs —
+                // also accept the flag in the container's Library/tmp roots.
+                NSArray *altFlags = @[
+                    [docs stringByAppendingPathComponent:@"../Library/force_exploit_jb"],
+                    [docs stringByAppendingPathComponent:@"../tmp/force_exploit_jb"],
+                ];
+                for (NSString *alt in altFlags) {
+                    if ([[NSFileManager defaultManager] fileExistsAtPath:alt]) {
+                        flagPath = alt;
+                        forceFlag = YES;
+                        break;
+                    }
+                }
+            }
+            if (forceFlag) {
+                TweakLog("[Tweak] FORCE EXPLOIT override active (%s) — running kernel exploit on jailbroken kernel (debug override)",
+                         W0LF_FORCE_EXPLOIT_JB ? "compile" : "flag file");
                 helperMode = NO;
             } else {
                 TweakLog("[Tweak] Jailbroken device, FilzaHelper present — helper mode (browser via helper, kernel exploit skipped)");
