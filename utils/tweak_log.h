@@ -73,15 +73,25 @@ static void TweakLog(const char *format, ...) {
         rename(TWEAK_LOG_PATH, oldPath);
     }
 
-    FILE *f = fopen(TWEAK_LOG_PATH, "a");
-    if (f) {
-        struct tm t;
-        time_t now = time(NULL);
-        localtime_r(&now, &t);
-        char ts[32];
-        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &t);
-        fprintf(f, "[%s] %s\n", ts, buf);
-        fclose(f);
+    // /tmp sink: on a non-jailbroken sideload the sandbox denies every write
+    // (44,995 denials observed in one 40s run — pure log-spam + CPU). Try a
+    // few times at launch, then disable permanently if it never works.
+    static int tmpDisabled = 0;
+    static int tmpTries = 0;
+    if (!tmpDisabled) {
+        FILE *f = fopen(TWEAK_LOG_PATH, "a");
+        if (f) {
+            struct tm t;
+            time_t now = time(NULL);
+            localtime_r(&now, &t);
+            char ts[32];
+            strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &t);
+            fprintf(f, "[%s] %s\n", ts, buf);
+            fclose(f);
+            tmpTries = 0;
+        } else if (++tmpTries > 5) {
+            tmpDisabled = 1;
+        }
     }
 
 #ifdef __OBJC__
