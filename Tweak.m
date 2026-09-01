@@ -215,6 +215,7 @@ static UIButton *g_hudArrow = nil;     // collapsed-state arrow button
 static UITextView *g_hudLogView = nil;
 static UILabel *g_hudStatusLabel = nil;
 static UIProgressView *g_hudProgressView = nil;
+static char g_hudDevInfo[64] = {0};    // "iPhone14,7 iOS 26.0.1" set in TweakInit
 // MRC build: an autoreleased NSString cache dangles after the pool drains
 // and crashes the timer callback (objc_msgSend on freed memory). Cache the
 // plain snapshot in a C buffer instead — no ObjC lifetime issues.
@@ -356,11 +357,19 @@ static void hudRefresh(void) {
             col = [UIColor colorWithRed:0.55 green:0.72 blue:1.0 alpha:1];
             progress = 1.0f;
             break;
+        case 5:
+            txt = @"W0lfSword: unsupported iOS — exploit disabled";
+            col = [UIColor colorWithWhite:0.6 alpha:1];
+            progress = 0;
+            break;
         default:
             txt = @"W0lfSword: idle";
             col = [UIColor colorWithWhite:0.8 alpha:1];
             progress = 0;
             break;
+    }
+    if (g_hudDevInfo[0]) {
+        txt = [NSString stringWithFormat:@"%@   [%s]", txt, g_hudDevInfo];
     }
     g_hudStatusLabel.text = txt;
     g_hudStatusLabel.textColor = col;
@@ -416,6 +425,28 @@ static void hudToggle(void) {
     hudSetExpanded(!g_hudExpanded);
 }
 
+// Export the last 32KB of the live log into the app's Documents so anyone
+// can share it (AirDrop / Files) — the log is otherwise unreachable on a
+// non-jailbroken device. Plain C write, no ObjC objects cached.
+static void hudExportLog(void) {
+    char snap[32768];
+    int n = tweak_log_ring_snapshot(snap, sizeof(snap));
+    if (n <= 0) {
+        TweakLog("[HUD] log export: ring empty");
+        return;
+    }
+    NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    NSString *path = [docs stringByAppendingPathComponent:@"w0lfsword-log.txt"];
+    FILE *f = fopen([path UTF8String], "w");
+    if (f) {
+        fwrite(snap, 1, (size_t)n, f);
+        fclose(f);
+        TweakLog("[HUD] log exported to Documents/w0lfsword-log.txt (%d bytes) — share it via the Files app or AirDrop", n);
+    } else {
+        TweakLog("[HUD] log export FAILED errno=%d (%s)", errno, strerror(errno));
+    }
+}
+
 static void hudInstall(void) {
     if (g_hudContainer || g_hudArrow) return;
     UIWindow *win = [UIApplication sharedApplication].keyWindow;
@@ -440,11 +471,29 @@ static void hudInstall(void) {
     container.backgroundColor = [UIColor colorWithWhite:0.07 alpha:0.92];
     container.layer.zPosition = 10000;
 
-    UILabel *status = [[UILabel alloc] initWithFrame:CGRectMake(8, 0, w - 76, 34)];
+    UILabel *status = [[UILabel alloc] initWithFrame:CGRectMake(8, 0, w - 156, 34)];
     status.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightSemibold];
     status.textColor = [UIColor colorWithWhite:0.8 alpha:1];
     status.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     status.userInteractionEnabled = NO;
+
+    // LOG: export the ring log to Documents (shareable on any device)
+    UIButton *logBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    logBtn.frame = CGRectMake(w - 140, 0, 36, 34);
+    logBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [logBtn setTitle:@"LOG" forState:UIControlStateNormal];
+    logBtn.titleLabel.font = [UIFont monospacedSystemFontOfSize:10.0 weight:UIFontWeightBold];
+    [logBtn addAction:[UIAction actionWithHandler:^(UIAction *a) { hudExportLog(); }]
+        forControlEvents:UIControlEventTouchUpInside];
+
+    // RERUN: fresh exploit attempt without relaunching the app
+    UIButton *rerunBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    rerunBtn.frame = CGRectMake(w - 104, 0, 36, 34);
+    rerunBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [rerunBtn setTitle:@"RERUN" forState:UIControlStateNormal];
+    rerunBtn.titleLabel.font = [UIFont monospacedSystemFontOfSize:10.0 weight:UIFontWeightBold];
+    [rerunBtn addAction:[UIAction actionWithHandler:^(UIAction *a) { tweak_rerun_exploit(); }]
+        forControlEvents:UIControlEventTouchUpInside];
 
     UIButton *close = [UIButton buttonWithType:UIButtonTypeSystem];
     close.frame = CGRectMake(w - 68, 0, 68, 34);
@@ -471,6 +520,8 @@ static void hudInstall(void) {
 
     [container addSubview:status];
     [container addSubview:close];
+    [container addSubview:logBtn];
+    [container addSubview:rerunBtn];
     [container addSubview:progress];
     [container addSubview:logView];
     [win addSubview:container];
@@ -1500,9 +1551,32 @@ __attribute__((constructor)) void TweakInit(void) {
         TweakLog("[Tweak] device=%s iOS=%s (jailbroken=%d)", un.machine,
                  tstr([[UIDevice currentDevice] systemVersion]),
                  access("/var/jb", F_OK) == 0 ? 1 : 0);
+        snprintf(g_hudDevInfo, sizeof(g_hudDevInfo), "%s iOS %s", un.machine,
+                 tstr([[UIDevice currentDevice] systemVersion]));
     }
     TweakLog("[Tweak] bundleID=%s", tstr([[NSBundle mainBundle] bundleIdentifier]));
     TweakLog("[Tweak] home=%s", tstr(NSHomeDirectory()));
+
+    // iOS range gate: the exploit chain covers 17.0 through 26.0.1 (DarkSword
+    // is patched on 26.1+). Outside that range the tweak stays quiet: no
+    // exploit scheduling, no probes, no kernel writes — the HUD shows status 5
+    // and the app keeps working as stock Filza (helper mode still applies on
+    // jailbroken devices so the browser keeps functioning).
+    NSOperatingSystemVersion sysv = [NSProcessInfo processInfo].operatingSystemVersion;
+    BOOL supportedIOS = (sysv.majorVersion >= 17 && sysv.majorVersion <= 26)
+                     && !(sysv.majorVersion == 26 && sysv.minorVersion >= 1);
+    if (!supportedIOS) {
+        TweakLog("[Tweak] iOS %ld.%ld.%ld outside supported range (17.0-26.0.1) — exploit disabled, app left stock",
+                 (long)sysv.majorVersion, (long)sysv.minorVersion, (long)sysv.patchVersion);
+        tweak_exploit_set_status(5);
+        BOOL jbHelper = (access("/var/jb/usr/libexec/filza/FilzaHelper", F_OK) == 0)
+                     || (access("/usr/libexec/filza/FilzaHelper", F_OK) == 0);
+        installHooks(!jbHelper);
+        if (jbHelper) {
+            TweakLog("[Tweak] jailbroken — FilzaHelper present, browser stays functional");
+        }
+        return;
+    }
     TweakLog("[Tweak] /var/jb exists=%d  /var/mobile accessible=%d  /var/writable=%d",
              access("/var/jb", F_OK) == 0 ? 1 : 0,
              access("/var/mobile", F_OK) == 0 ? 1 : 0,

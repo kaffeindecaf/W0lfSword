@@ -1,6 +1,6 @@
 #!/bin/bash
 # Single-source version  -  keep this in sync with control (A6.12).
-VERSION="1.3.0"
+VERSION="1.4.0"
 # Last used exploit method (set by cmd_adderall; saved/restored by profiles  -  K1.9)
 EXPLOIT_METHOD="auto"
 # ╔══════════════════════════════════════════════════════════════╗
@@ -2506,6 +2506,55 @@ experimental_body() {
         report|reports)
             experimental_report "${2:-list}"
             ;;
+        testipa)
+            section "Test IPA  -  main-device safety ladder"
+            echo -e "  ${C_DIM}Builds FilzaArctic-Test.ipa (W0LF_TEST_MODE=1). On device the tweak${NC}"
+            echo -e "  ${C_DIM}defaults to READONLY validation (zero kernel writes). Switch modes via${NC}"
+            echo -e "  ${C_DIM}Documents/w0lf_test_mode: 1=readonly, 2=writetest, 3=full chain.${NC}"
+            echo ""
+            local tipa="$PROJECT_DIR/packages/FilzaArctic-Test.ipa"
+            stage "1/1" "make mha W0LF_TEST_MODE=1 ..."
+            if ( cd "$PROJECT_DIR" && rm -rf .theos/obj/debug && export PATH="$PROJECT_DIR/scripts:$PATH" && \
+                 make mha IPA="$PROJECT_DIR/packages/Filza-MHA.ipa" OUT="$tipa" \
+                      BUNDLE_ID=com.kaffeindecaf.w0lfsword.filza W0LF_TEST_MODE=1 >/tmp/mha_test.log 2>&1 ); then
+                ok "built: $tipa ($(du -h "$tipa" | cut -f1))"
+            else
+                err "build failed  -  tail /tmp/mha_test.log"
+                return 1
+            fi
+            echo -e "  ${C_DIM}  sideload it, launch, watch the HUD. readonly runs first by default.${NC}"
+            echo -e "  ${C_DIM}  nojailbreak --test installs the same ladder over USB instead.${NC}"
+            ;;
+        offsets)
+            local ipsw="${2:-}"
+            if [ -z "$ipsw" ]; then
+                echo -e "  ${C_DIM}usage: experimental offsets <ipsw-url>${NC}"
+                echo -e "  ${C_DIM}fetch the kernelcache for a build and XPF-resolve the chain offsets.${NC}"
+                echo -e "  ${C_DIM}get the url from ipsw.me (device page -> iOS version -> full restore).${NC}"
+                return 1
+            fi
+            local kd="$HOME/Desktop/kernel-deltas"
+            if [ ! -x "$kd/tools/xpf-cli/xpf-cli" ]; then
+                echo -e "  ${C_AMB}kernel-deltas xpf-cli not found at $kd${NC}"
+                echo -e "  ${C_DIM}clone kaffeindecaf/kernel-deltas and run: ./W0lfSword experimental offsets <url>${NC}"
+                return 1
+            fi
+            local kdir; kdir=$(mktemp -d /tmp/ws_off.XXXXXX)
+            echo -e "  ${C_DIM}fetching kernelcache from the IPSW (ranged, ~20MB)...${NC}"
+            if ! python3 "$PROJECT_DIR/scripts/fetch_kernelcache.py" "$ipsw" "$kdir/kc.img4" >/dev/null 2>&1; then
+                err "fetch failed"
+                rm -rf "$kdir"
+                return 1
+            fi
+            echo -e "  ${C_DIM}running XPF...${NC}"
+            "$kd/tools/xpf-cli/xpf-cli" "$kdir/kc.img4" > "$kdir/dump.txt" 2>/dev/null
+            grep -aE "^#" "$kdir/dump.txt"
+            echo ""
+            grep -aE "kernelStruct\.(task\.itk_space|proc\.p_name|proc\.struct_size|thread\.t_tro|thread\.ctid|task\.task_exc_guard|thread\.machine_CpuDatap)" "$kdir/dump.txt" | grep -av "0x0000000000000000"
+            echo ""
+            echo -e "  ${C_DIM}compare against kexploit/offsets.m — p_name varies per 26.x minor.${NC}"
+            rm -rf "$kdir"
+            ;;
         chains)
             section "Novel chains  -  verbose"
             cat <<'EOF'
@@ -3695,9 +3744,10 @@ cmd_adderall() {
     local SAFE_MODE=false
     local USB_ONLY=false
     local FORCE_JB=false
+    local TEST_MODE=false
     local args_clean=()
     for a in "$@"; do
-        case "$a" in --safe|--safe-mode) SAFE_MODE=true;; --usb|--USB) USB_ONLY=true;; --force-jb) FORCE_JB=true;; *) args_clean+=("$a");; esac
+        case "$a" in --safe|--safe-mode) SAFE_MODE=true;; --usb|--USB) USB_ONLY=true;; --force-jb) FORCE_JB=true;; --test) TEST_MODE=true;; *) args_clean+=("$a");; esac
     done
     set -- "${args_clean[@]}"
     # --force-jb: compile the helper-mode bypass in (W0LF_FORCE_EXPLOIT_JB)
@@ -3709,6 +3759,9 @@ cmd_adderall() {
     else
         export W0LF_FORCE_JB=0
     fi
+    if $TEST_MODE; then
+        export W0LF_TEST_MODE=1
+    fi
 
     show_header
     echo ""
@@ -3719,6 +3772,9 @@ cmd_adderall() {
     fi
     if $FORCE_JB; then
         echo -e "  ${C_AMB}--force-jb: exploit will run on the jailbroken kernel (compile-time override)${NC}"
+    fi
+    if $TEST_MODE; then
+        echo -e "  ${C_AMB}--test: safety ladder compiled in (readonly default) — switch on-device via Documents/w0lf_test_mode${NC}"
     fi
     echo ""
     echo -e "  ${C_DIM}Fully automated: install missing tools, find your phone, pair it, check the${NC}"
@@ -4312,6 +4368,10 @@ EOF
 
         # Mark success
         ssh_safe "root@$IP" "touch /var/mobile/Documents/.filza_last_success" 2>/dev/null || true
+        # Reset the crash counter so a past failed run can't auto-disable the
+        # tweak later (the tweak disables itself after 3 launches without a
+        # success flag).
+        ssh_safe "root@$IP" "rm -f /var/mobile/Documents/.filza_crash_count" 2>/dev/null || true
 
         # History
         echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$IP\",\"ios\":\"$IOS_VER\",\"model\":\"$DEV_MODEL\",\"result\":\"success\"}" >> "$DATA_DIR/history.json"
@@ -4344,12 +4404,15 @@ EOF
 # ═══════════════════════════════════════════════════════════════
 
 cmd_nojailbreak() {
-    # Parse flags: --ipa <path> overrides the Filza.ipa source
+    # Parse flags: --ipa <path> overrides the Filza.ipa source, --test builds
+    # the main-device safety ladder (readonly default, see the HUD)
     local IPA_SRC=""
+    local TEST_MODE=false
     while [ $# -gt 0 ]; do
         case "$1" in
             --ipa) IPA_SRC="${2:-}"; shift 2;;
             --ipa=*) IPA_SRC="${1#--ipa=}"; shift;;
+            --test) TEST_MODE=true; shift;;
             *) shift;;
         esac
     done
@@ -4627,12 +4690,19 @@ EOF
     echo ""
     stage "1/3" "Building tweak (MHA_IDENTITY=1, substrate-free)..."
     check_theos || { err "THEOS not set"; hint "Install it with: sudo ./W0lfSword setup"; return 1; }
-    local build_log; build_log=$(make package MHA_IDENTITY=1 2>&1)
+    local build_extra=""
+    $TEST_MODE && build_extra="W0LF_TEST_MODE=1"
+    local build_log; build_log=$(make package MHA_IDENTITY=1 $build_extra 2>&1)
     local ec=$?
     $VERBOSE && echo "$build_log" | tail -5
     if [ $ec -ne 0 ]; then
         err "Build failed (exit=$ec)"
         return 1
+    fi
+    if $TEST_MODE; then
+        echo -e "  ${C_AMB}--test: safety ladder compiled in. Default mode on device: READONLY${NC}"
+        echo -e "  ${C_DIM}  (zero kernel writes - validates offsets only). Switch modes on the${NC}"
+        echo -e "  ${C_DIM}  device via Documents/w0lf_test_mode: 1=readonly 2=writetest 3=full${NC}"
     fi
     local dylib; dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
     [ -n "$dylib" ] || { err "Built dylib not found in .theos"; return 1; }
@@ -4662,6 +4732,9 @@ EOF
     local irc=$?
     if [ $irc -eq 0 ]; then
         ok "Filza-MHA installed over USB"
+        echo -e "  ${C_DIM}  Post-install check (device state):${NC}"
+        echo ""
+        cmd_readiness
     else
         echo -e "  ${C_AMB}⚠ ideviceinstaller install failed:${NC}"
         echo "$inst_out" | tail -3 | sed 's/^/    /'

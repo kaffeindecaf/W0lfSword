@@ -11,7 +11,7 @@ jailbroken iPhone with Filza into a full root file browser. The same
 repo holds host-side tools that pull kernel offsets from any iOS build
 on your computer, no device needed.
 
-Current release: v1.3.0
+Current release: v1.4.0
 
 ## Quick start
 
@@ -165,6 +165,10 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 |---------|------|---------|
 | `adderall` | discover -> build -> deploy -> verify (needs sudo). USB SSH preferred when the phone is plugged in | `sudo ./W0lfSword adderall` |
 | `adderall --usb` | force USB-only transport (fails if no USB device/sshd) | `sudo ./W0lfSword adderall --usb` |
+| `adderall --force-jb` | compile the helper-mode bypass in: run the kernel race on a jailbroken kernel (test beds where AFC writes are denied) | `sudo ./W0lfSword adderall --force-jb` |
+| `adderall --test` | compile the main-device safety ladder (readonly default) into the build | `sudo ./W0lfSword adderall --test` |
+| `readiness (r)` | full device report, no SSH needed: USB identity, tweak/app state from the on-device log (spray, PCB, corruption, escape), builds, release assets, offset coverage, kcwatch verdict | `./W0lfSword r` |
+| `nojailbreak (nj)` | USB-only Filza install with kernel R/W, no jailbreak. `--ipa <path>` for the Filza source, `--test` for the safety ladder | `sudo ./W0lfSword nj --test` |
 | `quick` | one-shot build -> deploy -> verify | `./W0lfSword quick` |
 | `build` | compile the tweak into a .deb | `./W0lfSword build` |
 | `deploy <ip>` | install the .deb on the phone | `./W0lfSword deploy 192.168.1.5` |
@@ -235,8 +239,12 @@ for logs.
 | Padlock bypass | Edit/delete always allowed, confirmation dialogs skipped |
 | Zip/unzip | Via Filza's own minizip, function pointers validated |
 | Userspace read escape | bad_query containermanagerd traversal (26.0–26.6.1) + MCM bridge. Container reads work even before the kernel exploit (K4.10/K4.11) |
+| On-screen HUD | collapsible status panel in Filza: exploit state + device/iOS line, live log, LOG button (exports the log to Documents/w0lfsword-log.txt for sharing), RERUN button (fresh exploit attempt without relaunching) |
+| Safety ladder | test builds default to READONLY (scan + validate offsets, zero kernel writes), then WRITETEST (corrupt + krw read probe + restore), then full. Switch modes on-device via Documents/w0lf_test_mode (1/2/3) |
+| Failure cleanup | on the final give-up the tweak removes everything it created (SSV diag files, /var/lib/filza, thousands of spray sockets) so a failed run leaves the device clean |
+| Unsupported-iOS gate | outside 17.0–26.0.1 the tweak goes quiet (status 5, no probes, no writes); jailbroken devices still get helper mode so the browser works |
 | Kill switch | `touch /var/mobile/Documents/.filza_tweak_disable` |
-| Logging | Everything in `/tmp/FilzaTweak.log` (4MB rotation) |
+| Logging | Everything in `/tmp/FilzaTweak.log` (4MB rotation) + Documents/FilzaTweak.log + os_log. Export via the HUD LOG button or pull over USB |
 
 ## Supported devices
 
@@ -260,6 +268,57 @@ Two files, nothing else:
 
 It injects into `com.tigisoftware.Filza` and `com.tigisoftware.Filza000`
 (Filza 4.0.2). Restart Filza and the exploit runs.
+
+## Releases
+
+One asset per release on the GitHub releases page. The sideload builds:
+
+- `FilzaArctic.ipa` - release build, display name "Filza Arctic", original
+  Filza icons. Full chain, cleans up after itself on failure.
+- `FilzaArctic-Test.ipa` - same thing with the safety ladder compiled in.
+  Defaults to READONLY on the device (zero kernel writes) until you write
+  a mode into Documents/w0lf_test_mode: 1 readonly, 2 writetest, 3 full.
+- `FilzaArctic-JBtest.ipa` - test-bed build with the jailbreak force
+  override (runs the kernel race on a jailbroken kernel).
+
+The `mha` / `nojailbreak` commands build these from your own Filza.ipa.
+The kernel offset tables are verified per build with XPF (see
+`experimental offsets <ipsw-url>`).
+
+<details>
+<summary><b>What's new in v1.4.0</b></summary>
+
+- Main-device safety ladder. Test builds default to READONLY: spray,
+  race, and OOB scan validate the filt/gencnt offsets and the 26.x
+  kernel base magic on-device, then stop before any corruption. Mode 2
+  (writetest) corrupts one socket, probes kernel reads, restores the
+  original pointer, and verifies. Mode 3 is the full chain. Switched
+  per-launch via Documents/w0lf_test_mode.
+- HUD got device/iOS line, LOG export button (writes the live log into
+  Documents/w0lfsword-log.txt so anyone can share it), and RERUN (fresh
+  exploit attempt without relaunching; attempt counter resets).
+- Failure cleanup: on the final give-up the tweak removes its leftovers
+  (SSV diag files, /var/lib/filza, spray sockets) and leaves the device
+  clean. A failed run leaves Filza in stock sandboxed mode, not broken.
+- Unsupported iOS goes quiet: outside 17.0-26.0.1 the tweak shows
+  status 5 and does nothing; jailbroken devices still get helper mode.
+- `readiness (r)` command: full device report with no SSH - USB
+  identity, app/tweak state pulled from the on-device log over AFC
+  (spray health, PCB found, corruption, escape), builds, release
+  assets, offset coverage, kcwatch verdict.
+- `adderall --force-jb` (jailbroken-kernel test beds), `adderall --test`,
+  `nojailbreak --test`, post-install readiness check after nojailbreak,
+  adderall resets the on-device crash counter after a win.
+- `experimental testipa` (build the safety-ladder IPA) and
+  `experimental offsets <ipsw-url>` (fetch a kernelcache + XPF-resolve
+  the chain offsets against offsets.m).
+- 26.0.1 (23A355) t8110 offsets XPF-verified; p_name fixed (0x57d ->
+  0x6A0, per-build in 26.x). Kernel base magic for 26.x byte-verified.
+- fsnode sanity guard fixed (it compared file-type bits against a
+  permission mask and never passed), failed best-effort kwrites no
+  longer spam FATAL, and the SSV diag errno only reports on failure.
+
+</details>
 
 <details>
 <summary><b>What's new in v1.3.0</b></summary>
