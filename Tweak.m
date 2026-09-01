@@ -1590,8 +1590,11 @@ __attribute__((constructor)) void TweakInit(void) {
     TweakLog("[Tweak] Documents=%s writable=%d", tstr(docDir), dfd >= 0 ? 1 : 0);
     if (dfd >= 0) close(dfd);
 #ifdef MHA_IDENTITY
-    TweakLog("[Tweak] MHA identity build (K4.12) — signed as com.apple.mobile.MobileHouseArrest; "
-             "containermanagerd trusts this identity, userspace container access expected pre-exploit");
+    // Substrate-free build (no FilzaPadlockBypass.xm, so no /var/jb CydiaSubstrate
+    // dependency). Bundle identity varies per install path: com.apple.mobile.
+    // MobileHouseArrest (TrollStore, pre-exploit container lease) or a plain
+    // sideloader-registrable ID. The exploit does not check the bundle ID.
+    TweakLog("[Tweak] substrate-free build (bundleID=%s)", tstr([[NSBundle mainBundle] bundleIdentifier]));
 #endif
 
     // Sandbox state is decided FIRST because it controls whether Filza's root

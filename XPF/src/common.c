@@ -1357,7 +1357,7 @@ static uint64_t xpf_find_thread_machine_CpuDatap(void)
 static uint64_t xpf_find_thread_machine_kstackptr(void)
 {
 	__block uint64_t stringAddr = 0;
-	PFStringMetric *stringMetric = pfmetric_string_init("Invalid kernel stack pointer (probable corruption).");
+	PFStringMetric *stringMetric = pfmetric_string_init("Invalid kernel stack pointer (probable overflow).");
 	pfmetric_run(gXPF.kernelStringSection, stringMetric, ^(uint64_t vmaddr, bool *stop) {
 		stringAddr = vmaddr;
 		*stop = true;
