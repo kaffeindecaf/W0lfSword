@@ -1206,9 +1206,9 @@ build_mha_ipa() {
     fi
     OUT_IPA="$PROJECT_DIR/packages/Filza-MHA.ipa"
     stage "re-sign" "Re-signing Filza with the tweak injected..."
-    bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$OUT_IPA" \
-        "com.kaffeindecaf.w0lfsword.filza" >/tmp/mha_resign_adderall.log 2>&1
-    if [ $? -ne 0 ] || [ ! -f "$OUT_IPA" ]; then
+    if ! bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$OUT_IPA" \
+         "com.kaffeindecaf.w0lfsword.filza" >/tmp/mha_resign_adderall.log 2>&1 \
+         || [ ! -f "$OUT_IPA" ]; then
         err "MHA re-sign failed - see /tmp/mha_resign_adderall.log"
         return 1
     fi
@@ -1727,11 +1727,12 @@ print(b,p)
     #    own queued AUD tickets - drop an exclusion when its item lands:
     #      SC2059 -> AUD.3 (colors-in-printf-format is the repo-wide convention)
     #      SC2012 -> AUD.2 (ls -t listings, low risk)
-    #      SC2086 -> AUD.1 (intentional word-splitting for multi-package installs)
     local sc_warns=0 sc_out=""
     if command -v shellcheck &>/dev/null; then
-        sc_out=$(shellcheck -s bash -e SC2059,SC2012,SC2086 W0lfSword 2>&1)
-        sc_warns=$(printf '%s\n' "$sc_out" | grep -c '^W0lfSword:' || true)
+        sc_out=$(shellcheck -s bash -e SC2059,SC2012 W0lfSword 2>&1)
+        # default output format prints "In W0lfSword line N:" headers;
+        # match that (an old `^W0lfSword:` pattern never matched and hid findings)
+        sc_warns=$(printf '%s\n' "$sc_out" | grep -c '^In W0lfSword line' || true)
     fi
     # --json (J6.2): machine-readable audit result
     if $JSON_MODE; then
@@ -3787,31 +3788,31 @@ EOF
         return 1
     fi
 
-    local to_install=""
-    command -v clang &>/dev/null    || { [ "$pkg_manager" != "brew" ] && to_install="$to_install clang"; }
-    command -v dpkg-deb &>/dev/null || to_install="$to_install dpkg"
-    command -v git &>/dev/null      || to_install="$to_install git"
-    command -v python3 &>/dev/null  || to_install="$to_install python3"
-    command -v make &>/dev/null     || { [ "$pkg_manager" = "apt" ] && to_install="$to_install make"; [ "$pkg_manager" = "pacman" ] && to_install="$to_install make"; }
-    command -v curl &>/dev/null     || to_install="$to_install curl"
-    command -v unzip &>/dev/null    || to_install="$to_install unzip"
-    command -v zip &>/dev/null      || to_install="$to_install zip"
-    command -v ssh &>/dev/null      || { [ "$pkg_manager" = "apt" ] && to_install="$to_install openssh-client"; }
-    command -v scp &>/dev/null      || { [ "$pkg_manager" = "apt" ] && to_install="$to_install openssh-client"; }
+    local -a to_install=()
+    command -v clang &>/dev/null    || { [ "$pkg_manager" != "brew" ] && to_install+=(clang); }
+    command -v dpkg-deb &>/dev/null || to_install+=(dpkg)
+    command -v git &>/dev/null      || to_install+=(git)
+    command -v python3 &>/dev/null  || to_install+=(python3)
+    command -v make &>/dev/null     || { [ "$pkg_manager" = "apt" ] && to_install+=(make); [ "$pkg_manager" = "pacman" ] && to_install+=(make); }
+    command -v curl &>/dev/null     || to_install+=(curl)
+    command -v unzip &>/dev/null    || to_install+=(unzip)
+    command -v zip &>/dev/null      || to_install+=(zip)
+    command -v ssh &>/dev/null      || { [ "$pkg_manager" = "apt" ] && to_install+=(openssh-client); }
+    command -v scp &>/dev/null      || { [ "$pkg_manager" = "apt" ] && to_install+=(openssh-client); }
     command -v idevice_id &>/dev/null || {
-        [ "$pkg_manager" = "apt" ]    && to_install="$to_install libimobiledevice-utils"
-        [ "$pkg_manager" = "brew" ]   && to_install="$to_install libimobiledevice"
-        [ "$pkg_manager" = "pacman" ] && to_install="$to_install libimobiledevice"
+        [ "$pkg_manager" = "apt" ]    && to_install+=(libimobiledevice-utils)
+        [ "$pkg_manager" = "brew" ]   && to_install+=(libimobiledevice)
+        [ "$pkg_manager" = "pacman" ] && to_install+=(libimobiledevice)
     }
 
-    if [ -n "$to_install" ]; then
-        echo -e "  ${C_AMB}Installing missing packages:${NC} ${C_RED}${to_install}${NC}"
+    if [ "${#to_install[@]}" -gt 0 ]; then
+        echo -e "  ${C_AMB}Installing missing packages:${NC} ${C_RED}${to_install[*]}${NC}"
         echo -e "  ${C_DIM}  (automatic  -  adderall never asks about dependencies)${NC}"
         start_pulse "installing packages" & PULSE_PID=$!
         case "$pkg_manager" in
-            apt)    apt update -qq >/dev/null 2>&1; apt install -y $to_install >/dev/null 2>&1 || true;;
-            brew)   brew install $to_install >/dev/null 2>&1 || true;;
-            pacman) pacman -Sy --noconfirm $to_install >/dev/null 2>&1 || true;;
+            apt)    apt update -qq >/dev/null 2>&1; apt install -y "${to_install[@]}" >/dev/null 2>&1 || true;;
+            brew)   brew install "${to_install[@]}" >/dev/null 2>&1 || true;;
+            pacman) pacman -Sy --noconfirm "${to_install[@]}" >/dev/null 2>&1 || true;;
         esac
         stop_pulse
         command -v idevice_id &>/dev/null && ok "libimobiledevice ready  -  USB device detection active"
@@ -4414,32 +4415,32 @@ EOF
         return 1
     fi
 
-    local to_install=""
-    command -v clang &>/dev/null    || { [ "$pkg_manager" != "brew" ] && to_install="$to_install clang"; }
-    command -v dpkg-deb &>/dev/null || to_install="$to_install dpkg"
-    command -v git &>/dev/null      || to_install="$to_install git"
-    command -v python3 &>/dev/null  || to_install="$to_install python3"
-    command -v curl &>/dev/null     || to_install="$to_install curl"
-    command -v unzip &>/dev/null    || to_install="$to_install unzip"
-    command -v zip &>/dev/null      || to_install="$to_install zip"
+    local -a to_install=()
+    command -v clang &>/dev/null    || { [ "$pkg_manager" != "brew" ] && to_install+=(clang); }
+    command -v dpkg-deb &>/dev/null || to_install+=(dpkg)
+    command -v git &>/dev/null      || to_install+=(git)
+    command -v python3 &>/dev/null  || to_install+=(python3)
+    command -v curl &>/dev/null     || to_install+=(curl)
+    command -v unzip &>/dev/null    || to_install+=(unzip)
+    command -v zip &>/dev/null      || to_install+=(zip)
     command -v idevice_id &>/dev/null || {
-        [ "$pkg_manager" = "apt" ]    && to_install="$to_install libimobiledevice-utils"
-        [ "$pkg_manager" = "brew" ]   && to_install="$to_install libimobiledevice"
-        [ "$pkg_manager" = "pacman" ] && to_install="$to_install libimobiledevice"
+        [ "$pkg_manager" = "apt" ]    && to_install+=(libimobiledevice-utils)
+        [ "$pkg_manager" = "brew" ]   && to_install+=(libimobiledevice)
+        [ "$pkg_manager" = "pacman" ] && to_install+=(libimobiledevice)
     }
     command -v ideviceinstaller &>/dev/null || {
-        [ "$pkg_manager" = "apt" ]    && to_install="$to_install ideviceinstaller"
-        [ "$pkg_manager" = "brew" ]   && to_install="$to_install ideviceinstaller"
-        [ "$pkg_manager" = "pacman" ] && to_install="$to_install ideviceinstaller"
+        [ "$pkg_manager" = "apt" ]    && to_install+=(ideviceinstaller)
+        [ "$pkg_manager" = "brew" ]   && to_install+=(ideviceinstaller)
+        [ "$pkg_manager" = "pacman" ] && to_install+=(ideviceinstaller)
     }
 
-    if [ -n "$to_install" ]; then
-        echo -e "  ${C_AMB}Installing missing packages:${NC} ${C_RED}${to_install}${NC}"
+    if [ "${#to_install[@]}" -gt 0 ]; then
+        echo -e "  ${C_AMB}Installing missing packages:${NC} ${C_RED}${to_install[*]}${NC}"
         start_pulse "installing packages" & PULSE_PID=$!
         case "$pkg_manager" in
-            apt)    apt update -qq >/dev/null 2>&1; apt install -y $to_install >/dev/null 2>&1 || true;;
-            brew)   brew install $to_install >/dev/null 2>&1 || true;;
-            pacman) pacman -Sy --noconfirm $to_install >/dev/null 2>&1 || true;;
+            apt)    apt update -qq >/dev/null 2>&1; apt install -y "${to_install[@]}" >/dev/null 2>&1 || true;;
+            brew)   brew install "${to_install[@]}" >/dev/null 2>&1 || true;;
+            pacman) pacman -Sy --noconfirm "${to_install[@]}" >/dev/null 2>&1 || true;;
         esac
         stop_pulse
         command -v ideviceinstaller &>/dev/null && ok "ideviceinstaller ready  -  USB app install active"
@@ -4588,7 +4589,8 @@ EOF
     fi
     if [ -n "$installed" ]; then
         echo -e "  ${C_GRN}✓${NC} Filza / MHA build found on device:"
-        echo "$installed" | sed 's/^/    /'
+        installed=${installed//$'\n'/$'\n    '}
+        echo "    $installed"
         echo ""
         if confirm "Filza is already installed. Launch it and verify kernel R/W?"; then
             # Can't uiopen without SSH; just tell the user what to do.
@@ -4642,8 +4644,7 @@ EOF
     # API error 9400), so the Apple-ID sideload path uses a registerable
     # bundle id. The kernel R/W works from any bundle id; the MHA identity
     # (com.apple.mobile.MobileHouseArrest) is only for the TrollStore path.
-    bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$out_ipa" "com.kaffeindecaf.w0lfsword.filza" >/tmp/mha_resign.log 2>&1
-    if [ $? -ne 0 ] || [ ! -f "$out_ipa" ]; then
+    if ! bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$out_ipa" "com.kaffeindecaf.w0lfsword.filza" >/tmp/mha_resign.log 2>&1 || [ ! -f "$out_ipa" ]; then
         err "MHA re-sign failed"
         $VERBOSE && tail -10 /tmp/mha_resign.log
         return 1
@@ -4681,7 +4682,8 @@ EOF
     installed=$(ideviceinstaller -l 2>/dev/null | grep -iE "Filza|MobileHouseArrest" | head -3 || echo "")
     if [ -n "$installed" ]; then
         ok "Verified on device:"
-        echo "$installed" | sed 's/^/    /'
+        installed=${installed//$'\n'/$'\n    '}
+        echo "    $installed"
     fi
     echo ""
     banner "$C_GRN" "INSTALLED - OPEN FILZA ON THE PHONE" 44
@@ -4880,28 +4882,28 @@ EOF
         echo ""
     fi
 
-    local to_install=""
-    command -v clang &>/dev/null || { [ "$IS_MACOS" -eq 0 ] && to_install="$to_install clang"; }
-    command -v dpkg-deb &>/dev/null || to_install="$to_install dpkg"
-    command -v git &>/dev/null || to_install="$to_install git"
-    command -v python3 &>/dev/null || to_install="$to_install python3"
+    local -a to_install=()
+    command -v clang &>/dev/null || { [ "$IS_MACOS" -eq 0 ] && to_install+=(clang); }
+    command -v dpkg-deb &>/dev/null || to_install+=(dpkg)
+    command -v git &>/dev/null || to_install+=(git)
+    command -v python3 &>/dev/null || to_install+=(python3)
 
     # idevice tools + ssh: platform-specific package names
     if [ "$pkg_manager" = "apt" ]; then
-        command -v ssh &>/dev/null || to_install="$to_install openssh-client"
-        command -v idevice_id &>/dev/null || to_install="$to_install libimobiledevice-utils"
+        command -v ssh &>/dev/null || to_install+=(openssh-client)
+        command -v idevice_id &>/dev/null || to_install+=(libimobiledevice-utils)
     elif [ "$pkg_manager" = "brew" ]; then
-        command -v idevice_id &>/dev/null || to_install="$to_install libimobiledevice"
+        command -v idevice_id &>/dev/null || to_install+=(libimobiledevice)
     fi
     
-    if [ -n "$to_install" ]; then
-        echo -e "  ${C_AMB}Missing:${C_RED}${to_install}${NC}"
+    if [ "${#to_install[@]}" -gt 0 ]; then
+        echo -e "  ${C_AMB}Missing:${C_RED}${to_install[*]}${NC}"
         echo ""
         if confirm "Install now?"; then
             case "$pkg_manager" in
-                apt)    apt update -qq && apt install -y $to_install;;
-                brew)   brew install $to_install;;
-                pacman) pacman -Sy --noconfirm $to_install;;
+                apt)    apt update -qq && apt install -y "${to_install[@]}";;
+                brew)   brew install "${to_install[@]}";;
+                pacman) pacman -Sy --noconfirm "${to_install[@]}";;
             esac
             ok "Packages installed"
         fi
