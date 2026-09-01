@@ -285,6 +285,14 @@ The `mha` / `nojailbreak` commands build these from your own Filza.ipa.
 The kernel offset tables are verified per build with XPF (see
 `experimental offsets <ipsw-url>`).
 
+Bundle IDs: the GitHub release asset keeps the MobileHouseArrest identity
+for TrollStore installs. For Apple-ID sideloading (PlumeImpactor /
+AltStore) build with `BUNDLE_ID=com.kaffeindecaf.w0lfsword.filza` (or run
+`./W0lfSword nojailbreak`, which passes it automatically) — Apple's
+developer portal rejects every com.apple.* identifier with API error
+9400, including the sharing extension, so the MHA identity can never be
+registered through a sideloader.
+
 <details>
 <summary><b>What's new in v1.4.0</b></summary>
 
