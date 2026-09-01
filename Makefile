@@ -95,6 +95,11 @@ FilzaApplySandboxExt_LDFLAGS += -Wl,-no_fixup_chains
 endif
 
 MHA_DYLIB = .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib
+# Forward the safety-ladder / force-JB flags into the sub-makes: they arrive
+# on the command line or in the environment of the OUTER make only, and
+# $(MAKE) drops them unless re-passed explicitly. Without this, `make mha
+# W0LF_TEST_MODE=1` silently shipped a release dylib (2026-09-01: Test,
+# release and JBtest IPAs contained byte-identical dylibs).
 mha:
 	# Force a fresh dylib: Theos gates the build phase on .stamp files in
 	# the obj dirs, so stale stamps can make `make package` skip compiling
@@ -103,8 +108,8 @@ mha:
 	# Nuke the whole obj tree, build the ALL phase explicitly (package only
 	# reaches it via stage:: all), then package.
 	rm -rf .theos/obj/debug
-	$(MAKE) all MHA_IDENTITY=1
-	$(MAKE) package MHA_IDENTITY=1
+	$(MAKE) all MHA_IDENTITY=1 W0LF_TEST_MODE=$(W0LF_TEST_MODE) W0LF_FORCE_JB=$(W0LF_FORCE_JB)
+	$(MAKE) package MHA_IDENTITY=1 W0LF_TEST_MODE=$(W0LF_TEST_MODE) W0LF_FORCE_JB=$(W0LF_FORCE_JB)
 	@test -n "$(IPA)" || { echo "  ✗ usage: make mha IPA=/path/Filza.ipa [OUT=Filza-MHA.ipa]"; exit 1; }
 	@test -f "$(MHA_DYLIB)" || { echo "  ✗ built dylib not found: $(MHA_DYLIB)"; exit 1; }
 	bash scripts/re-sign_mha.sh "$(IPA)" "$(MHA_DYLIB)" "$(OUT)"

@@ -358,7 +358,7 @@ static void hudRefresh(void) {
             progress = 1.0f;
             break;
         case 5:
-            txt = @"W0lfSword: unsupported iOS — exploit disabled";
+            txt = @"W0lfSword: unsupported iOS — exploit disabled (race rejected on this device)";
             col = [UIColor colorWithWhite:0.6 alpha:1];
             progress = 0;
             break;
