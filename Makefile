@@ -18,6 +18,14 @@ ifeq ($(W0LF_FORCE_JB),1)
 ADDITIONAL_CFLAGS += -DW0LF_FORCE_EXPLOIT_JB=1
 endif
 
+# Main-device safety ladder: make W0LF_TEST_MODE=1 builds the test IPA whose
+# DEFAULT mode is READONLY (offsets validation, zero kernel writes). The mode
+# can be switched at runtime via the app's Documents/w0lf_test_mode file
+# (1=readonly, 2=writetest, 3=full).
+ifeq ($(W0LF_TEST_MODE),1)
+ADDITIONAL_CFLAGS += -DW0LF_TEST_MODE=1
+endif
+
 # --- Tweak + sandbox escape ---
 # FilzaPadlockBypass.xm uses Logos %hook → links CydiaSubstrate from
 # /var/jb. On the non-jailbroken MHA path that path doesn't exist, so dyld
