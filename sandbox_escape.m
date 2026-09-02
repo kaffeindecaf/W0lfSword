@@ -73,6 +73,7 @@ _Static_assert(sizeof("com.apple.app-sandbox.read-write") - 1 == KRW_LEN,
 // Kernel address range — used to validate pointers before dereference.
 // These are loaded at runtime from offsets_init().
 extern uint64_t VM_MIN_KERNEL_ADDRESS;
+extern uint64_t pac_mask;
 extern uint64_t VM_MAX_KERNEL_ADDRESS;
 
 static inline bool ptr_in_kernel(uint64_t p) {
@@ -112,8 +113,8 @@ static uint64_t __attribute((naked)) __xpaci_sbx(uint64_t a) {
 #endif
 
 #define S(x) ({ uint64_t _v = __xpaci_sbx(x); \
-    ((_v >> 32) > 0xFFFF ? (_v | 0xFFFFFF8000000000ULL) : _v); })
-#define K(x) ((x) > 0xFFFFFF8000000000ULL)
+    ((_v >> 32) > 0xFFFF ? (_v | pac_mask) : _v); })
+#define K(x) ((x) > VM_MIN_KERNEL_ADDRESS)
 
 #pragma mark - Extension patching
 
