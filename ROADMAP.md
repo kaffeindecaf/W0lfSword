@@ -188,6 +188,37 @@
 - [x] `SBT.5` — docs: README row, DEBUG_TRACKING [SBT] layer, RESEARCH.md
   lara entry (Section G, when lara analysis lands).
 
+## 0.10 — Staged auto-mode exploit (2026-09-02, main-device safety)
+
+> Filza-Arctic.ipa is the iPhone 14 daily-driver build. Prior behavior: the
+> release IPA ran the full chain immediately on every launch. Now the release
+> default is STAGED (mode 0): the exploit only reaches the destructive end
+> (sandbox escape / cred patch / SSV) after two gates pass, and a failed gate
+> is a FINAL verdict with the device left clean — no retry storm.
+
+- [x] `SG.1` — mode semantics: release default 0 = staged auto (test IPA
+  default stays 1 = readonly). Runtime override via Documents/w0lf_test_mode:
+  1 = readonly-only stop, 2 = writetest-only stop, 3 = full immediate (old
+  behavior). CLI help texts updated.
+- [x] `SG.2` — stage 0 (cheap readonly manifest): offsets_init fail in staged
+  mode returns -6 (nothing touched, no retries) instead of the generic -1
+  retry path.
+- [x] `SG.3` — stage 1 (deep readonly check): the existing mid-scan PCB
+  layout validation (filt/gencnt verified with zero kernel writes) becomes a
+  PASS log in staged mode and falls through to the single restorable socket
+  corruption (mode 1 still stops there).
+- [x] `SG.4` — stage 2 (light write probe): post-corruption krw chain +
+  bounded kernel-magic walk; on PASS logs and continues the full chain; on
+  FAIL restores the socket (restore_corrupted_socket, writetest order:
+  neighbor qword then filt pointer) and returns -5.
+- [x] `SG.5` — runExploit handles -5/-6 as FINAL verdicts → HUD status 6
+  ("compatibility check failed — device left untouched/restored"), no
+  retries; -4 (race rejected) unchanged at status 5.
+- [x] `SG.6` — Filza-Arctic.ipa rebuilt (all [STAGED] markers verified in the
+  shipped dylib), audit PASSED. On-device verification still required: one
+  launch on the 26.0.1 daily driver should log stage 1/2 pass → stage 2/2
+  pass → escape.
+
 ---
 
 ## LEGEND

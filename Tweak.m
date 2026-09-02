@@ -364,6 +364,11 @@ static void hudRefresh(void) {
             col = [UIColor colorWithWhite:0.6 alpha:1];
             progress = 0;
             break;
+        case 6:
+            txt = @"W0lfSword: compatibility check failed — device left untouched/restored (see log)";
+            col = [UIColor colorWithRed:0.95 green:0.6 blue:0.2 alpha:1];
+            progress = 0;
+            break;
         default:
             txt = @"W0lfSword: idle";
             col = [UIColor colorWithWhite:0.8 alpha:1];

@@ -242,9 +242,9 @@ for logs.
 | Zip/unzip | Via Filza's own minizip, function pointers validated |
 | Userspace read escape | bad_query containermanagerd traversal (26.0–26.6.1) + MCM bridge. Container reads work even before the kernel exploit (K4.10/K4.11) |
 | On-screen HUD | collapsible status panel in Filza: exploit state + device/iOS line, live log, LOG button (exports the log to Documents/w0lfsword-log.txt for sharing), RERUN button (fresh exploit attempt without relaunching) |
-| Safety ladder | test builds default to READONLY (scan + validate offsets, zero kernel writes), then WRITETEST (corrupt + krw read probe + restore), then full. Switch modes on-device via Documents/w0lf_test_mode (1/2/3) |
+| Safety ladder | release builds default to STAGED auto: readonly compatibility check → light krw write probe → full chain only if both pass; a failed stage is a final verdict with the device left clean (status 6, no retries). Test builds default to READONLY (zero kernel writes). Switch modes on-device via Documents/w0lf_test_mode: (absent)=staged, 1=readonly, 2=writetest, 3=full immediate |
 | Failure cleanup | on the final give-up the tweak removes everything it created (SSV diag files, /var/lib/filza, thousands of spray sockets) so a failed run leaves the device clean |
-| Unsupported-iOS gate | outside 17.0–26.0.1 the tweak goes quiet (status 5, no probes, no writes); jailbroken devices still get helper mode so the browser works |
+| Unsupported-iOS gate | outside 17.0–26.0.1 the tweak goes quiet (status 5, no probes, no writes); a staged incompatibility (bad offsets / wrong device) stops at status 6; jailbroken devices still get helper mode so the browser works |
 | Kill switch | `touch /var/mobile/Documents/.filza_tweak_disable` |
 | Logging | Everything in `/tmp/FilzaTweak.log` (4MB rotation) + Documents/FilzaTweak.log + os_log. Export via the HUD LOG button or pull over USB |
 
