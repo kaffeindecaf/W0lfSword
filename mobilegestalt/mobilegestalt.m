@@ -75,6 +75,16 @@ static const mg_catalog_entry mg_catalog[] = {
     { "product-type",      "h9jDsbgj7xIVeIQ8S3/X3Q", 's', "ProductType (e.g. iPhone15,3 - device spoof)" },
     { "device-class",      "+3Uf0Pm5F8Xy7Onyvko0vA", 's', "DeviceClass (iPhone/iPad)" },
     { "thinning-product",  "0+nc/Udy4WNG8S+Q7a/s1A", 's', "ThinningProductType" },
+    // lara cross-check additions (2026-09-02, GestaltView.swift catalog)
+    { "liquid-glass-lpm",  "SAGvsp6O6kAQ4fEfDJpC4Q", 'i', "Liquid Glass low-power-mode UI" },
+    { "region-info",       "zHeENZu+wbg7PUprwNwBWg", 's', "RegionInfo (e.g. LL/A)" },
+    { "has-internal-bundle", "Oji6HRoPi7rH7HPdWVakuw", 'i', "HasInternalSettingsBundle" },
+    { "stage-manager",     "qeaj75wk3HF4DwQ8qbIi7g", 'i', "DeviceSupportsEnhancedMultitasking (Stage Manager)" },
+    { "medusa-floating",   "mG0AnH/Vy1veoqoLRAIgTA", 'i', "MedusaFloatingLiveAppCapability (iPadOS)" },
+    { "medusa-overlay",    "UCG5MkVahJxG1YULbbd5Bg", 'i', "MedusaOverlayAppCapability (iPadOS)" },
+    { "medusa-pinned",     "ZYqko/XM5zD3XBfN5RmaXA", 'i', "MedusaPinnedAppCapability (iPadOS)" },
+    { "medusa-pip",        "nVh/gwNpy7Jv1NOk00CMrw", 'i', "MedusaPIPCapability (iPadOS)" },
+    { "ipad-uikit",        "uKc7FPnEO++lVhHWHFlGbQ", 'i', "iPad UI idiom (TrollPad family)" },
     // artwork-subtype is special: nested under the ArtworkTraits dict
     { "artwork-subtype",   "oPeik/9e8lQWMszEjbPzng", 'i', "ArtworkTraits.ArtworkDeviceSubType (nested)" },
     { NULL, NULL, 0, NULL }
