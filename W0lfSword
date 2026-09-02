@@ -751,13 +751,21 @@ exploit_compat_check() {
 }
 
 soc_family() {
+    # Chip label for a device model. Canonical map lives in select_exploit()
+    # above (AUD.4): iPhone16=A17, iPhone17=A18, iPhone18=A19, iPad17=M5,
+    # iPad8/11 = A12-family, iPad13-16 = M1-M4. Output feeds the tweak-install
+    # verdict's family_set (line ~3085) and readiness/nojailbreak CPU labels -
+    # keep every label a key in that dict.
     case "$1" in
-        iPhone8,*|iPhone9,*|iPhone10,*) echo "A9-A11";;
-        iPhone1[1-6],*)  echo "A12-A16";;
-        iPhone17,*)      echo "A17";;
-        iPhone18,*)      echo "A18";;
-        iPad1[1-9],*)    echo "M1-M4";;
-        *)               echo "unknown";;
+        iPhone8,*|iPhone9,*|iPhone10,*)  echo "A9-A11";;   # A9-A11 (puaf path)
+        iPhone1[1-5],*)                  echo "A12-A16";;  # A12-A16 (pe_v1)
+        iPhone16,*)                      echo "A17";;      # A17 (pe_v1 path)
+        iPhone17,*)                      echo "A18";;      # A18 (pe_v2 path)
+        iPhone18,*)                      echo "A19";;      # A19 - MTE, refused
+        iPad8,*|iPad11,*)                echo "A12-A16";;  # A12/A12X/A12Z iPads (pe_v1)
+        iPad1[3-6],*)                    echo "M1-M4";;    # M1-M4 iPads (pe_v1)
+        iPad17,*)                        echo "M5";;       # M5 - MTE, refused
+        *)                               echo "unknown";;
     esac
 }
 
@@ -2514,8 +2522,8 @@ experimental_body() {
             echo ""
             local tipa="$PROJECT_DIR/packages/FilzaArctic-Test.ipa"
             stage "1/1" "make mha W0LF_TEST_MODE=1 ..."
-            if ( cd "$PROJECT_DIR" && rm -rf .theos/obj/debug && export PATH="$PROJECT_DIR/scripts:$PATH" && \
-                 make mha IPA="$PROJECT_DIR/packages/Filza-MHA.ipa" OUT="$tipa" \
+            if ( cd "$PROJECT_DIR" && rm -rf .theos/obj/debug && \
+                 PATH="$PROJECT_DIR/scripts:$PATH" make mha IPA="$PROJECT_DIR/packages/Filza-MHA.ipa" OUT="$tipa" \
                       BUNDLE_ID=com.kaffeindecaf.w0lfsword.filza W0LF_TEST_MODE=1 >/tmp/mha_test.log 2>&1 ); then
                 ok "built: $tipa ($(du -h "$tipa" | cut -f1))"
             else
@@ -3085,7 +3093,9 @@ family_set = {
     "A12-A16": {"A12","A13","A14","A15","A16"},
     "A17":     {"A17"},
     "A18":     {"A18"},
+    "A19":     {"A19"},
     "M1-M4":   {"M1","M2","M3","M4"},
+    "M5":      {"M5"},
     "A9-A11":  {"A9","A10","A11"},
 }.get(fam, set())
 want = set(socs.split(',')) if socs else set()
