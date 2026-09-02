@@ -158,6 +158,36 @@
   commands row, DEBUG_TRACKING [MG] layer, referenceforAI/RESEARCH.md
   (6 new repos + verdict).
 
+## 0.9 — SpringBoard live tweaks round (2026-09-02, TaskRop RemoteCall driver)
+
+> lara (referenceforAI/Projects/lara, AGPL — studied, not copied) lists
+> 5 App Dock + live SB tweaks on iOS 17-18.7.1 + 26.0-26.0.1 via
+> RemoteCall/TaskRop into the running SpringBoard. The 5-icon dock was
+> previously rated not possible on 26.0.1 from our side: the dock column
+> count is a live SpringBoard object property (gridSize / layout
+> configuration portrait columns), not a gestalt/plist value. The W0lfSword
+> tree already shipped the machinery (kexploit/RemoteCall.m, ported from
+> darksword-kexploit-fun, dormant since the 2026-08 port session) — the
+> missing piece was a driver. On-device verification still required
+> (RemoteCall is finicky; no device attached this session).
+
+- [x] `SBT.1` — kexploit/RemoteCall.h/.m: export `remote_call_scratch()`
+  (the mmap'd target-process scratch page) so callers can stage remote
+  strings. Additive, no behavior change.
+- [x] `SBT.2` — sbtweak/sbtweak.m (new): remote ObjC layer on the flat
+  RemoteCall API (sel_registerName/objc_getClass/objc_msgSend via
+  do_remote_call_stable) + dock column setter (SBIconController ->
+  iconManager -> dockListView -> model gridSize + layoutConfiguration
+  portrait columns, live re-layout). Fresh implementation over Apple API
+  facts — no lara code copied (AGPL). sb-cmd-*.json / sb-result-*.json
+  Documents channel, bg queue, status/dock/reset ops.
+- [x] `SBT.3` — CLI `sbtweak` (menu sbt): status | dock <1-12> | reset.
+  Reuses the mobilegestalt AFC transport helpers.
+- [x] `SBT.4` — Filza-Arctic.ipa rebuilt (module verified in shipped
+  dylib); audit PASSED, shellcheck clean.
+- [x] `SBT.5` — docs: README row, DEBUG_TRACKING [SBT] layer, RESEARCH.md
+  lara entry (Section G, when lara analysis lands).
+
 ---
 
 ## LEGEND

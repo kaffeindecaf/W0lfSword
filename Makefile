@@ -45,6 +45,11 @@ FilzaApplySandboxExt_FILES += kexploit/kexploit_opa334.m kexploit/krw.m kexploit
 # Substrate-free plain ObjC (in both MHA and jailbroken builds).
 FilzaApplySandboxExt_FILES += mobilegestalt/mobilegestalt.m
 
+# --- SpringBoard live tweaks (TaskRop RemoteCall driver) ---
+# Substrate-free plain ObjC; drives the dormant kexploit/RemoteCall.m into
+# the running SpringBoard (dock columns / 5-icon dock etc).
+FilzaApplySandboxExt_FILES += sbtweak/sbtweak.m
+
 # --- SSV Bypass ---
 FilzaApplySandboxExt_FILES += SSV/SSVUtils.m
 

@@ -3059,6 +3059,94 @@ PY
     echo ""
 }
 
+# ═══════════════════════════════════════════════════════════════
+#  SBTWEAK  -  SpringBoard live tweaks via TaskRop RemoteCall
+# ═══════════════════════════════════════════════════════════════
+# Drives the in-tweak sbtweak module (sbtweak/sbtweak.m), which uses the
+# repo's dormant kexploit/RemoteCall.m to make remote Objective-C calls into
+# the running SpringBoard: dock column count (5-icon dock etc). Previously
+# rated not possible on 26.0.1 - the machinery was in-tree but undriven.
+# lara (referenceforAI/Projects/lara, AGPL) proved the feature set; this is
+# a fresh implementation over our own RemoteCall API. Same Documents
+# command-file protocol + transport helpers as mobilegestalt (mg_* helpers
+# above are shared).
+
+# sbt_push_and_wait <json-file> <timeout> -> prints result JSON
+sbt_push_and_wait() {
+    local json="$1" timeout="${2:-60}" token
+    token="$(date +%s)$$"
+    local cmd_remote="Documents/sb-cmd-${token}.json"
+    local res_remote="Documents/sb-result-${token}.json"
+
+    mg_afc_put "$json" "$cmd_remote" || { err "AFC push failed - open Filza once (exploit must be running) and retry"; return 1; }
+
+    local waited=0 resf=""
+    while [ "$waited" -lt "$timeout" ]; do
+        sleep 2; waited=$((waited + 2))
+        resf=$(mg_afc_get "$res_remote") && break
+    done
+    [ -z "$resf" ] && { err "no result after ${timeout}s - RemoteCall init can take a while; check ./W0lfSword log"; mg_afc_rm "$cmd_remote"; return 1; }
+    cat "$resf"; rm -rf "$(dirname "$resf")"
+    mg_afc_rm "$res_remote"
+    mg_afc_rm "$cmd_remote"
+    return 0
+}
+
+cmd_sbtweak() {
+    local sub="${1:-help}"
+    [ "$#" -gt 0 ] && shift
+
+    local json tmp result
+    case "$sub" in
+        status)
+            section "SpringBoard RemoteCall status"
+            tmp=$(mktemp /tmp/ws_sbt.XXXXXX.json)
+            printf '{"op":"status"}' > "$tmp"
+            result=$(sbt_push_and_wait "$tmp" 90) || { rm -f "$tmp"; return 1; }
+            rm -f "$tmp"
+            echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result";;
+
+        dock)
+            local cols="${1:-5}"
+            case "$cols" in
+                ''|*[!0-9]*) err "usage: sbtweak dock <columns 1-12> (5 = five-icon dock)"; return 1;;
+            esac
+            [ "$cols" -ge 1 ] && [ "$cols" -le 12 ] || { err "columns must be 1-12"; return 1; }
+            confirm "Change the dock to $cols columns in the LIVE SpringBoard (reverts on reboot; 4 = stock)? Continue?" || return 1
+            tmp=$(mktemp /tmp/ws_sbt.XXXXXX.json)
+            printf '{"op":"dock","columns":%s}' "$cols" > "$tmp"
+            result=$(sbt_push_and_wait "$tmp") || { rm -f "$tmp"; return 1; }
+            rm -f "$tmp"
+            echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result";;
+
+        reset)
+            confirm "Reset the dock to the stock 4 columns (live, reverts on reboot anyway)?" || return 1
+            tmp=$(mktemp /tmp/ws_sbt.XXXXXX.json)
+            printf '{"op":"reset"}' > "$tmp"
+            result=$(sbt_push_and_wait "$tmp") || { rm -f "$tmp"; return 1; }
+            rm -f "$tmp"
+            echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result";;
+
+        help|-h|--help|"")
+            echo "usage: ./W0lfSword sbtweak <op>"
+            echo ""
+            echo "  status         RemoteCall session state (init parks SpringBoard threads briefly)"
+            echo "  dock <1-12>    dock column count in the LIVE SpringBoard (5 = five-icon dock)"
+            echo "  reset          dock back to stock 4 columns"
+            echo ""
+            echo "Live SpringBoard tweaks via the in-tree TaskRop RemoteCall;"
+            echo "changes revert on reboot. Requires the Filza Arctic escape"
+            echo "(non-JB) - RemoteCall needs kernel r/w."
+            echo ""
+            echo "example:"
+            echo "  ./W0lfSword sbtweak dock 5";;
+
+        *)
+            err "unknown subcommand: $sub (try: sbtweak help)"; return 1;;
+    esac
+    echo ""
+}
+
 cmd_experimental() {
     local sub="${1:-list}"
     clear
@@ -3943,6 +4031,7 @@ menu_body() {
     menu_opt r "readiness"        "device capability + exploit-readiness report (live probes)"
     menu_opt nj "NoJailbreak"     "USB install Filza + kernel R/W, no jailbreak needed (18-26.0.1)"
     menu_opt mg "MobileGestalt"   "full MobileGestalt editing - set/unset/dump keys via Filza Arctic (26.0.1)"
+    menu_opt sbt "SB Tweak"       "SpringBoard live tweaks - 5-icon dock via RemoteCall (26.0.1)" "${C_AMB}[live SB]${NC}"
     menu_opt ex "Experimental"    "unfinished exploits · novel chains (dev)" "${C_AMB}[beta]${NC}"
     [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
 
@@ -4071,6 +4160,7 @@ run_menu() {
             cve)          cmd_cve || true;;
             poclab|o)     cmd_poclab || true;;
             mobilegestalt|mg) cmd_mobilegestalt || true;;
+            sbtweak|sbt) cmd_sbtweak || true;;
             experimental|ex) cmd_experimental || true;;
             g|cfg|config) cmd_config || true;;
             # usbliter8-arctic
@@ -4113,7 +4203,7 @@ run_menu() {
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown  -  try 1-9, b/d/a/nj/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/mg/ex/g, or q${NC}";;
+                echo -e "  ${C_RED}Unknown  -  try 1-9, b/d/a/nj/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/mg/sbt/ex/g, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -5614,6 +5704,27 @@ mobilegestalt  -  full MobileGestalt editing (Chain F).
   backup) and revert with 'mobilegestalt restore' if something misbehaves.
 EOF
             ;;
+        sbtweak|sbt)
+            cat <<'EOF'
+sbtweak  -  SpringBoard live tweaks (5-icon dock) via TaskRop RemoteCall.
+  The dock's icon count is a LIVE SpringBoard object property (gridSize +
+  layoutConfiguration portrait columns) - MobileGestalt edits can't touch
+  it, which is why it was rated not possible on 26.0.1 before. lara
+  (referenceforAI/Projects/lara) proved the RemoteCall approach works on
+  17.0-18.7.1 + 26.0-26.0.1; the W0lfSword tree already shipped the
+  machinery (kexploit/RemoteCall.m, dormant) - this module drives it.
+
+  What it does:
+    1. 'status' initializes a RemoteCall session into SpringBoard
+       (parks two of its threads for a few hundred ms - brief hiccup)
+    2. 'dock 5' (or any 1-12) sets the dock column count live
+    3. 'reset' puts it back to stock 4
+
+  Changes are session-live and revert on reboot. Requires the Filza Arctic
+  kernel escape (RemoteCall needs kernel r/w). RemoteCall is inherently
+  finicky - if a call fails, check the tweak log for which stage broke.
+EOF
+            ;;
         deploy)
             cat <<'EOF'
 deploy  -  install an already-built tweak onto the phone.
@@ -6028,6 +6139,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "cve [filter]" "CVE tracker: kernel|userspace|sandbox|tcc|ssv|live (C5.1/C5.2)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "poclab (o)"   "PoC lab: test found-but-unimplemented bugs  -  list | test <alac|libxml2-diff> (C6)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "mobilegestalt (mg)" "Full MobileGestalt editing: list | set | unset | dump | backup | restore - via Filza Arctic over USB, or SSH (Chain F)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "sbtweak (sbt)" "SpringBoard live tweaks: dock <1-12> (5-icon dock) | reset | status - TaskRop RemoteCall into SB (17-26.0.1)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "experimental" "Dev section: unfinished exploits, novel chains, device dump (red theme)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "toggle on|off" "Enable/disable tweak"
     printf "  ${C_EYE}%-14s${NC} %s\n" "history"      "Exploit stats + chart"
@@ -6123,6 +6235,7 @@ main() {
         cve)       cmd_cve "${args[@]}";;
         poclab)    cmd_poclab "${args[@]}";;
         mobilegestalt|mg) cmd_mobilegestalt "${args[@]}";;
+        sbtweak|sbt) cmd_sbtweak "${args[@]}";;
         experimental|exp) cmd_experimental "${args[@]}";;
         report)    cmd_report "${args[@]}";;
         config|cfg|g) cmd_config "${args[@]}";;
