@@ -205,13 +205,26 @@
 
 ## Chain F - "GestaltForge" - userspace **write**-escape via bad_query+MCM → device-identity/feature spoofing (26.1+, no kernel)
 
+**UPDATE 2026-09-02 — kernel-route half IMPLEMENTED.** The bl_sbx /
+SparseBoxPlus / Erosion repos (landed in referenceforAI/Projects/) prove the
+gestalt cache at `systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist`
+is mobile-writable through iOS 26.2b1 and edits stick after a respring —
+overturning the earlier "gestalt editing not possible on 26.0.1" reading
+(the cache container looked read-only from our MCM leases; the daemon-side
+mobile write route was the missing fact). Since the DarkSword escape gives
+the Filza process root creds on ≤26.0.1, the write needs no daemon chain:
+`mobilegestalt/mobilegestalt.m` (new) edits the plist atomically in-process
+(mobile:mobile ownership preserved) and the CLI `mobilegestalt` command
+drives it over USB/AFC (`Filza Arctic.ipa`) or --ssh. The no-kernel
+bad_query/MCM variant below stays research for 26.1+.
+
 The repo's `bad_query_escape(path, create, ...)` already supports **create=true**; combined with MCM leases and the class-13 SystemGroup route, the traversal grants a *consumed sandbox extension* on the traversed path - and consumed extensions are not read-only. Public precedent: **GestaltEdit** uses the identical class-13+traversal constants to open `.../systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist` with `O_RDWR` (DeepWiki analysis of `BadQueryBridge.m`). Repo-specific twist: the **Geod-MCM class-12 partDomain traversal** (0xjohnnydev/Geod-MCM-PoC) reaches the same MobileGestalt cache via a *built-in daemon container* route, and the repo's `mcm_bridge`/`container_access.m` already dlopens the exact API surface.
 
-- **Stages:** (F1) MCM/bad_query lease on the MobileGestalt cache path (IMPLEMENTED pieces: `bad_query_escape(path, create=true, NULL, false)`, `mcm_activate_container(class 13/12, ...)`); (F2) O_RDWR rewrite of `com.apple.MobileGestalt.plist` - feature flags (Apple Intelligence gating, device-class spoofing, privacy-misleading identifiers) - research PoC on 26.1 (repo has no Gestalt module yet); (F3) extend to other systemgroup containers (e.g. TCC-adjacent group data, healthd group) - research.
-- **Applicability:** 26.0–26.6.1 (bad_query), 18–27b (MCM route). **No kernel, no jailbreak.**
+- **Stages:** (F1) MCM/bad_query lease on the MobileGestalt cache path (IMPLEMENTED pieces: `bad_query_escape(path, create=true, NULL, false)`, `mcm_activate_container(class 13/12, ...)`); (F2) O_RDWR rewrite of `com.apple.MobileGestalt.plist` - feature flags (Apple Intelligence gating, device-class spoofing, privacy-misleading identifiers) - **kernel route DONE (mobilegestalt module, iOS ≤26.0.1)**; no-kernel bad_query write route research-only (26.1+); (F3) extend to other systemgroup containers (e.g. TCC-adjacent group data, healthd group) - research.
+- **Applicability:** 26.0–26.6.1 (bad_query), 18–27b (MCM route). **No kernel, no jailbreak.** Kernel route: 17.0–26.0.1 via Filza Arctic.
 - **Impact:** persistent (until cache rebuild) device-identity/feature spoofing + systemgroup data tamper. Bounty: sandbox write-escape / privacy boundary (~$100k class if the *write* variant is novel vs public read-only PoCs).
-- **Status:** ~40% (lease machinery implemented; Gestalt write + systemgroup target matrix research-only).
-- **CLI:** `chains gestalt list|set <key> <value>` → wraps bad_query lease + plist edit + verify; feed `exploits` matrix.
+- **Status:** ~75% (kernel-route gestalt edit implemented + CLI; bad_query no-kernel write + systemgroup target matrix research-only).
+- **CLI:** `mobilegestalt list|status|get|set|unset|apply|dump|backup|restore|respring` (implemented 2026-09-02) - wraps the on-device module over AFC/USB or SSH; `chains gestalt` alias not wired (mobilegestalt is the full command).
 
 ## Chain G - "FontStrike" - FontParser RCE → DarkSword kernel → TCC+SSV implant (the SE2's complete live chain)
 

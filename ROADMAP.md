@@ -127,6 +127,37 @@
 - [x] `AU.6` — experimental section (red theme, menu ex)
 - [x] `AU.7` — non-critical findings → AUDIT section (for later)
 
+## 0.8 — MobileGestalt editing round (2026-09-02, Chain F kernel-route impl)
+
+> GestaltForge (Chain F) flips from "research-only" to implemented on the
+> kernel route. The bl_sbx / SparseBoxPlus / Erosion repos landed in
+> referenceforAI/Projects/ prove the gestalt cache plist in
+> systemgroup.com.apple.mobilegestaltcache/Library/Caches/ is writable
+> through iOS 26.2b1 (mobile-owned, edits stick after a respring) — so the
+> earlier "gestalt editing not possible on 26.0.1" verdict is overturned:
+> the missing piece was the mobile-userland/root write route, which the
+> DarkSword escape already provides on the iPhone14,7/26.0.1 Filza Arctic
+> path. Implemented as an on-device module + CLI command.
+
+- [x] `MG.1` — on-device module `mobilegestalt/mobilegestalt.m`: cache path
+  discovery (26.x + 18.x container names), atomic CacheExtra edits (temp +
+  rename, mobile:mobile ownership/mode preserved, fsync + read-back verify),
+  known-key catalog + arbitrary raw-key support, rolling backup, backboardd
+  respring. Polls `Documents/mg-cmd-*.json`, answers `mg-result-*.json` +
+  `mg-state-*.json` (full CacheExtra). Wired into the tweak's 0.5s HUD timer
+  (`mg_poll_commands()` in Tweak.m), included in MHA + JB builds.
+- [x] `MG.2` — CLI `mobilegestalt` (menu mg): list | status | get | set |
+  unset | apply <batch.json> | dump | backup | restore | respring, with
+  --type and --respring. USB/AFC transport into the Filza Arctic app
+  (non-JB, no SSH) + --ssh <ip> transport for jailbroken devices
+  (plistlib pull/edit/push, mobile:mobile chown, killall backboardd).
+- [x] `MG.3` — Filza-Arctic.ipa rebuilt with the module (kaffeindecaf
+  identity); shipped dylib verified: mg markers present, substrate-free,
+  LC_DYLD_INFO_ONLY (no chained fixups). Audit PASSED, shellcheck clean.
+- [x] `MG.4` — docs: research/attack_chains.md Chain F status, README
+  commands row, DEBUG_TRACKING [MG] layer, referenceforAI/RESEARCH.md
+  (6 new repos + verdict).
+
 ---
 
 ## LEGEND

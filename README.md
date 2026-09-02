@@ -181,6 +181,7 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `offsets [ver]` | offset coverage per iOS version | `./W0lfSword offsets 26.0` |
 | `exploits` | technique matrix: what works on your device (K1.5) | `./W0lfSword exploits` |
 | `chains [a-g\|best]` | attack chain catalog with stages; `chains best` auto-selects for the connected device (K5.9) | `./W0lfSword chains best` |
+| `mobilegestalt (mg)` | full MobileGestalt editing (Chain F): list/set/unset/dump/apply/backup/restore/respring — USB/AFC into Filza Arctic (non-JB) or `--ssh <ip>` (jailbroken); kernel-route write via the escaped Filza process, iOS 17–26.0.1 | `./W0lfSword mobilegestalt set dynamic-island 1 --respring` |
 | `cve [filter]` | CVE tracker: kernel / userspace / sandbox / tcc / ssv / live (C5.1/C5.2) | `./W0lfSword cve live` |
 | `poclab list` | PoC lab: found-but-unimplemented bugs with status (tested / blocked / needs-device) | `./W0lfSword poclab list` |
 | `poclab test <id>` | run a host-side PoC: `alac` (ASAN harnesses, BB-038/039), `libxml2-diff` (fork comparison) | `./W0lfSword poclab test alac` |

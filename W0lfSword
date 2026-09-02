@@ -29,7 +29,7 @@ if [ "$EUID" -ne 0 ] && ! $JSON_MODE; then
     # raw escapes on purpose: this runs before the palette block loads
     echo -e "\033[1;33m  ⚠  Not running as root\033[0m"
     echo -e "\033[38;5;240m  Commands needing:\033[0m  \033[1;38;5;117m${SUDO_NEEDED_COMMANDS}\033[0m"
-    echo -e "\033[38;5;240m  Commands safe without:\033[0m  \033[38;5;153m${SUDO_UNSAFE_COMMANDS}...\033[0m"
+    echo -e "\033[38;5;240m  Commands safe without:\033[0m  \033[38;5;153m${SUDO_UNSAFE_COMMANDS} mobilegestalt...\033[0m"
     echo -e "\033[38;5;240m  Re-run with:\033[0m  \033[1;38;5;117msudo ./W0lfSword\033[0m"
     echo ""
 fi
@@ -2623,6 +2623,442 @@ EOF
     echo ""
 }
 
+# ═══════════════════════════════════════════════════════════════
+#  MOBILEGESTALT  -  full MobileGestalt editing (Chain F)
+# ═══════════════════════════════════════════════════════════════
+# Drives the on-device mobilegestalt module (mobilegestalt/mobilegestalt.m)
+# through the app's Documents dir over USB/AFC (non-jailbroken Filza Arctic
+# path, no SSH) or edits the cache directly over SSH (jailbroken devices).
+#
+# Why this works on 26.0.1 (2026-09): bl_sbx / SparseBoxPlus prove the cache
+# plist in systemgroup.com.apple.mobilegestaltcache/Library/Caches/ is
+# writable through iOS 26.2b1 and edits stick after a respring. After the
+# DarkSword escape the Filza process holds root creds, so the module writes
+# the same file directly (mobile-owned 501:501 is preserved by the atomic
+# rename in the module).
+#
+# Command protocol: the module polls Documents/mg-cmd-<token>.json and
+# answers with Documents/mg-result-<token>.json (+ mg-state-<token>.json
+# with the full CacheExtra after a mutation). Commands sit unprocessed until
+# the escape is live, so the host can queue them early.
+
+mg_bid_detect() {
+    # Installed Filza bundle id, from the device itself (team-suffixed ids
+    # appear on PlumeImpactor installs). Fall back to the known candidates.
+    if command -v ideviceinstaller &>/dev/null; then
+        local inst; inst=$(ideviceinstaller -l 2>/dev/null | grep -iE "Filza|MobileHouseArrest" | head -1 || echo "")
+        if [ -n "$inst" ]; then
+            echo "${inst%% *}"
+            return 0
+        fi
+    fi
+    local bid
+    for bid in "com.kaffeindecaf.w0lfsword.filza" "com.kaffeindecaf.w0lfsword.filza.J8T95UQMW2"; do
+        echo "$bid"
+        return 0
+    done
+    return 1
+}
+
+# mg_afc_get <remote> -> prints local tmp path; empty on failure
+mg_afc_get() {
+    local remote="$1" bid outdir
+    bid=$(mg_bid_detect) || return 1
+    outdir=$(mktemp -d /tmp/ws_mg.XXXXXX 2>/dev/null || echo /tmp)
+    (cd "$outdir" && afcclient --documents "$bid" get "$remote" >/dev/null 2>&1)
+    local base; base=$(basename "$remote")
+    if [ -s "$outdir/$base" ]; then echo "$outdir/$base"; else rm -rf "$outdir"; return 1; fi
+}
+
+# mg_afc_put <local> <remote>
+mg_afc_put() {
+    local bid; bid=$(mg_bid_detect) || return 1
+    afcclient --documents "$bid" put "$1" "$2" >/dev/null 2>&1
+}
+
+mg_afc_rm() {
+    local bid; bid=$(mg_bid_detect) || return 1
+    afcclient --documents "$bid" rm "$1" >/dev/null 2>&1
+}
+
+# mg_push_and_wait <json-file> [wait-secs] -> prints result JSON
+# Pushes a command file with a unique token, polls for the matching result,
+# cleans up both sides. Works only when the tweak is alive + escaped.
+mg_push_and_wait() {
+    local json="$1" timeout="${2:-45}" token result
+    token="$(date +%s)$$"
+    local cmd_remote="Documents/mg-cmd-${token}.json"
+    local res_remote="Documents/mg-result-${token}.json"
+
+    mg_afc_put "$json" "$cmd_remote" || { err "AFC push failed - open Filza once (exploit must be running) and retry"; return 1; }
+
+    local waited=0 resf=""
+    while [ "$waited" -lt "$timeout" ]; do
+        sleep 2; waited=$((waited + 2))
+        resf=$(mg_afc_get "$res_remote") && break
+    done
+    [ -z "$resf" ] && { err "no result after ${timeout}s - is Filza open with the exploit escaped? (log: ./W0lfSword log)"; mg_afc_rm "$cmd_remote"; return 1; }
+    cat "$resf"; rm -rf "$(dirname "$resf")"
+    mg_afc_rm "$res_remote"
+    mg_afc_rm "$cmd_remote"
+    return 0
+}
+
+# mg_roundtrip <op> <name-or-key> <value> <type(auto|int|string|bool|json)> <respring:0|1>
+mg_roundtrip() {
+    local op="$1" name="$2" value="$3" type="$4" respring="$5" tmp
+    tmp=$(mktemp /tmp/ws_mgcmd.XXXXXX.json)
+    python3 - "$op" "$name" "$value" "$type" "$respring" "$tmp" <<'PY'
+import json, sys
+op, name, value, typ, respring, out = sys.argv[1:7]
+cmd = {"op": op}
+if name:
+    cmd["name"] = name
+if value != "\\x00":
+    if typ == "string":
+        cmd["value"] = value
+    elif typ == "json":
+        cmd["value"] = json.loads(value)
+    elif typ in ("int", "bool"):
+        cmd["value"] = json.loads(value)
+        cmd["type"] = typ
+    else:  # auto: numbers/bools stay typed, everything else is a string
+        try:
+            cmd["value"] = json.loads(value)
+        except ValueError:
+            cmd["value"] = value
+if respring == "1":
+    cmd["respring"] = True
+json.dump(cmd, open(out, "w"))
+PY
+    local result
+    result=$(mg_push_and_wait "$tmp") || { rm -f "$tmp"; return 1; }
+    rm -f "$tmp"
+    echo "$result"
+    return 0
+}
+
+# SSH transport (jailbroken devices): pull the cache, edit locally with
+# plistlib, push back, keep mobile:mobile ownership. Names resolve against
+# the same catalog as the on-device module; raw base64 keys work too.
+mg_ssh_cache_path() {
+    ssh_safe "root@$1" 'ls -d /var/containers/Shared/SystemGroup/*mobilegestalt*/Library/Caches/com.apple.MobileGestalt.plist 2>/dev/null | head -1' 2>/dev/null | tr -d '\r'
+}
+
+# mg_ssh_edit <ip> <op> <name-or-key> <value> <type> <respring:0|1>
+mg_ssh_edit() {
+    local ip="$1" op="$2" name="$3" value="$4" typ="$5" respring="$6"
+    local rpath; rpath=$(mg_ssh_cache_path "$ip")
+    [ -z "$rpath" ] && { err "no gestalt cache found on $ip"; return 1; }
+
+    local td; td=$(mktemp -d /tmp/ws_mgssh.XXXXXX)
+    scp_safe "root@$ip:${rpath}" "$td/cache.plist" || { err "scp pull failed"; rm -rf "$td"; return 1; }
+    # rolling backup on the device, first pull of the day only
+    ssh_safe "root@$ip" "cp '$rpath' '$rpath.mg-backup'" >/dev/null 2>&1
+
+    python3 - "$td/cache.plist" "$op" "$name" "$value" "$typ" <<'PY' || { err "edit failed (bad key/value?)"; rm -rf "$td"; return 1; }
+import json, plistlib, sys
+path, op, name, value, typ = sys.argv[1:6]
+cat = {
+ "dynamic-island": "YlEtTtHlNesRBMal1CqRaA", "always-on-display": "2OOJf1VhaM7NxfRok3HbWQ",
+ "always-on-time": "j8/Omm6s1lsmTDFsXjsBfA", "aod-vibrancy": "ykpu7qyhqFweVMKtxNylWA",
+ "charge-limit-80": "37NVydb//GP/GrhuTN+exg", "boot-chime": "QHxt+hGLaBPbQJbXiUJX3w",
+ "apple-pencil": "yhHcB0iH0d1XzPO/CFd3ow", "tap-to-wake": "yZf3GTRMGTuwSV/lD7Cagw",
+ "camera-button": "CwvKxM2cEogD3p+HYgaW0Q", "action-button": "cT44WE1EohiwRzhsZ8xEsw",
+ "collision-sos": "HCzWusHQwZDea6nNhaKndw", "pulse-width-max": "6IejgN+1Fmu5/QrZFOIeNw",
+ "internal-build": "LBJfwOEzExRxzlAnSuI7eg", "internal-install": "EqrsVvjcYDdxHBiQmGhAWw",
+ "generative-models": "A62OafQ85EJAiiqKn4agtg", "research-fuse": "XYlJKKkj2hztRP1NWWnhlw",
+ "region-code": "h63QSdBCiT/z0WU6rdQv6Q", "product-type": "h9jDsbgj7xIVeIQ8S3/X3Q",
+ "device-class": "+3Uf0Pm5F8Xy7Onyvko0vA", "thinning-product": "0+nc/Udy4WNG8S+Q7a/s1A",
+ "artwork-subtype": "oPeik/9e8lQWMszEjbPzng",
+}
+def b64(s): return "".join(ch for ch in s if ch.isalnum() or ch in "+/=-_")
+if op in ("set", "unset", "get"):
+    key = cat.get(name, name)          # catalog name or raw base64 key
+    assert key and len(key) <= 128 and key == b64(key), "bad gestalt key"
+with open(path, "rb") as f:
+    d = plistlib.load(f)
+extra = d.setdefault("CacheExtra", {})
+is_art = name in ("artwork-subtype", "oPeik/9e8lQWMszEjbPzng")
+if op == "get":
+    val = (extra.get(key) or {}).get("ArtworkDeviceSubType") if is_art else extra.get(key)
+    print(json.dumps({"ok": True, "found": val is not None, "value": val}, default=str))
+    sys.exit(0)
+elif op == "set":
+    if typ == "int": v = int(value)
+    elif typ == "bool": v = value.lower() == "true"
+    else:
+        try: v = json.loads(value)   # keep numbers/bools typed
+        except ValueError: v = value
+    if is_art:
+        a = extra.setdefault(key, {})
+        a["ArtworkDeviceSubType"] = v
+    else:
+        extra[key] = v
+elif op == "unset":
+    if is_art:
+        a = extra.get(key)
+        if isinstance(a, dict): a.pop("ArtworkDeviceSubType", None)
+    else:
+        extra.pop(key, None)
+elif op == "dump":
+    print(json.dumps({"ok": True, "cacheExtra": extra}, default=str)); sys.exit(0)
+with open(path, "wb") as f:
+    plistlib.dump(d, f, fmt=plistlib.FMT_BINARY)
+print(json.dumps({"ok": True, "detail": "written"}))
+PY
+    scp_safe "$td/cache.plist" "root@$ip:${rpath}" || { err "scp push failed - cache NOT modified"; rm -rf "$td"; return 1; }
+    ssh_safe "root@$ip" "chown mobile:mobile '$rpath' 2>/dev/null; chmod 644 '$rpath'" >/dev/null 2>&1
+    rm -rf "$td"
+    if [ "$respring" = "1" ]; then
+        ok "respringing..."
+        ssh_safe "root@$ip" 'killall -9 backboardd 2>/dev/null' >/dev/null 2>&1
+    fi
+    return 0
+}
+
+cmd_mobilegestalt() {
+    local sub="${1:-help}"
+    [ "$#" -gt 0 ] && shift
+
+    local typ="auto" respring=false mode="usb" ssh_ip=""
+    local args=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --type) typ="$2"; shift 2;;
+            --type=*) typ="${1#--type=}"; shift;;
+            --respring) respring=true; shift;;
+            --ssh) mode="ssh"; ssh_ip="$2"; shift 2;;
+            --ssh=*) mode="ssh"; ssh_ip="${1#--ssh=}"; shift;;
+            --usb) mode="usb"; shift;;
+            *) args+=("$1"); shift;;
+        esac
+    done
+    set -- "${args[@]}"
+    [ "$mode" = "ssh" ] && [ -z "$ssh_ip" ] && ssh_ip=$(get_device_ip "")
+
+    local result tmp
+    case "$sub" in
+        list|catalog)
+            section "MobileGestalt key catalog (names -> base64 keys)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "name" "key" "description"
+            echo -e "  ${C_DIM}------------------------------------------------------------------------------------------------${NC}"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "dynamic-island" "YlEtTtHlNesRBMal1CqRaA" "DeviceSupportsDynamicIsland (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "always-on-display" "2OOJf1VhaM7NxfRok3HbWQ" "DeviceSupportsAlwaysOnDisplay (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "always-on-time" "j8/Omm6s1lsmTDFsXjsBfA" "DeviceSupportsAlwaysOnTime (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "aod-vibrancy" "ykpu7qyhqFweVMKtxNylWA" "DeviceSupportsAODVibrancy (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "charge-limit-80" "37NVydb//GP/GrhuTN+exg" "DeviceSupports80ChargeLimit (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "boot-chime" "QHxt+hGLaBPbQJbXiUJX3w" "DeviceSupportsBootChime (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "apple-pencil" "yhHcB0iH0d1XzPO/CFd3ow" "DeviceSupportsApplePencil (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "tap-to-wake" "yZf3GTRMGTuwSV/lD7Cagw" "DeviceSupportsTapToWake (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "camera-button" "CwvKxM2cEogD3p+HYgaW0Q" "CameraButtonCapability (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "action-button" "cT44WE1EohiwRzhsZ8xEsw" "RingerButtonCapability (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "collision-sos" "HCzWusHQwZDea6nNhaKndw" "DeviceSupportsCollisionSOS (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "pulse-width-max" "6IejgN+1Fmu5/QrZFOIeNw" "DeviceSupportsPulseWidthMaximization (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "internal-build" "LBJfwOEzExRxzlAnSuI7eg" "InternalBuild (int 1 - storage info)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "internal-install" "EqrsVvjcYDdxHBiQmGhAWw" "apple-internal-install (int 1 - Metal HUD)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "generative-models" "A62OafQ85EJAiiqKn4agtg" "DeviceSupportsGenerativeModelSystems (AI gate)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "research-fuse" "XYlJKKkj2hztRP1NWWnhlw" "ResearchFuse (int 1)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "region-code" "h63QSdBCiT/z0WU6rdQv6Q" "RegionCode (string, e.g. LL)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "product-type" "h9jDsbgj7xIVeIQ8S3/X3Q" "ProductType (string - device spoof)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "device-class" "+3Uf0Pm5F8Xy7Onyvko0vA" "DeviceClass (string, iPhone/iPad)"
+            printf "  ${C_FROST}%-22s${NC} %-34s %s\n" "artwork-subtype" "oPeik/9e8lQWMszEjbPzng" "ArtworkTraits.ArtworkDeviceSubType (nested int)"
+            echo ""
+            echo -e "  ${C_DIM}Any raw base64 gestalt key also works directly: set '<key>' <value>.${NC}"
+            return 0;;
+
+        status)
+            section "MobileGestalt status"
+            echo -e "  ${C_DIM}device: ${NC}$(ideviceinfo -k ProductType 2>/dev/null || echo '?')  iOS $(ideviceinfo -k ProductVersion 2>/dev/null || echo '?')  ($(ideviceinfo -k BuildVersion 2>/dev/null || echo '?'))"
+            if [ "$mode" = "ssh" ]; then
+                local rp; rp=$(mg_ssh_cache_path "$ssh_ip")
+                if [ -n "$rp" ]; then ok "gestalt cache: $rp"; else err "no gestalt cache found on $ssh_ip"; fi
+                return 0
+            fi
+            result=$(mg_roundtrip "status" "" "\x00" "" 0) && { echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"; return 0; }
+            return 1;;
+
+        get)
+            [ -z "${1:-}" ] && { err "usage: mobilegestalt get <name|key>"; return 1; }
+            if [ "$mode" = "ssh" ]; then
+                mg_ssh_edit "$ssh_ip" get "$1" "\x00" "" 0; return $?
+            fi
+            result=$(mg_roundtrip "get" "$1" "\x00" "" 0) || return 1
+            echo "$result" | python3 -c 'import json,sys; r=json.load(sys.stdin); print("found" if r.get("found") else "NOT SET"); print(r.get("value")) if r.get("found") else None' 2>/dev/null || echo "$result";;
+
+        set)
+            [ -z "${1:-}" ] || [ -z "${2:-}" ] && { err "usage: mobilegestalt set <name|key> <value> [--type int|string|bool|json] [--respring]"; return 1; }
+            confirm "This edits the device's MobileGestalt cache (reboot or respring applies it; wrong values can cause bootloops). Continue?" || return 1
+            if [ "$mode" = "ssh" ]; then
+                mg_ssh_edit "$ssh_ip" set "$1" "$2" "$typ" "$($respring && echo 1 || echo 0)"; return $?
+            fi
+            result=$(mg_roundtrip "set" "$1" "$2" "$typ" 0) || return 1
+            echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+            if $respring && echo "$result" | grep -q '"ok": true'; then
+                ok "respringing..."
+                mg_roundtrip "respring" "" "\x00" "" 0 >/dev/null
+            fi
+            echo -e "  ${C_DIM}backup of the pre-edit cache: Documents/gestalt-backups/ on the device (pull: mobilegestalt backup)${NC}";;
+
+        unset)
+            [ -z "${1:-}" ] && { err "usage: mobilegestalt unset <name|key> [--respring]"; return 1; }
+            confirm "Remove this key from the device's MobileGestalt cache? Continue?" || return 1
+            if [ "$mode" = "ssh" ]; then
+                mg_ssh_edit "$ssh_ip" unset "$1" "\x00" "" "$($respring && echo 1 || echo 0)"; return $?
+            fi
+            result=$(mg_roundtrip "unset" "$1" "\x00" "" 0) || return 1
+            echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+            if $respring && echo "$result" | grep -q '"ok": true'; then
+                ok "respringing..."
+                mg_roundtrip "respring" "" "\x00" "" 0 >/dev/null
+            fi;;
+
+        apply)
+            local f="${1:-}"
+            [ -z "$f" ] && { err "usage: mobilegestalt apply <batch.json> [--respring]"; return 1; }
+            [ -f "$f" ] || { err "no such file: $f"; return 1; }
+            local cnt; cnt=$(python3 - "$f" <<'PY' 2>/dev/null || echo 0
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert isinstance(d.get("ops"), list) and d["ops"], "ops list required"
+for o in d["ops"]:
+    assert o.get("op") in ("set", "unset") and (o.get("name") or o.get("key")), "bad op entry"
+print(len(d["ops"]))
+PY
+)
+            [ "$cnt" -gt 0 ] 2>/dev/null || { err "invalid batch json (needs {\"ops\":[{\"op\":\"set|unset\",...}]})"; return 1; }
+            confirm "Apply $cnt gestalt edits? Wrong values can cause bootloops. Continue?" || return 1
+            if [ "$mode" = "ssh" ]; then
+                # apply every op sequentially over SSH; args are shell-quoted
+                # by python so batch contents can never inject commands
+                local batchsh; batchsh=$(mktemp /tmp/ws_mgssh_batch.XXXXXX.sh)
+                python3 - "$f" "$batchsh" "$ssh_ip" <<'PY'
+import json, shlex, sys
+f, out, ip = sys.argv[1:4]
+lines = []
+for o in json.load(open(f))["ops"]:
+    nm = o.get("name") or o.get("key")
+    if o["op"] == "unset":
+        lines.append("mg_ssh_edit %s unset %s %s %s %s" % (shlex.quote(ip), shlex.quote(nm), shlex.quote("\\x00"), "", 0))
+    else:
+        v = o.get("value")
+        vj = json.dumps(v) if not isinstance(v, str) else v
+        lines.append("mg_ssh_edit %s set %s %s %s %s" % (shlex.quote(ip), shlex.quote(nm), shlex.quote(vj), shlex.quote(o.get("type", "auto")), 0))
+open(out, "w").write("\n".join(lines) + "\n")
+PY
+                # the batch runs in a child bash: export the functions it calls
+                export -f mg_ssh_edit mg_ssh_cache_path ssh_safe scp_safe err ok 2>/dev/null || true
+                if bash "$batchsh"; then
+                    if $respring; then
+                        ok "respringing..."
+                        ssh_safe "root@$ssh_ip" 'killall -9 backboardd 2>/dev/null' >/dev/null 2>&1
+                    fi
+                fi
+                rm -f "$batchsh"
+                return 0
+            fi
+            tmp=$(mktemp /tmp/ws_mgbatch.XXXXXX.json)
+            python3 - "$f" "$tmp" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+json.dump({"op": "batch", "ops": d["ops"]}, open(sys.argv[2], "w"))
+PY
+            result=$(mg_push_and_wait "$tmp") || { rm -f "$tmp"; err "apply transport failed"; return 1; }
+            rm -f "$tmp"
+            echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+            if $respring && echo "$result" | grep -q '"ok": true'; then
+                ok "respringing..."
+                mg_roundtrip "respring" "" "\x00" "" 0 >/dev/null
+            fi;;
+
+        dump)
+            if [ "$mode" = "ssh" ]; then
+                mg_ssh_edit "$ssh_ip" dump "" "\x00" "" 0 | python3 -m json.tool 2>/dev/null
+                return 0
+            fi
+            result=$(mg_roundtrip "dump" "" "\x00" "" 0) || return 1
+            echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result";;
+
+        backup)
+            if [ "$mode" = "ssh" ]; then
+                local outb="${1:-mg-backup-$(date +%Y%m%d-%H%M%S).plist}"
+                local rp2; rp2=$(mg_ssh_cache_path "$ssh_ip")
+                if [ -z "$rp2" ]; then
+                    err "no gestalt cache on $ssh_ip"; return 1
+                fi
+                if scp_safe "root@$ssh_ip:${rp2}.mg-backup" "$outb"; then
+                    ok "backup saved: $outb"
+                else
+                    err "no .mg-backup on device yet - run a set/unset first"
+                fi
+                return 0
+            fi
+            local out="${1:-mg-backup-$(date +%Y%m%d-%H%M%S).plist}"
+            local got; got=$(mg_afc_get "Documents/gestalt-backups/com.apple.MobileGestalt.plist") || { err "no backup on device yet - run a set/unset first (every write keeps a rolling backup)"; return 1; }
+            cp "$got" "$out" && ok "backup saved: $out"
+            rm -rf "$(dirname "$got")";;
+
+        restore)
+            confirm "Restore the device's last saved gestalt backup (reverts this tool's edits)? Continue?" || return 1
+            if [ "$mode" = "ssh" ]; then
+                local rp3; rp3=$(mg_ssh_cache_path "$ssh_ip")
+                if [ -z "$rp3" ]; then
+                    err "no gestalt cache on $ssh_ip"; return 1
+                fi
+                if ssh_safe "root@$ssh_ip" "cp '$rp3.mg-backup' '$rp3' && chown mobile:mobile '$rp3' && chmod 644 '$rp3'" >/dev/null 2>&1; then
+                    ok "restored"
+                else
+                    err "restore failed (no .mg-backup?)"
+                fi
+                echo -e "  ${C_DIM}respring or reboot to apply${NC}"
+                return 0
+            fi
+            result=$(mg_roundtrip "restore" "" "\x00" "" 0) || return 1
+            echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+            echo -e "  ${C_DIM}reboot or run 'mobilegestalt respring' to apply${NC}";;
+
+        respring)
+            confirm "Kill backboardd (respring)? Apps will restart." || return 1
+            if [ "$mode" = "ssh" ]; then
+                if ssh_safe "root@$ssh_ip" 'killall -9 backboardd 2>/dev/null' >/dev/null 2>&1; then
+                    ok "respring issued"
+                else
+                    err "respring failed"
+                fi
+                return 0
+            fi
+            result=$(mg_roundtrip "respring" "" "\x00" "" 0) || return 1
+            echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result";;
+
+        help|-h|--help|"")
+            echo "usage: ./W0lfSword mobilegestalt <op> ..."
+            echo ""
+            echo "  list                       key catalog (names -> base64 keys)"
+            echo "  status                     cache path + writability on the device"
+            echo "  get <name|key>             read one key"
+            echo "  set <name|key> <value>     write one key  [--type int|string|bool|json] [--respring]"
+            echo "  unset <name|key>           remove one key  [--respring]"
+            echo "  apply <batch.json>         apply {\"ops\":[{set|unset}...]}  [--respring]"
+            echo "  dump                       full CacheExtra as JSON"
+            echo "  backup [file]              pull the device's rolling backup"
+            echo "  restore                    revert to the device's last backup"
+            echo "  respring                   kill backboardd"
+            echo ""
+            echo "transport: USB/AFC into the Filza Arctic app (non-jailbroken) by"
+            echo "default; --ssh <ip> edits over SSH (jailbroken devices)."
+            echo ""
+            echo "examples:"
+            echo "  ./W0lfSword mobilegestalt set dynamic-island 1 --type int --respring"
+            echo "  ./W0lfSword mobilegestalt set product-type iPhone15,3 --type string"
+            echo "  ./W0lfSword mobilegestalt unset region-code"
+            echo "  ./W0lfSword mobilegestalt dump";;
+
+        *)
+            err "unknown subcommand: $sub (try: mobilegestalt help)"; return 1;;
+    esac
+    echo ""
+}
+
 cmd_experimental() {
     local sub="${1:-list}"
     clear
@@ -3506,12 +3942,13 @@ menu_body() {
     menu_opt w "kcwatch"          "auto kernel-delta watcher  -  poll → fetch → resolve → report"
     menu_opt r "readiness"        "device capability + exploit-readiness report (live probes)"
     menu_opt nj "NoJailbreak"     "USB install Filza + kernel R/W, no jailbreak needed (18-26.0.1)"
+    menu_opt mg "MobileGestalt"   "full MobileGestalt editing - set/unset/dump keys via Filza Arctic (26.0.1)"
     menu_opt ex "Experimental"    "unfinished exploits · novel chains (dev)" "${C_AMB}[beta]${NC}"
     [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
     printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}nj${NC} nojailbreak  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
-    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}r${NC} readiness  ${C_FROST}g${NC} config  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
+    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}r${NC} readiness  ${C_FROST}g${NC} config  ${C_FROST}mg${NC} mobilegestalt  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
     echo ""
 }
@@ -3633,6 +4070,7 @@ run_menu() {
             chains|ch)    cmd_chains || true;;
             cve)          cmd_cve || true;;
             poclab|o)     cmd_poclab || true;;
+            mobilegestalt|mg) cmd_mobilegestalt || true;;
             experimental|ex) cmd_experimental || true;;
             g|cfg|config) cmd_config || true;;
             # usbliter8-arctic
@@ -3675,7 +4113,7 @@ run_menu() {
             help|h|\?) cmd_help || true;;
             explain|x) cmd_explain || true;;
             *)
-                echo -e "  ${C_RED}Unknown  -  try 1-9, b/d/a/nj/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/ex/g, or q${NC}";;
+                echo -e "  ${C_RED}Unknown  -  try 1-9, b/d/a/nj/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/mg/ex/g, or q${NC}";;
         esac
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
@@ -5147,6 +5585,35 @@ nojailbreak  -  USB install Filza with kernel R/W, no jailbreak.
   --ipa. Nothing persists across a reboot.
 EOF
             ;;
+        mobilegestalt|mg)
+            cat <<'EOF'
+mobilegestalt  -  full MobileGestalt editing (Chain F).
+  Previously rated not possible on iOS 26: the gestalt cache container was
+  reachable only for reading. The bl_sbx / SparseBoxPlus repos (landed
+  2026-09-02) proved the cache plist at
+  systemgroup.com.apple.mobilegestaltcache/Library/Caches/ is writable
+  through iOS 26.2b1 (mobile-owned file, edits stick after a respring).
+  With the DarkSword escape the Filza process holds root creds, so the
+  tweak now writes that same file directly - no daemon chain needed.
+
+  What it does:
+    1. 'list' shows the key catalog (names like dynamic-island, plus the
+       raw base64 key for anything else)
+    2. 'set <name> <value>' / 'unset <name>' edits CacheExtra atomically
+       (temp file + rename, mobile:mobile ownership preserved, read-back
+       verified). Every write keeps a rolling backup on the device.
+    3. 'dump' prints the full CacheExtra; 'backup' pulls the backup file
+    4. 'respring' (or --respring) kills backboardd so SpringBoard
+       re-reads the cache
+
+  Transport: USB/AFC into the Filza Arctic app's Documents (non-jailbroken
+  device, no SSH) - the tweak polls for command files and answers with a
+  result file. Works on iOS 18.0 - 26.0.1 (the DarkSword range).
+
+  Warning: wrong values can cause bootloops. Keep a backup (mobilegestalt
+  backup) and revert with 'mobilegestalt restore' if something misbehaves.
+EOF
+            ;;
         deploy)
             cat <<'EOF'
 deploy  -  install an already-built tweak onto the phone.
@@ -5560,6 +6027,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "chains"       "Attack chain catalog + stages (C5.3)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "cve [filter]" "CVE tracker: kernel|userspace|sandbox|tcc|ssv|live (C5.1/C5.2)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "poclab (o)"   "PoC lab: test found-but-unimplemented bugs  -  list | test <alac|libxml2-diff> (C6)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "mobilegestalt (mg)" "Full MobileGestalt editing: list | set | unset | dump | backup | restore - via Filza Arctic over USB, or SSH (Chain F)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "experimental" "Dev section: unfinished exploits, novel chains, device dump (red theme)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "toggle on|off" "Enable/disable tweak"
     printf "  ${C_EYE}%-14s${NC} %s\n" "history"      "Exploit stats + chart"
@@ -5654,6 +6122,7 @@ main() {
         chains)    cmd_chains "${args[@]}";;
         cve)       cmd_cve "${args[@]}";;
         poclab)    cmd_poclab "${args[@]}";;
+        mobilegestalt|mg) cmd_mobilegestalt "${args[@]}";;
         experimental|exp) cmd_experimental "${args[@]}";;
         report)    cmd_report "${args[@]}";;
         config|cfg|g) cmd_config "${args[@]}";;

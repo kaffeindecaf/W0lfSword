@@ -26,6 +26,7 @@
 #import "utils/permission_utils.h"
 #import "utils/state.h"
 #include "TweakExploit.h"
+#include "mobilegestalt/mobilegestalt.h"
 
 #include "utils/tweak_log.h"
 
@@ -536,6 +537,7 @@ static void hudInstall(void) {
 
     NSTimer *timer = [NSTimer timerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *t) {
         hudRefresh();
+        mg_poll_commands();  // [MG] MobileGestalt command files from the host
     }];
     [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
     hudRefresh();
