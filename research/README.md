@@ -28,6 +28,7 @@
 | `TCC_BYPASS.md` | TCC database modification research (roadmap C2.1) |
 | `sandbox_research.h` | Reverse-engineered sandbox struct definitions |
 | `kc261_gap_windows.md` | BB-050 follow-up: 26.6.1 named-function re-run (relink noise confirmed), anchor-precise shift-cluster map, inter-anchor gap windows localizing the fix sites to 2 named regions (+320 vn_kqfilter, +344 load_static_trust_cache), ALAC retest note. Evidence: `~/Desktop/ios-bounty-hunt/reports/bb050-reread-20260903/` |
+| `webkit_download_gaps_current.md` | BB-052 re-verification 2026-09-03: blob:/file: download gaps still open on WebKit main (startDownload/convertMainResourceLoadToDownload scheme-less, blob: download branch unvalidated, data: guard data:-only); BB-047 item-3 shadow-owner family negative (WeakPtr-hardened). Evidence: `~/Desktop/ios-bounty-hunt/reports/webkit-main-verify-20260903/` |
 
 ## Status
 
