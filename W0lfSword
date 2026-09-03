@@ -2464,6 +2464,61 @@ experimental_report() {
     echo ""
 }
 
+# ── experimental device dump helpers ───────────────────────────
+# Shared tail of the dump: exploit + chain rows and the compatibility
+# table for a (model, ios) pair. Used by the USB and the WiFi paths.
+device_compat_block() {
+    local m="$1" v="$2"
+    echo -e "  ${C_DIM}exploit:   ${NC}$(select_exploit "$m")"
+    echo -e "  ${C_DIM}chain:     ${NC}$(select_best_chain "$v" "$m" | cut -d'|' -f1-2 | tr '|' ' ')"
+    echo ""
+    echo -e "  ${C_FROST}compatibility:${NC}"
+    exploit_compat_check "$v" "$m"
+}
+
+# AUD.7  -  saved-device WiFi fallback for `experimental device` (was USB
+# only): same route as `device info`  -  saved IP, then ssh. BatchMode, so a
+# missing key fails with a hint instead of prompting mid-dump.
+device_wifi_dump() {
+    local ip; ip=$(get_device_ip)
+    if [ -z "$ip" ]; then
+        err "no device on USB and no saved WiFi device"
+        hint "USB: plug the phone in and tap TRUST  -  or WiFi: ./W0lfSword device add <ip> (needs OpenSSH)"
+        return 1
+    fi
+    if ! ping_check "$ip"; then
+        err "saved device $ip is offline"
+        hint "power the phone on (or ./W0lfSword device switch <ip>) and re-run"
+        return 1
+    fi
+    # Reachability + key check first (same probe as `device info`), then one
+    # simple command per field - no nested quoting. Model via hw.machine;
+    # uname -m is the fallback on rootless Dopamine where sysctl is not in
+    # PATH (same as the adderall probe).
+    if ! ssh_safe "root@$ip" "echo ok" 2>/dev/null | grep -q ok; then
+        err "SSH to root@$ip failed  -  device offline or this computer's key not on it"
+        hint "run ./W0lfSword adderall once (installs the key) or: ssh-copy-id root@$ip"
+        return 1
+    fi
+    local dname dmodel dios dbuild
+    dname=$(ssh_safe "root@$ip" "hostname 2>/dev/null || uname -n" 2>/dev/null || echo "?")
+    dmodel=$(ssh_safe "root@$ip" "sysctl -n hw.machine 2>/dev/null || uname -m" 2>/dev/null || echo "?")
+    dios=$(ssh_safe "root@$ip" "sw_vers -productVersion" 2>/dev/null || echo "?")
+    dbuild=$(ssh_safe "root@$ip" "sw_vers -buildVersion" 2>/dev/null || echo "?")
+    echo -e "  ${C_DIM}link:      ${NC}WiFi  (root@$ip)"
+    echo -e "  ${C_DIM}name:      ${NC}$dname"
+    echo -e "  ${C_DIM}model:     ${NC}$dmodel"
+    echo -e "  ${C_DIM}ios:       ${NC}$dios"
+    echo -e "  ${C_DIM}build:     ${NC}$dbuild"
+    if [ "$dios" != "?" ] && [ "$dmodel" != "?" ]; then
+        device_compat_block "$dmodel" "$dios"
+    else
+        echo ""
+        echo -e "  ${C_DIM}(exploit/chain map needs model + iOS  -  both came back unknown)${NC}"
+    fi
+    return 0
+}
+
 # experimental body: the content below the wolf (also used by the
 # scramble reveal, so it must be pure stdout)
 experimental_body() {
@@ -2592,26 +2647,32 @@ EOF
             ;;
         device)
             section "Device dump  -  verbose"
+            local dumped=0
             if command -v idevice_id &>/dev/null; then
                 local uuid; uuid=$(idevice_id -l 2>/dev/null | head -1 || echo "")
                 if [ -n "$uuid" ]; then
+                    dumped=1
+                    local dname dios dbuild dmodel darch
+                    dname=$(ideviceinfo -k DeviceName 2>/dev/null || echo "?")
+                    dios=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "?")
+                    dbuild=$(ideviceinfo -k BuildVersion 2>/dev/null || echo "?")
+                    dmodel=$(ideviceinfo -k ProductType 2>/dev/null || echo "?")
+                    darch=$(ideviceinfo -k CPUArchitecture 2>/dev/null || echo "?")
+                    echo -e "  ${C_DIM}link:      ${NC}USB"
                     echo -e "  ${C_DIM}udid:      ${NC}$uuid"
-                    echo -e "  ${C_DIM}model:     ${NC}$(ideviceinfo -k ProductType 2>/dev/null || echo '?')"
-                    echo -e "  ${C_DIM}ios:       ${NC}$(ideviceinfo -k ProductVersion 2>/dev/null || echo '?')"
-                    echo -e "  ${C_DIM}build:     ${NC}$(ideviceinfo -k BuildVersion 2>/dev/null || echo '?')"
-                    echo -e "  ${C_DIM}name:      ${NC}$(ideviceinfo -k DeviceName 2>/dev/null || echo '?')"
-                    echo -e "  ${C_DIM}arch:      ${NC}$(ideviceinfo -k CPUArchitecture 2>/dev/null || echo '?')"
-                    local m v; m=$(ideviceinfo -k ProductType 2>/dev/null || echo ""); v=$(ideviceinfo -k ProductVersion 2>/dev/null || echo "")
-                    echo -e "  ${C_DIM}exploit:   ${NC}$(select_exploit "$m")"
-                    echo -e "  ${C_DIM}chain:     ${NC}$(select_best_chain "$v" "$m" | cut -d'|' -f1-2 | tr '|' ' ')"
-                    echo ""
-                    echo -e "  ${C_FROST}compatibility:${NC}"
-                    exploit_compat_check "$v" "$m"
-                else
-                    echo -e "  ${C_RED}no device on USB${NC}"
+                    echo -e "  ${C_DIM}model:     ${NC}$dmodel"
+                    echo -e "  ${C_DIM}ios:       ${NC}$dios"
+                    echo -e "  ${C_DIM}build:     ${NC}$dbuild"
+                    echo -e "  ${C_DIM}name:      ${NC}$dname"
+                    echo -e "  ${C_DIM}arch:      ${NC}$darch"
+                    device_compat_block "$dmodel" "$dios"
                 fi
             else
-                echo -e "  ${C_RED}idevice tools missing  -  run ./W0lfSword setup${NC}"
+                echo -e "  ${C_RED}idevice tools missing  -  USB dump unavailable${NC}"
+            fi
+            if [ "$dumped" -eq 0 ]; then
+                # AUD.7  -  saved-device WiFi fallback (prints its own errors)
+                device_wifi_dump || true
             fi
             echo ""
             echo -e "  ${C_DIM}saved devices: .w0lfsword/devices.json${NC}"
