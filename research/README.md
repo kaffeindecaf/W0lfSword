@@ -27,6 +27,7 @@
 | `bug_bounty_writeup.md` | DarkSword-ecosystem findings mapped to Apple bounty categories (KASLR leak, sandbox escape, etc.) |
 | `TCC_BYPASS.md` | TCC database modification research (roadmap C2.1) |
 | `sandbox_research.h` | Reverse-engineered sandbox struct definitions |
+| `kc261_gap_windows.md` | BB-050 follow-up: 26.6.1 named-function re-run (relink noise confirmed), anchor-precise shift-cluster map, inter-anchor gap windows localizing the fix sites to 2 named regions (+320 vn_kqfilter, +344 load_static_trust_cache), ALAC retest note. Evidence: `~/Desktop/ios-bounty-hunt/reports/bb050-reread-20260903/` |
 
 ## Status
 
