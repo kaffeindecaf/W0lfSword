@@ -97,7 +97,10 @@ docs/POPULARITY_WRITEUP.md
 # responsible-disclosure window allows it)
 /reports/
 /pocs/bb032/
+/pocs/bb0*/
 /pocs/mcmfuzz/
+/pocs/mcmprobe/
+*.ips
 
 # Bounty research docs + PoC lab (untracked 2026-09-03, local only)
 /research/bug_bounty_writeup.md

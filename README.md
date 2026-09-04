@@ -185,7 +185,7 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `sbtweak (sbt)` | SpringBoard live tweaks via TaskRop RemoteCall: `dock <1-12>` (5-icon dock) | `reset` | `status` — live SB object edits, revert on reboot, iOS 17–26.0.1 (on-device verify pending) | `./W0lfSword sbtweak dock 5` |
 | `cve [filter]` | CVE tracker: kernel / userspace / sandbox / tcc / ssv / live (C5.1/C5.2) | `./W0lfSword cve live` |
 | `poclab list` | PoC lab: found-but-unimplemented bugs with status (tested / blocked / needs-device) | `./W0lfSword poclab list` |
-| `poclab test <id>` | run a host-side PoC: `alac` (ASAN harnesses, BB-038/039), `libxml2-diff` (fork comparison) | `./W0lfSword poclab test alac` |
+| `poclab test <id>` | run a host-side PoC: `alac` (ASAN ALAC harnesses), `libxml2-diff` (fork comparison) | `./W0lfSword poclab test alac` |
 | `experimental` | dev section (red theme): unfinished exploits, novel chains, verbose device dump | `./W0lfSword experimental list` |
 | `poc list` | panic-PoC catalog (research only, crashes the phone) | `./W0lfSword poc list` |
 | `poc sep-panic [ip]` | build + deploy + fire the SEP panic PoC | `./W0lfSword poc sep-panic` |
@@ -202,7 +202,7 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `setup` | install build tools (needs sudo on Linux) | `sudo ./W0lfSword setup` |
 | `usbliter8` | A12/A13 tethered jailbreak TUI (needs sudo) | `sudo ./W0lfSword ul8` |
 | `usbtest (u)` | USB cable + pairing + data round-trip. Harmless, read-only | `./W0lfSword usbtest` |
-| `panic` | classify .ips crash logs -> kernel/SEP/MTE + known CVEs (BB-032..037) | `./W0lfSword panic analyze crash.ips` |
+| `panic` | classify .ips crash logs -> kernel/SEP/MTE + known CVEs | `./W0lfSword panic analyze crash.ips` |
 | `kernelcache` | offline XPF offset research: resolve / diff / extract (K4.1 as a command) | `./W0lfSword kernelcache diff a.img4 b.img4` |
 | `status/offsets/audit --json` | machine-readable output for scripts and CI | `./W0lfSword status --json` |
 | `clean` / `update` / `audit` / `export` | housekeeping and diagnostics | `./W0lfSword update` |
@@ -374,8 +374,8 @@ registered through a sideloader.
   nothing. Run it before `adderall` if the phone isn't found.
 - `panic` command: drop a .ips crash report or panic log in and it
   classifies the crash (kernel / SEP / MTE / userspace), extracts the
-  xnu build, and maps it to known CVEs plus the BUG_BOUNTY findings
-  (BB-032..037). `panic fetch` pulls the latest report off the phone.
+  xnu build, and maps it to known CVEs. `panic fetch` pulls the latest
+  report off the phone.
 - `kernelcache` command: offline XPF offset research. Resolve a
   kernelcache's offsets, diff two builds (the K4.1 methodology), or
   extract the kernelcache straight from an IPSW. No device needed.

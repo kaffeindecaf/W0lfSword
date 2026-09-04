@@ -66,22 +66,22 @@
 - [x] `C4.1` ⚪ — Audio framework attack surface map + CVE catalog
   _Done 2026-08-29: map in research/audio_frameworks.md (AudioToolbox/CoreAudio/CoreMedia entry points, formats, open-source status). CVE catalog merged from NVD/P0 research — see research/audio_frameworks.md + other_frameworks.md._
 - [x] `C4.2` ⚪ — Open-source code audit: ALAC decoder, apple-oss-distributions/CoreAudio
-  _Done 2026-08-29: apple-oss-distributions has NO CoreAudio (verified via git ls-remote; org = ICU/Libiconv/libxml2/mDNSResponder only). Audited apple/ALAC instead: two ASAN-verified bugs (BB-038 partialFrame numSamples heap overflow, BB-039 Init cookie OOB read) + unbounded bitstream reads. Harnesses in research/alac_poc/._
+  _Done 2026-08-29: apple-oss-distributions has NO CoreAudio (verified via git ls-remote; org = ICU/Libiconv/libxml2/mDNSResponder only). Audited apple/ALAC instead: two ASAN-verified bugs (ALAC partialFrame numSamples heap overflow + Init cookie OOB read) + unbounded bitstream reads. Harnesses in research/alac_poc/._
 - [x] `C4.3` ⚪ — Audio fuzz harness (host + SE 18.4.1 probe)
   _Done 2026-08-30 (host side): libFuzzer target over ALACDecoder
   (research/alac_poc/fuzz_alac.cpp, structure-aware mutator on
   partialFrame/numSamples) + encoder-based seed generator
   (gen_seeds.cpp), wired as `./W0lfSword poclab test alac-fuzz [secs]`.
   Finds in 30-60s: unpc_block READ OOB (dp_dec.c:99), dyn_decomp WRITE
-  (ag_dec.c:345 = BB-038 compressed path), BitBufferRead OOB
+  (ag_dec.c:345 = compressed path), BitBufferRead OOB
   (ALACBitUtilities.c:48). On-device probe stays hardware-gated: no
   phone attached this session._
 - [x] `C4.4` ⚪ — Other framework targets (CoreMedia/CoreText/PDFKit/libxml2/ICU/mDNSResponder)
-  _Done 2026-08-29: research/other_frameworks.md — 8 ranked targets, verified CVE catalog (41 CVEs cited), dyld-cache RE workflow. Top lead: CVE-2025-43400 FontParser OOB write LIVE on the 18.4.1 test device (BB-040), fix recoverable by diffing libFontParser 18.4.1 vs 18.7.1._
+  _Done 2026-08-29: research/other_frameworks.md — 8 ranked targets, verified CVE catalog (41 CVEs cited), dyld-cache RE workflow. Top lead: CVE-2025-43400 FontParser OOB write LIVE on the 18.4.1 test device, fix recoverable by diffing libFontParser 18.4.1 vs 18.7.1._
 - [x] `C4.5` ⚪ — IPSW userspace extraction feasibility (rootfs DMG encryption)
   _Done 2026-08-29: rootfs DMG is encrypted; kernel-deltas pipeline extracts only the kernelcache (20MB of an 8.45GB IPSW). Userspace frameworks come from the on-device dyld shared cache instead (blacktop/ipsw). No kernel offsets needed for the userspace findings so far._
-- [x] `C4.6` ⚪ — BUG_BOUNTY.md entries for confirmed findings (BB-022+)
-  _Done 2026-08-29: BB-038 (ALAC heap overflow, ASAN-verified), BB-039 (ALAC cookie OOB read, ASAN-verified), BB-040 (FontParser OOB write live on 18.4.1). Next-steps list extended with the audio probe + FontParser diff plan._
+- [x] `C4.6` ⚪ — Tracker entries for confirmed findings
+  _Done 2026-08-29: ALAC heap overflow (ASAN-verified), ALAC cookie OOB read (ASAN-verified), FontParser OOB write live on 18.4.1. Next-steps list extended with the audio probe + FontParser diff plan._
 
 ## 0.5 — CVE hunting + attack chains campaign (2026-08-29, 26.1+ direction)
 
@@ -92,13 +92,13 @@
 - [x] `C5.1` ⚪ — Kernel CVE hunt: xnu bugs fixed in iOS 26.1–26.6.x (LPE candidates for a 26.1+ kernel stage, incl. CVE-2025-46285)
   _Done 2026-08-29: research/kernel26_cves.md — full catalog 26.1→26.6.1. Top candidates: DirtySlide (CVE-2026-43724, only public kernel-write PoC), CVE-2026-64747 AVEVideoEncoder (kernel CODE EXEC, live 26.1–26.5.x), CVE-2026-28951 (root LPE, widest window), CVE-2026-20687 (AppleJPEG UAF, public trigger). CVE-2025-46285 confirmed fixed 26.2/18.7.3 → live 26.1 AND 18.4.1._
 - [x] `C5.2` ⚪ — Userspace CVE hunt: sandbox escape + TCC bypass + SSV bypass (2025-2026), live-vs-patched on 18.4.1 / 26.x
-  _Done 2026-08-29: research/userspace_escapes.md — top finds: CVE-2025-43329 (sandbox escape, LIVE all 18.x, fixed only in 26.0, BB-042), bl_sbx itunesstored/bookassetd write-escape (ALIVE ≤26.2b1, BB-041), CVE-2025-14174/43510 (DarkSword kit escape stages), CVE-2026-28973 (libc int overflow escape). No iOS SSV CVEs in 2025-26 (kernel-mediated only)._
+  _Done 2026-08-29: research/userspace_escapes.md — top finds: CVE-2025-43329 (sandbox escape, LIVE all 18.x, fixed only in 26.0), bl_sbx itunesstored/bookassetd write-escape (ALIVE ≤26.2b1), CVE-2025-14174/43510 (DarkSword kit escape stages), CVE-2026-28973 (libc int overflow escape). No iOS SSV CVEs in 2025-26 (kernel-mediated only)._
 - [x] `C5.3` ⚪ — Attack chain designs from live bugs (bad_query / MCM / FontParser / kernel ≤26.0.1)
   _Done 2026-08-29: research/attack_chains.md — 7 chains (A ContainerKey ~75%, B TCC-Key ~55%, C MediaLock ~30%, D Kernel26 ~35%, E SealBreaker ~70%, F GestaltForge novel ~40%, G FontStrike novel ~25%)._
 - [x] `C5.4` ⚪ — W0lfSword CLI: `chains` + `cve` commands, exploits matrix update
   _Done 2026-08-29: cmd_chains (7 chains, per-chain stages) + cmd_cve (kernel/userspace/sandbox/tcc/ssv/live filters) wired in 5 places (dispatch, menu, menu_opt n, help, explain). exploits matrix gained bad_query/MCM/ALAC/FontParser/APAC rows. README commands table updated. bash -n + audit pass._
 - [x] `C5.5` ⚪ — Documentation: research doc + BUG_BOUNTY entries for confirmed live findings
-  _Done 2026-08-29: BB-041 (bl_sbx write-escape, ALIVE ≤26.2b1) + BB-042 (CVE-2025-43329 sandbox escape, LIVE all 18.x). Findings: 42 total._
+  _Done 2026-08-29: bl_sbx write-escape (ALIVE ≤26.2b1) + CVE-2025-43329 sandbox escape (LIVE all 18.x)._
 
 ## 0.6 — PoC lab campaign (2026-08-29, test the found bugs)
 
@@ -106,7 +106,7 @@
 > into tested proof-of-concepts, document why each works or doesn't on
 > this host, and expose them through a new `poclab` CLI tab.
 
-- [x] `C6.1` ⚪ — Re-verify ALAC PoCs (BB-038/BB-039) end-to-end under ASAN
+- [x] `C6.1` ⚪ — Re-verify ALAC PoCs end-to-end under ASAN
 - [x] `C6.2` ⚪ — libxml2 fork-diff test (apple-oss-distributions vs upstream)
 - [x] `C6.3` ⚪ — mDNSResponder Linux build + smoke test
 - [x] `C6.4` ⚪ — DirtySlide / bl_sbx / FontParser: why-not-testable analysis
@@ -268,16 +268,16 @@
 - [x] `A1.10` 🟢 — `TweakLog` is NOT thread-safe (fopen/fclose race) → pthread_mutex_t guard  
   _Prompt:_ "The shared TweakLog() in utils/tweak_log.h can have two threads calling fopen on the same path simultaneously. Add a pthread_mutex_t guard around the entire function."
 
-- [x] `A1.11` 🟡 — `TweakLog` mutex deadlock if signal handler calls TweakLog (BB-008) → use trylock with stderr fallback  
+- [x] `A1.11` 🟡 — `TweakLog` mutex deadlock if signal handler calls TweakLog → use trylock with stderr fallback  
   _Prompt:_ "Add pthread_mutex_trylock() to TweakLog. If the lock fails (held by another thread during signal handling), write to stderr instead. This prevents deadlock if an exception handler thread calls TweakLog while the main thread holds the lock."
 
-- [x] `A1.12` 🔴 — `_Atomic bool` reads/writes need `memory_order_acquire`/`memory_order_release` for cross-thread visibility (BB-009)  
+- [x] `A1.12` 🔴 — `_Atomic bool` reads/writes need `memory_order_acquire`/`memory_order_release` for cross-thread visibility  
   _Prompt:_ "Replace bare `g_exploitDone = true` with `atomic_store_explicit(&g_exploitDone, true, memory_order_release)` and `if (g_exploitDone)` with `if (atomic_load_explicit(&g_exploitDone, memory_order_acquire))`. Same for g_patching_in_progress. Include <stdatomic.h>."
 
-- [x] `A1.13` 🟡 — Add sanity check: verify APFS fsnode `mode & 0777` is ≤ 0777 before writing ownership fields (BB-012)  
+- [x] `A1.13` 🟡 — Add sanity check: verify APFS fsnode `mode & 0777` is ≤ 0777 before writing ownership fields  
   _Prompt:_ "In apply_permissions_kernel() in permission_utils.m, read the current mode from v_data+off_apfs_fsnode_mode before writing. Verify it's a valid POSIX mask (0-0777). If it's garbage, the offset is wrong and we should abort instead of corrupting kernel memory."
 
-- [x] `A1.14` 🔴 — Verify thread/machine offsets for A16/A17/A18 on iOS 26.0.1 before any writes (BB-011)  
+- [x] `A1.14` 🔴 — Verify thread/machine offsets for A16/A17/A18 on iOS 26.0.1 before any writes  
   _Prompt:_ "Add a 'known good' verification in kexploit_opa334.m: after offset resolution but before any kwrite, read the value at off_thread_machine_kstackptr. It should be a valid kernel stack address (aligned to 16, within VM_MIN/VM_MAX). If it fails, log and return -1. This prevents corrupting kernel memory with wrong offsets."
 
 ---
@@ -645,7 +645,7 @@
   apple/ALAC decoder, apple-oss-distributions/CoreAudio,
   AudioVideoBundles. Evidence per finding (file:line, trigger, impact).
   _Done 2026-08-29: CoreAudio/AudioVideoBundles absent from the org
-  (verified). ALAC audit: BB-038 + BB-039 ASAN-verified, harnesses in
+  (verified). ALAC audit: partialFrame heap overflow + cookie OOB read ASAN-verified, harnesses in
   research/alac_poc/._
 - [x] `C4.4` ⚪ — Audio fuzz harness reusing K4.2 patterns: ALAC/CAF/WAV
   seeds, structure-aware mutator, host-side (libFuzzer/AFL++ if
@@ -656,21 +656,21 @@
   gen_seeds.cpp encoder-vended corpus (mono/stereo, 16/24/32-bit).
   Wired `./W0lfSword poclab test alac-fuzz [secs]`; 30-60s finds the
   unpc_block READ OOB (dp_dec.c:99), dyn_decomp WRITE (ag_dec.c:345,
-  BB-038 compressed path) and BitBufferRead OOB (ALACBitUtilities.c:48).
+  compressed path) and BitBufferRead OOB (ALACBitUtilities.c:48).
   On-device probe hardware-gated (no phone)._
 - [x] `C4.5` ⚪ — Other framework targets: CoreMedia sample buffers,
   CoreText fonts, PDFKit, libxml2, ICU, mDNSResponder, Quick Look.
   Rank by open-source availability, parser size, CVE density.
   _Done 2026-08-29: research/other_frameworks.md — 8 targets ranked,
-  top lead CVE-2025-43400 FontParser live on 18.4.1 (BB-040)._
+  top lead CVE-2025-43400 FontParser live on 18.4.1._
 - [x] `C4.6` ⚪ — IPSW userspace extraction: rootfs DMG is encrypted;
   only the kernelcache is extractable via the kernel-deltas pipeline.
   Notate as blocked if keys unavailable.
   _Done 2026-08-29: confirmed blocked — userspace frameworks come from
   the on-device dyld shared cache (blacktop/ipsw), not IPSWs._
-- [x] `C4.7` ⚪ — BUG_BOUNTY.md: confirmed findings as BB-022+ with
+- [x] `C4.7` ⚪ — Tracker entries for confirmed findings with
   evidence (file:line, trigger, impact, bounty category).
-  _Done 2026-08-29: BB-038, BB-039, BB-040 added._
+  _Done 2026-08-29: ALAC heap overflow, ALAC cookie OOB read, FontParser OOB write logged._
 
 ---
 
@@ -693,8 +693,8 @@
 - [x] `C5.2` ⚪ — Userspace CVE hunt: sandbox escape + TCC bypass + SSV
   bypass, 2025-2026, iOS 17-26. Live-vs-patched on 18.4.1 (SE2) and
   26.x. Skip already-ported bugs (bad_query K4.10, MCM/mha K4.12).
-  _Done 2026-08-29: research/userspace_escapes.md. BB-041 (bl_sbx), BB-042
-  (CVE-2025-43329). No iOS SSV CVEs 2025-26._
+  _Done 2026-08-29: research/userspace_escapes.md. bl_sbx write-escape
+  + CVE-2025-43329 sandbox escape. No iOS SSV CVEs 2025-26._
 - [x] `C5.3` ⚪ — Attack chain designs: chain the live bugs (bad_query
   read-escape, MCM container access, FontParser 18.4.1 OOB write, kernel
   R/W ≤26.0.1) into 3-5 concrete chains with per-version applicability,
@@ -709,9 +709,9 @@
   _Done 2026-08-29: cmd_chains + cmd_cve wired (dispatch/menu/menu_opt n/
   help/explain); exploits matrix updated; README commands table; verified._
 - [x] `C5.5` ⚪ — Documentation: research/attack_chains.md + CVE catalog
-  doc; BUG_BOUNTY.md entries for confirmed live findings.
+  doc; tracker entries for confirmed live findings.
   _Done 2026-08-29: research/attack_chains.md + kernel26_cves.md +
-  userspace_escapes.md; BUG_BOUNTY BB-041 + BB-042 (42 total)._
+  userspace_escapes.md._
 
 ---
 
@@ -722,11 +722,10 @@
 > doesn't. The `poclab` CLI tab lists every concept with a runnable
 > test or a blocker. Docs in research/poclab.md.
 
-- [x] `C6.1` ⚪ — ALAC PoCs (BB-038 partialFrame heap overflow, BB-039
-  cookie OOB read): re-verify both harnesses under ASAN on this host,
+- [x] `C6.1` ⚪ — ALAC PoCs (partialFrame heap overflow + cookie OOB read):
+  re-verify both harnesses under ASAN on this host,
   wire `poclab test alac` to build + run them against a cloned
-  apple/ALAC. Expected: heap-buffer-overflow WRITE (BB-038) + READ
-  (BB-039). Why it works: the reference decoder never bounds the
+  apple/ALAC. Expected: heap-buffer-overflow WRITE + READ. Why it works: the reference decoder never bounds the
   bitstream numSamples against the cookie-sized buffers.
   _Done 2026-08-29: scripts/poclab_test_alac.sh (clone cached in
   .w0lfsword/poclab/alac) builds both harnesses and both ASAN
@@ -1122,7 +1121,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `J6.2` 🟡 — Add --json flag to status/audit/offsets for machine-readable output
   _Done 2026-08-24: `--json` flag parsed in main() (any command position); status emits {version, git, roadmap, device, exploit_methods, offset_blocks}; audit emits {files[], issues, passed}; offsets emits {version_blocks[], soc_coverage, total_blocks}. Pure bash→python3 json.dumps, no deps._
 
-- [x] `J6.4` 🟡 — Panic log analyzer: `panic analyze` classifies .ips/panic logs (kernel/SEP/MTE/userspace) and maps to known CVEs + BB-032..037
+- [x] `J6.4` 🟡 — Panic log analyzer: `panic analyze` classifies .ips/panic logs (kernel/SEP/MTE/userspace) and maps to known CVEs
   _Done 2026-08-24: scripts/panic_analyzer.py (pure stdlib) — rules for SEP exhaustion (0x0006fe9x/0x6fea7), AppleJPEGDriver UAF (CVE-2026-20687), DirtySlide (CVE-2026-43724), DarkSword class (CVE-2025-43520), EXR (CVE-2026-28990), MCM activity. CLI: `panic list|fetch [ip]|analyze <file>` (menu `p`)._
 
 - [x] `J6.5` 🟢 — Kernelcache diff: offline XPF offset research (K4.1 automation) — resolve/diff kernelcaches, extract from IPSW
