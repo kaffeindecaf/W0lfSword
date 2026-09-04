@@ -2703,43 +2703,75 @@ EOF
 # with the full CacheExtra after a mutation). Commands sit unprocessed until
 # the escape is live, so the host can queue them early.
 
+# stderr diagnostics for the mg transport: mginfo always prints, mgdbg only
+# with --verbose / -v. Everything goes to stderr so stdout stays pure result
+# JSON for the callers that pipe it (dump/get/set parse it).
+mginfo() { printf "  ${C_DIM}mg: %s${NC}\n" "$*" >&2; }
+mgdbg()  { { [ "${MG_VERBOSE:-0}" = "1" ] || $VERBOSE; } && printf "  ${C_DIM}mg: %s${NC}\n" "$*" >&2 || true; }
+
+MG_BID=""
 mg_bid_detect() {
-    # Installed Filza bundle id, from the device itself (team-suffixed ids
-    # appear on PlumeImpactor installs). Fall back to the known candidates.
+    # Return a bundle id that actually answers on the AFC documents domain.
+    # Sideloaded Filza registers as <bid>.<uuid>; the bare id passes
+    # ideviceinstaller -l but fails house-arrest, so every candidate is
+    # validated with a real afcclient ls before being accepted.
+    local candidate rc
+    if [ -n "$MG_BID" ]; then echo "$MG_BID"; return 0; fi
     if command -v ideviceinstaller &>/dev/null; then
         local inst; inst=$(ideviceinstaller -l 2>/dev/null | grep -iE "Filza|MobileHouseArrest" | head -1 || echo "")
         if [ -n "$inst" ]; then
-            echo "${inst%% *}"
-            return 0
+            candidate="${inst%% *}"
+            afcclient --documents "$candidate" ls Documents >/dev/null 2>&1; rc=$?
+            if [ "$rc" -eq 0 ]; then
+                mgdbg "AFC bid: $candidate (from ideviceinstaller)"
+                MG_BID="$candidate"; echo "$candidate"; return 0
+            fi
+            mginfo "bid '$candidate' (ideviceinstaller) does not answer AFC - probing known ids"
         fi
     fi
-    local bid
-    for bid in "com.kaffeindecaf.w0lfsword.filza" "com.kaffeindecaf.w0lfsword.filza.J8T95UQMW2"; do
-        echo "$bid"
-        return 0
+    for candidate in "com.kaffeindecaf.w0lfsword.filza.J8T95UQMW2" "com.kaffeindecaf.w0lfsword.filza"; do
+        afcclient --documents "$candidate" ls Documents >/dev/null 2>&1; rc=$?
+        if [ "$rc" -eq 0 ]; then
+            mgdbg "AFC bid: $candidate"
+            MG_BID="$candidate"; echo "$candidate"; return 0
+        fi
+        mgdbg "bid $candidate: no AFC answer (rc=$rc)"
     done
+    mginfo "no Filza container answers on AFC - is Filza installed and the device paired? (usbmuxd up?)"
     return 1
 }
 
 # mg_afc_get <remote> -> prints local tmp path; empty on failure
 mg_afc_get() {
-    local remote="$1" bid outdir
+    local remote="$1" bid outdir errf rc base
     bid=$(mg_bid_detect) || return 1
     outdir=$(mktemp -d /tmp/ws_mg.XXXXXX 2>/dev/null || echo /tmp)
-    (cd "$outdir" && afcclient --documents "$bid" get "$remote" >/dev/null 2>&1)
-    local base; base=$(basename "$remote")
-    if [ -s "$outdir/$base" ]; then echo "$outdir/$base"; else rm -rf "$outdir"; return 1; fi
+    errf=$(mktemp /tmp/ws_mg_err.XXXXXX)
+    (cd "$outdir" && afcclient --documents "$bid" get "$remote" >/dev/null 2>"$errf"); rc=$?
+    base=$(basename "$remote")
+    if [ "$rc" -eq 0 ] && [ -s "$outdir/$base" ]; then
+        rm -f "$errf"; echo "$outdir/$base"
+    else
+        mgdbg "afcclient get $remote failed (rc=$rc): $(head -c 300 "$errf" 2>/dev/null)"
+        rm -rf "$outdir" "$errf"; return 1
+    fi
 }
 
 # mg_afc_put <local> <remote>
 mg_afc_put() {
-    local bid; bid=$(mg_bid_detect) || return 1
-    afcclient --documents "$bid" put "$1" "$2" >/dev/null 2>&1
+    local bid rc errf; bid=$(mg_bid_detect) || return 1
+    errf=$(mktemp /tmp/ws_mg_err.XXXXXX)
+    afcclient --documents "$bid" put "$1" "$2" >/dev/null 2>"$errf"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        mginfo "AFC put of $2 rejected (rc=$rc) - open Filza once so its container mounts, then retry"
+        mgdbg "afcclient put stderr: $(head -c 300 "$errf" 2>/dev/null)"
+    fi
+    rm -f "$errf"; return $rc
 }
 
 mg_afc_rm() {
-    local bid; bid=$(mg_bid_detect) || return 1
-    afcclient --documents "$bid" rm "$1" >/dev/null 2>&1
+    local bid rc; bid=$(mg_bid_detect) || return 1
+    afcclient --documents "$bid" rm "$1" >/dev/null 2>&1; return $?
 }
 
 # mg_push_and_wait <json-file> [wait-secs] -> prints result JSON
@@ -2751,14 +2783,20 @@ mg_push_and_wait() {
     local cmd_remote="Documents/mg-cmd-${token}.json"
     local res_remote="Documents/mg-result-${token}.json"
 
+    mginfo "push $cmd_remote (op payload), waiting up to ${timeout}s for the on-device module"
     mg_afc_put "$json" "$cmd_remote" || { err "AFC push failed - open Filza once (exploit must be running) and retry"; return 1; }
 
-    local waited=0 resf=""
+    local waited=0 resf="" tick=0
     while [ "$waited" -lt "$timeout" ]; do
         sleep 2; waited=$((waited + 2))
         resf=$(mg_afc_get "$res_remote") && break
+        tick=$((tick + 2))
+        if [ $((tick % 10)) -eq 0 ]; then
+            mginfo "no module answer yet (${waited}s/${timeout}s) - is Filza open with the exploit escaped?"
+        fi
     done
     [ -z "$resf" ] && { err "no result after ${timeout}s - is Filza open with the exploit escaped? (log: ./W0lfSword log)"; mg_afc_rm "$cmd_remote"; return 1; }
+    mginfo "module answered after ${waited}s:"
     cat "$resf"; rm -rf "$(dirname "$resf")"
     mg_afc_rm "$res_remote"
     mg_afc_rm "$cmd_remote"
@@ -2889,6 +2927,7 @@ cmd_mobilegestalt() {
             --type) typ="$2"; shift 2;;
             --type=*) typ="${1#--type=}"; shift;;
             --respring) respring=true; shift;;
+            --verbose|--debug) MG_VERBOSE=1; shift;;
             --ssh) mode="ssh"; ssh_ip="$2"; shift 2;;
             --ssh=*) mode="ssh"; ssh_ip="${1#--ssh=}"; shift;;
             --usb) mode="usb"; shift;;
