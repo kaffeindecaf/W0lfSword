@@ -154,7 +154,15 @@ static const char *mg_find_plist_path(void) {
             }
         }
     }
-    TweakLog("[MG] gestalt cache NOT FOUND under %s", [sg UTF8String]);
+    // One-time log: mg_poll_commands runs on the 0.5s HUD tick, so logging
+    // per miss flooded the log + os_log + HUD ring 2x/sec on stock devices
+    // (seen 2026-09-04: "gestalt cache NOT FOUND" every tick, repeating
+    // output on the HUD panel).
+    static int s_notFoundLogged = 0;
+    if (!s_notFoundLogged) {
+        s_notFoundLogged = 1;
+        TweakLog("[MG] gestalt cache NOT FOUND under %s", [sg UTF8String]);
+    }
     return NULL;
 }
 
