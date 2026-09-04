@@ -4,9 +4,15 @@
 //
 //  See mobilegestalt.h for the host protocol. Objective-C is used for plist
 //  + JSON handling only; every filesystem op is raw POSIX (open/write/fsync/
-//  rename) so the module is immune to the SSV NSFileManager swizzles in
-//  Tweak.m and to Filza's own file layer. MRC (the project builds without
-//  -fobjc-arc): no code below stores autoreleased objects in statics.
+//  rename/opendir/readdir/unlink) so the module is immune to the SSV
+//  NSFileManager swizzles in Tweak.m and to Filza's own file layer. MRC (the
+//  project builds without -fobjc-arc): no code below stores autoreleased
+//  objects in statics.
+//
+//  Ops: respring, status, get, set, unset, batch, dump/export, plus ls (raw
+//  POSIX dir listing) and rm (whitelisted icon-cache delete for the white-
+//  icon recovery fix). ls/rm gate on the same post-escape write check as
+//  set/unset.
 //
 //  Build note: substrate-free (plain Foundation), included in BOTH the MHA
 //  and jailbroken tweak builds via the Makefile.
@@ -446,6 +452,166 @@ static int mg_op_unset(NSMutableDictionary *extra, NSDictionary *cmd, char *errb
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// ls / rm raw POSIX helpers (white-icon recovery)
+// ---------------------------------------------------------------------------
+
+// The module's write gate: the process must actually be able to write the
+// gestalt cache (post-escape). mg_poll_commands() does the same access()
+// probe before dispatching; ls/rm re-check here so the direct
+// mg_apply_command_json() API can't list/delete before the escape.
+static BOOL mg_can_write(const char *path) {
+    return geteuid() == 0 || access(path, W_OK) == 0;
+}
+
+// List a directory with raw opendir/readdir + stat (never NSFileManager, so
+// the SSV swizzles can't fake results). Returns an array of {name,type,size}
+// dicts sorted by name, or nil on error (errno detail in errbuf). *truncated
+// is set when enumeration stopped at the 800-entry cap.
+static NSArray *mg_list_dir(const char *dirpath, int *truncated, char *errbuf, size_t errlen) {
+    *truncated = 0;
+    DIR *d = opendir(dirpath);
+    if (!d) {
+        snprintf(errbuf, errlen, "opendir failed errno=%d (%s)", errno, strerror(errno));
+        return nil;
+    }
+
+    // Strip trailing slashes (except root) so child paths are "dir/name".
+    char base[PATH_MAX];
+    snprintf(base, sizeof(base), "%s", dirpath);
+    size_t blen = strlen(base);
+    while (blen > 1 && base[blen - 1] == '/') base[--blen] = '\0';
+
+    NSMutableArray *entries = [NSMutableArray array];
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+        char child[PATH_MAX];
+        snprintf(child, sizeof(child), "%s/%s", base, de->d_name);
+        const char *type = "other";
+        long long size = 0;
+        struct stat st;
+        if (stat(child, &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                type = "dir";
+            } else if (S_ISREG(st.st_mode)) {
+                type = "file";
+                size = (long long)st.st_size;
+            }
+        }
+        if (entries.count >= 800) {
+            *truncated = 1;
+            break;
+        }
+        NSMutableDictionary *e = [NSMutableDictionary dictionary];
+        NSString *fname = [NSString stringWithUTF8String:de->d_name];
+        e[@"name"] = fname ? fname : (NSString *)@"<non-utf8>";   // never insert nil (raises)
+        e[@"type"] = [NSString stringWithUTF8String:type];
+        e[@"size"] = @(size);
+        [entries addObject:e];
+    }
+    closedir(d);
+
+    return [entries sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
+        return [(NSString *)a[@"name"] compare:(NSString *)b[@"name"]];
+    }];
+}
+
+// Icon-art cache whitelist for rm. ONLY these two locations (or subpaths) may
+// be deleted - clearing the ART cache makes springboard re-render icons from
+// bundles, fixing white icons after a SpringBoard crash. NEVER the icon
+// LAYOUT plist /var/mobile/Library/SpringBoard/IconState.plist (iOS resets
+// that via "Reset Home Screen Layout").
+static const char *mg_rm_whitelist[] = {
+    "/var/mobile/Library/Caches/com.apple.IconServices",
+    "/var/mobile/Library/Caches/com.apple.springboard",
+    NULL
+};
+
+static BOOL mg_rm_path_allowed(const char *inpath) {
+    if (!inpath || !*inpath) return NO;
+
+    // Normalize trailing slashes: "dir///" == "dir".
+    char norm[PATH_MAX];
+    snprintf(norm, sizeof(norm), "%s", inpath);
+    size_t len = strlen(norm);
+    while (len > 1 && norm[len - 1] == '/') norm[--len] = '\0';
+
+    // Reject any "." or ".." component so the path can't step outside an
+    // allowed prefix (e.g. ".../IconServices/../../SpringBoard/IconState.plist").
+    for (const char *p = norm; *p; ) {
+        if (*p == '/') { p++; continue; }
+        const char *seg = p;
+        while (*p && *p != '/') p++;
+        size_t slen = (size_t)(p - seg);
+        if ((slen == 1 && seg[0] == '.') || (slen == 2 && seg[0] == '.' && seg[1] == '.')) {
+            return NO;
+        }
+    }
+
+    for (int i = 0; mg_rm_whitelist[i]; i++) {
+        const char *wl = mg_rm_whitelist[i];
+        size_t wl_len = strlen(wl);
+        if (strncmp(norm, wl, wl_len) == 0 && (norm[wl_len] == '\0' || norm[wl_len] == '/')) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+// Delete a path: unlink files (and symlinks); for directories walk with
+// opendir/readdir, unlink children, recurse into subdirs, rmdir at the end.
+// Only directories require recursive:true. *removed accumulates files+dirs.
+// Symlink-safe: every path is lstat()ed before acting, so a symlink is
+// unlinked, never followed. Accepted residual risk: a concurrent same-uid
+// writer inside /var/mobile/Library/Caches could race the lstat->opendir
+// window and redirect a walk - out of scope for a single-user recovery tool
+// (such a process could delete these caches itself).
+static int mg_rm_path(const char *p, int recursive, int *removed, char *errbuf, size_t errlen) {
+    struct stat st;
+    if (lstat(p, &st) != 0) {
+        snprintf(errbuf, errlen, "lstat failed errno=%d (%s)", errno, strerror(errno));
+        return -1;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        if (unlink(p) != 0) {
+            snprintf(errbuf, errlen, "unlink failed errno=%d (%s)", errno, strerror(errno));
+            return -1;
+        }
+        (*removed)++;
+        return 0;
+    }
+    if (!recursive) {
+        snprintf(errbuf, errlen, "is a directory - recursive:true required");
+        return -1;
+    }
+
+    DIR *d = opendir(p);
+    if (!d) {
+        snprintf(errbuf, errlen, "opendir failed errno=%d (%s)", errno, strerror(errno));
+        return -1;
+    }
+    int rc = 0;
+    struct dirent *de;
+    char child[PATH_MAX];
+    while ((de = readdir(d)) != NULL) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+        snprintf(child, sizeof(child), "%s/%s", p, de->d_name);
+        if (mg_rm_path(child, recursive, removed, errbuf, errlen) != 0) {
+            rc = -1;
+            break;
+        }
+    }
+    closedir(d);
+    if (rc != 0) return rc;
+    if (rmdir(p) != 0) {
+        snprintf(errbuf, errlen, "rmdir failed errno=%d (%s)", errno, strerror(errno));
+        return -1;
+    }
+    (*removed)++;
+    return 0;
+}
+
 // Runs one command dict against the live plist; result dict is JSON-safe.
 static NSMutableDictionary *mg_execute(NSDictionary *cmd, const char *path) {
     NSMutableDictionary *res = [NSMutableDictionary dictionary];
@@ -467,6 +633,70 @@ static NSMutableDictionary *mg_execute(NSDictionary *cmd, const char *path) {
         res[@"path"] = @(path);
         res[@"euid"] = @((int)geteuid());
         res[@"root"] = @(geteuid() == 0 || access(path, W_OK) == 0);
+        return res;
+    }
+
+    if ([op isEqualToString:@"ls"]) {
+        if (!mg_can_write(path)) {
+            res[@"ok"] = @NO;
+            res[@"detail"] = @"not writable - escape not active";
+            return res;
+        }
+        NSString *dir = cmd[@"path"];
+        if (![dir isKindOfClass:[NSString class]] || dir.length == 0) {
+            res[@"ok"] = @NO;
+            res[@"detail"] = @"ls needs a path";
+            return res;
+        }
+        res[@"path"] = dir;
+        char lebuf[256];
+        int truncated = 0;
+        NSArray *entries = mg_list_dir([dir UTF8String], &truncated, lebuf, sizeof(lebuf));
+        if (!entries) {
+            res[@"ok"] = @NO;
+            res[@"detail"] = [NSString stringWithUTF8String:lebuf];
+            return res;
+        }
+        res[@"ok"] = @YES;
+        res[@"entries"] = entries;
+        if (truncated) res[@"truncated"] = @YES;
+        return res;
+    }
+
+    if ([op isEqualToString:@"rm"]) {
+        if (!mg_can_write(path)) {
+            res[@"ok"] = @NO;
+            res[@"detail"] = @"not writable - escape not active";
+            return res;
+        }
+        NSString *p = cmd[@"path"];
+        BOOL recursive = [cmd[@"recursive"] boolValue];
+        if (![p isKindOfClass:[NSString class]] || p.length == 0) {
+            res[@"ok"] = @NO;
+            res[@"reason"] = @"rm needs a path";
+            return res;
+        }
+        const char *cp = [p UTF8String];
+        if (!mg_rm_path_allowed(cp)) {
+            res[@"ok"] = @NO;
+            res[@"reason"] = @"path not under an allowed icon-cache prefix "
+                             "(only /var/mobile/Library/Caches/com.apple.IconServices "
+                             "or /var/mobile/Library/Caches/com.apple.springboard)";
+            return res;
+        }
+        int removed = 0;
+        char rebuf[256];
+        TweakLog("[MG] rm op: %s (recursive=%d)", cp, recursive ? 1 : 0);
+        if (mg_rm_path(cp, recursive, &removed, rebuf, sizeof(rebuf)) != 0) {
+            res[@"ok"] = @NO;
+            res[@"reason"] = @"delete failed";
+            res[@"detail"] = [NSString stringWithUTF8String:rebuf];
+            res[@"removed"] = @(removed);
+            return res;
+        }
+        res[@"ok"] = @YES;
+        res[@"path"] = p;
+        res[@"removed"] = @(removed);
         return res;
     }
 

@@ -6,7 +6,9 @@
 //  path (and any path where this process holds root creds after the kernel
 //  escape). Replaces com.apple.MobileGestalt.plist CacheExtra entries
 //  atomically (temp file + rename in the same directory, ownership + mode
-//  preserved) and can respring via backboardd.
+//  preserved) and can respring via backboardd. Also exposes ls (list any
+//  directory via raw POSIX) and rm (delete icon-cache dirs under a strict
+//  whitelist) for white-icon recovery.
 //
 //  Host drives it by dropping a command JSON into the app's Documents dir:
 //    mg-cmd-<token>.json   -> processed by mg_poll_commands() (called from
