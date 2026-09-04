@@ -336,14 +336,37 @@ static void hudRefresh(void) {
     UIColor *col;
     float progress = 0;
     switch (st) {
-        case 1:
-            txt = [NSString stringWithFormat:@"W0lfSword: exploit initializing (attempt %d/5, cycle %d/3)…", att, cyc];
+        case 1: {
+            // Minimal loading animation: braille spinner rotates every tick
+            // while the exploit is running (compile-time constants, MRC-safe).
+            static int g_hudSpin = 0;
+            g_hudSpin = (g_hudSpin + 1) % 10;
+            static const NSString *spins[] = {
+                @"⠋", @"⠙", @"⠹", @"⠸", @"⠼", @"⠴", @"⠦", @"⠧", @"⠇", @"⠏"
+            };
+            // Scan telemetry from kexploit (atomics): offset + sockets + landed
+            // reads make the crawl legible instead of a static "initializing".
+            uint64_t soff = kexploit_scan_offset();
+            unsigned long socks = kexploit_scan_sockets();
+            int landed = kexploit_scan_landed();
+            NSString *scanPart = @"";
+            if (soff || socks || landed) {
+                scanPart = [NSString stringWithFormat:@" - scan@0x%llx socks=%lu reads=%d",
+                            soff, socks, landed];
+            }
+            NSString *modeTag = @"";
+            if (wolf_test_mode == 3) modeTag = @" [FULL]";
+            else if (wolf_test_mode == 1) modeTag = @" [readonly]";
+            else if (wolf_test_mode == 2) modeTag = @" [writetest]";
+            txt = [NSString stringWithFormat:@"%@ W0lfSword: exploit initializing (attempt %d/5, cycle %d/3)%@%@…",
+                   spins[g_hudSpin], att, cyc, scanPart, modeTag];
             col = [UIColor colorWithRed:0.95 green:0.75 blue:0.2 alpha:1];
             // 5 attempts x 3 cycles = 15 slots; min sliver so it reads as active
             progress = (float)((att - 1) * 3 + MAX(cyc, 1)) / 15.0f;
             if (progress > 1.0f) progress = 1.0f;
             if (progress < 0.03f) progress = 0.03f;
             break;
+        }
         case 2:
             txt = @"W0lfSword: exploit ready — sandbox escaped";
             col = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
