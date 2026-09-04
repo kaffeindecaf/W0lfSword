@@ -793,6 +793,7 @@ test_usb_cable() {
     else
         err "Bad USB connection ($ok/$tries reads)  -  try another cable before deploying"
         hint "Short MFI-certified cable, direct port (no hub), no extension dongles."
+        return 1
     fi
     return 0
 }
@@ -3139,6 +3140,68 @@ PY
             result=$(mg_roundtrip "respring" "" "\x00" "" 0) || return 1
             echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result";;
 
+        fs)
+            # filesystem debug ops for the escaped app (usb only): ls any
+            # dir, rm icon-cache dirs. rm is whitelisted module-side.
+            [ "$mode" = "ssh" ] && { err "fs ops are usb-only - over ssh use the shell directly"; return 1; }
+            local fop="${1:-help}" fpath="${2:-}"
+            case "$fop" in
+                ls)
+                    [ -z "$fpath" ] && { err "usage: mobilegestalt fs ls <path>"; return 1; }
+                    tmp=$(mktemp /tmp/ws_mgls.XXXXXX.json)
+                    python3 - "$fpath" "$tmp" <<'PY'
+import json, sys
+json.dump({"op": "ls", "path": sys.argv[1]}, open(sys.argv[2], "w"))
+PY
+                    result=$(mg_push_and_wait "$tmp") || { rm -f "$tmp"; return 1; }
+                    rm -f "$tmp"
+                    if ! echo "$result" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+if not r.get("ok"):
+    print("ls failed:", r.get("reason") or r.get("detail") or "unknown")
+    sys.exit(1)
+print("path: %s (%d entries%s)" % (r.get("path"), len(r.get("entries", [])), ", truncated" if r.get("truncated") else ""))
+for e in r.get("entries", []):
+    t = e.get("type", "?")
+    s = "" if t == "dir" else ("%d" % e.get("size", 0))
+    print("  %-6s %10s  %s" % (t, s, e.get("name", "?")))
+'; then
+                        return 1
+                    fi;;
+                rm)
+                    [ -z "$fpath" ] && { err "usage: mobilegestalt fs rm <path> [--recursive]"; return 1; }
+                    local rec=false
+                    [ "${3:-}" = "--recursive" ] && rec=true
+                    confirm "Delete $fpath on the device (module whitelists icon-cache paths only)? Continue?" || return 1
+                    tmp=$(mktemp /tmp/ws_mgrm.XXXXXX.json)
+                    python3 - "$fpath" "$rec" "$tmp" <<'PY'
+import json, sys
+json.dump({"op": "rm", "path": sys.argv[1], "recursive": sys.argv[2] == "true"}, open(sys.argv[3], "w"))
+PY
+                    result=$(mg_push_and_wait "$tmp") || { rm -f "$tmp"; return 1; }
+                    rm -f "$tmp"
+                    if ! echo "$result" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+if r.get("ok"):
+    print("removed %s (%s items)" % (r.get("path"), r.get("removed")))
+else:
+    print("rm refused:", r.get("reason") or r.get("detail") or "unknown")
+    sys.exit(1)
+'; then
+                        return 1
+                    fi;;
+                help|-h|"")
+                    echo "usage: ./W0lfSword mobilegestalt fs <ls|rm> <path> [--recursive]"
+                    echo "  ls <path>   list a directory through the escaped app (raw posix)"
+                    echo "  rm <path>   delete an icon-cache path (module whitelist:"
+                    echo "              /var/mobile/Library/Caches/com.apple.IconServices* and"
+                    echo "              /var/mobile/Library/Caches/com.apple.springboard*)"
+                    echo "              [--recursive] for directories";;
+                *) err "unknown fs op: $fop (try: mobilegestalt fs help)"; return 1;;
+            esac;;
+
         help|-h|--help|"")
             echo "usage: ./W0lfSword mobilegestalt <op> ..."
             echo ""
@@ -3152,6 +3215,8 @@ PY
             echo "  backup [file]              pull the device's rolling backup"
             echo "  restore                    revert to the device's last backup"
             echo "  respring                   kill backboardd"
+            echo "  fs ls <path>               list a dir through the escaped app (usb)"
+            echo "  fs rm <path> [--recursive] delete icon-cache paths (usb, whitelisted)"
             echo ""
             echo "transport: USB/AFC into the Filza Arctic app (non-jailbroken) by"
             echo "default; --ssh <ip> edits over SSH (jailbroken devices)."
@@ -3784,14 +3849,19 @@ PYEOF
     echo ""
     local rp; rp="/tmp/$(basename "$DEB")"
     retry 3 1 scp_safe "$DEB" "root@$IP:$rp" || { err "SCP failed after 3 retries"; return 1; }
-    ssh_safe "root@$IP" "dpkg -i '$rp' 2>&1; rm -f '$rp'" >/dev/null 2>&1
+    local dpkg_out
+    dpkg_out=$(ssh_safe "root@$IP" "dpkg -i '$rp' 2>&1; rc=\$?; rm -f '$rp'; exit \$rc") || {
+        err "dpkg install failed on $IP"
+        [ -n "$dpkg_out" ] && printf '%s\n' "$dpkg_out" | sed 's/^/      /'
+        return 1
+    }
     ok "Installed on $IP"
     ssh_safe "root@$IP" "killall -9 SpringBoard 2>/dev/null" || true
     ok "SpringBoard respringing  -  tweak live in a few seconds"
     log_script "tweak $tid installed on $IP (device=$DEV_MODEL ios=$IOS_VER method=$METHOD)"
     echo ""
     echo -e "  ${C_DIM}Uninstall anytime on the phone:${NC}"
-    echo -e "  ${C_DIM}  dpkg -r com.kaffeindecaf.w0lfsword.tweak.$T_ID${NC}"
+    echo -e "  ${C_DIM}  dpkg -r com.kaffeindecaf.w0lfsword.tweak.${T_ID//_/-}${NC}"
     echo ""
 }
 
@@ -5349,7 +5419,7 @@ EOF
     if $TEST_MODE; then
         echo -e "  ${C_AMB}--test: safety ladder compiled in. Default mode on device: READONLY${NC}"
         echo -e "  ${C_DIM}  (zero kernel writes - validates offsets only). Switch modes on the${NC}"
-        echo -e "  ${C_DIM}  device via Documents/w0lf_test_mode: (absent)=staged auto 1=readonly 2=writetest 3=full${NC}"
+        echo -e "  ${C_DIM}  device via Documents/w0lf_test_mode: (absent)=readonly 1=readonly 2=writetest 3=full${NC}"
     fi
     local dylib; dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
     [ -n "$dylib" ] || { err "Built dylib not found in .theos"; return 1; }
