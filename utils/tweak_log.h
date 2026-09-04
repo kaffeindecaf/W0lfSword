@@ -96,11 +96,15 @@ static void TweakLog(const char *format, ...) {
 
 #ifdef __OBJC__
     // App-sandbox Documents copy — the non-jailbroken read-back path.
+    // MRC: stringByAppendingPathComponent returns autoreleased; the static
+    // must retain or it dangles after the creating pool drains and the next
+    // [docLogPath UTF8String] objc_msgSends into freed memory (seen on-device
+    // 2026-09-04: EXC_BAD_ACCESS / PAC failure at TweakLog+748, HUD tick path).
     static NSString *docLogPath = nil;
     if (!docLogPath) {
         NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
         if (paths.count > 0) {
-            docLogPath = [[paths objectAtIndex:0] stringByAppendingPathComponent:@"FilzaTweak.log"];
+            docLogPath = [[[paths objectAtIndex:0] stringByAppendingPathComponent:@"FilzaTweak.log"] retain];
         }
     }
     if (docLogPath) {
