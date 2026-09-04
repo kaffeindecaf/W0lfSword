@@ -98,4 +98,23 @@ docs/POPULARITY_WRITEUP.md
 /reports/
 /pocs/bb032/
 /pocs/mcmfuzz/
+
+# Bounty research docs + PoC lab (untracked 2026-09-03, local only)
+/research/bug_bounty_writeup.md
+/research/poclab.md
+/research/attack_chains.md
+/research/audio_frameworks.md
+/research/other_frameworks.md
+/research/userspace_escapes.md
+/research/kc261_gap_windows.md
+/research/webkit_download_gaps_current.md
+/research/alac_poc/
+/scripts/panic_analyzer.py
+/scripts/poclab_*.sh
+/scripts/poclab_cat.c
+
+# AI tooling (local agent config, never committed)
+.claude/
+AGENTS.md
+CLAUDE.md
 /pocs/mcmprobe/
