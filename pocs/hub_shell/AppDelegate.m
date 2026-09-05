@@ -3,12 +3,14 @@
 // L5.1/L5.2 — post-escape verification probes (engine-backed).
 // The probes are READ-ONLY and gated on exploit_is_done(): when the exploit
 // has not run, they report "not acquired" instead of touching kernel memory.
+// L7.2 — hub_guard panic guard (app-scoped crash counter + auto-disable).
 #import "kexploit/kexploit_opa334.h"
 #import "kexploit/krw.h"
 #import "kexploit/kutils.h"
 #import "kexploit/offsets.h"
 #import "utils/state.h"
 #import "sandbox_escape.h"
+#import "hub_guard.h"
 #import <unistd.h>
 
 @implementation AppDelegate
@@ -44,7 +46,9 @@
 
 // L5.2: kread64 smoke test on a known-safe address (own proc pid field).
 // Only runs when the exploit has completed; otherwise reports "not acquired".
+// L7.2: when the panic guard is disabled, do not touch kernel memory at all.
 static NSString *kernelRWStatus(void) {
+    if (hub_guard_is_disabled()) return @"disabled (panic guard)";
     if (!exploit_is_done()) return @"not acquired (exploit not run)";
     uint64_t self_proc = proc_self();
     if (!self_proc) return @"smoke failed (proc_self NULL)";
@@ -55,6 +59,7 @@ static NSString *kernelRWStatus(void) {
 
 // L5.1: read back the kernel-side posix creds after the escape.
 static NSString *rootCredsStatus(void) {
+    if (hub_guard_is_disabled()) return @"disabled (panic guard)";
     if (!exploit_is_done()) return @"not acquired (exploit not run)";
     uint64_t self_proc = proc_self();
     if (!self_proc) return @"read-back failed (proc_self NULL)";
@@ -66,13 +71,30 @@ static NSString *rootCredsStatus(void) {
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // L7.2: resolve + create the app-scoped Application Support dir, then run
+    // the panic-guard launch registration (crash counter + auto-disable).
+    NSArray *supportPaths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,
+                                                                NSUserDomainMask, YES);
+    NSString *appSupportDir = [supportPaths firstObject];
+    if (appSupportDir) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:appSupportDir
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:NULL];
+        hub_guard_init([appSupportDir UTF8String]);
+    }
+    hub_guard_state_t guardState = hub_guard_register_launch();
+    NSString *guardLine = (guardState == HUB_GUARD_DISABLED)
+        ? [NSString stringWithFormat:@"panic guard: crashes %d/3 - disabled", hub_guard_crash_count()]
+        : @"panic guard: ok";
+
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     UIViewController *vc = [[UIViewController alloc] init];
     vc.view.backgroundColor = [UIColor blackColor];
 
     UILabel *label = [[UILabel alloc] init];
-    label.text = [NSString stringWithFormat:@"W0lfSword Hub shell\nbuild path OK (L2.1)\nengine: libw0lfengine.a (L2.2)\noffsets: %@\n\nverification (L5.1/L5.2)\nrunning probes…",
-                  [self resolveOffsetsInfo]];
+    label.text = [NSString stringWithFormat:@"W0lfSword Hub shell\nbuild path OK (L2.1)\nengine: libw0lfengine.a (L2.2)\noffsets: %@\n\nverification (L5.1/L5.2)\n%@\nrunning probes…",
+                  [self resolveOffsetsInfo], guardLine];
     label.textColor = [UIColor colorWithRed:0.60 green:0.85 blue:1.0 alpha:1.0];
     label.numberOfLines = 0;
     label.textAlignment = NSTextAlignmentCenter;
@@ -83,11 +105,14 @@ static NSString *rootCredsStatus(void) {
     // Probes are read-only and gated; run them off the main thread, then
     // publish the results back on main.
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        // L7.2: if the exploit already completed, record success (resets the
+        // crash counter). Placeholder success point until L6.1 adds a runner.
+        if (exploit_is_done()) hub_guard_mark_success();
         NSString *krw = kernelRWStatus();
         NSString *creds = rootCredsStatus();
         dispatch_async(dispatch_get_main_queue(), ^{
-            label.text = [NSString stringWithFormat:@"W0lfSword Hub shell\nbuild path OK (L2.1)\nengine: libw0lfengine.a (L2.2)\noffsets: %@\n\nverification (L5.1/L5.2)\nkernel r/w: %@\ncredentials: %@",
-                          [self resolveOffsetsInfo], krw, creds];
+            label.text = [NSString stringWithFormat:@"W0lfSword Hub shell\nbuild path OK (L2.1)\nengine: libw0lfengine.a (L2.2)\noffsets: %@\n\nverification (L5.1/L5.2)\nkernel r/w: %@\ncredentials: %@\n%@",
+                          [self resolveOffsetsInfo], krw, creds, guardLine];
         });
     });
 
