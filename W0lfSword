@@ -929,10 +929,14 @@ cmd_panic() {
         list)
             section "Panic Reports ($panics_dir)"
             if compgen -G "$panics_dir/*" >/dev/null 2>&1; then
-                ls -t "$panics_dir" | head -20 | while read -r f; do
-                    local ts; ts=$(date -r "$panics_dir/$f" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "?")
-                    echo -e "  ${C_DIM}$ts${NC}  ${C_FROST}$f${NC}"
-                done
+                # newest-first listing, find -print0 based (AUD.2 - no ls parsing)
+                while IFS='|' read -r ts f; do
+                    [ -n "$f" ] || continue
+                    echo -e "  ${C_DIM}${ts}${NC}  ${C_FROST}${f}${NC}"
+                done < <(find "$panics_dir" -maxdepth 1 -type f -print0 2>/dev/null |
+                    while IFS= read -r -d '' pf; do
+                        printf '%s|%s\n' "$(date -r "$pf" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')" "$(basename "$pf")"
+                    done | sort -r | head -20)
             else
                 echo -e "  ${C_DIM}No panic reports yet. Fetch one with: ./W0lfSword panic fetch${NC}"
             fi
@@ -1045,7 +1049,7 @@ with open(out, "wb") as fh:
     fh.write(data)
 print(f"OK {name} -> {out} ({len(data)} bytes)")
 PYEOF
-            local got; got=$(ls -t "$outdir"/* 2>/dev/null | head -1 || echo "")
+            local got; got=$(newest_file "$outdir" '*' || echo "")
             if [ -n "$got" ] && [ -f "$got" ] && confirm "Resolve offsets with XPF now?"; then
                 echo ""
                 cmd_kernelcache resolve "$got"
@@ -1472,7 +1476,25 @@ check_theos() {
     return 1
 }
 
-find_deb() { ls -t packages/*.deb 2>/dev/null | head -1; }
+# file_mtime <file> — epoch seconds of last modification (GNU `stat -c %Y` with
+# BSD/macOS `stat -f %m` fallback). Prints 0 when neither is available.
+file_mtime() {
+    stat -c %Y -- "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
+}
+
+# newest_file <dir> <glob> — echo the file in <dir> matching <glob> with the
+# newest mtime. find -print0 based: newline-safe, no `ls -t | head` parsing
+# (AUD.2). Prints nothing when the dir has no match.
+newest_file() {
+    local dir="$1" pat="$2" newest="" nt=0 f t
+    while IFS= read -r -d '' f; do
+        t=$(file_mtime "$f")
+        [ "$t" -gt "$nt" ] && { nt=$t; newest=$f; }
+    done < <(find "$dir" -maxdepth 1 -type f -name "$pat" -print0 2>/dev/null)
+    [ -n "$newest" ] && printf '%s\n' "$newest"
+}
+
+find_deb() { newest_file packages '*.deb'; }
 
 get_device_ip() {
     [ -n "${1:-}" ] && echo "$1" && return 0
@@ -1735,10 +1757,12 @@ print(b,p)
     #    when shellcheck is not installed. Exclusions = categories that have their
     #    own queued AUD tickets - drop an exclusion when its item lands:
     #      SC2059 -> AUD.3 (colors-in-printf-format is the repo-wide convention)
-    #      SC2012 -> AUD.2 (ls -t listings, low risk)
+    #    (SC2012 dropped 2026-09-05 with AUD.2: every local `ls -t | head`
+    #    filename pick now goes through newest_file / find -print0. Remote ssh
+    #    picks stay ls-based - shellcheck cannot see inside ssh command strings.)
     local sc_warns=0 sc_out=""
     if command -v shellcheck &>/dev/null; then
-        sc_out=$(shellcheck -s bash -e SC2059,SC2012 W0lfSword 2>&1)
+        sc_out=$(shellcheck -s bash -e SC2059 W0lfSword 2>&1)
         # default output format prints "In W0lfSword line N:" headers;
         # match that (an old `^W0lfSword:` pattern never matched and hid findings)
         sc_warns=$(printf '%s\n' "$sc_out" | grep -c '^In W0lfSword line' || true)
@@ -3831,7 +3855,7 @@ PYEOF
         return 1
     fi
     stop_pulse
-    local DEB; DEB=$(ls -t tweaks/packages/*.deb 2>/dev/null | head -1)
+    local DEB; DEB=$(newest_file tweaks/packages '*.deb' || echo "")
     [ -n "$DEB" ] || { err "Build produced no .deb"; return 1; }
     ok "Built $(basename "$DEB")"
 
