@@ -1184,8 +1184,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `K1.5b` 🟠 — Panic-PoC deploy commands (`poc` lab)  \
   _Done 2026-08-21: `./W0lfSword poc list|sep-panic|exr|applejpeg|dirtyslide` — builds sep_panic via Theos (pocs/sep_panic/), generates the CVE-2026-28990 EXR trigger (pocs/exr/gen_exr_trigger.py, stdlib-only, byte-identical to zygosec's), deploys over SSH, arms the crash-monitor, gates every run behind a confirm prompt. applejpeg/dirtyslide print the macOS+Xcode manual flow. See research/moreprojects_deep_dive.md._
 
-- [ ] `K1.6` 🟠 — Add kfd/PUAF fallback options as menu choices beside DarkSword  
-  _Prompt: "Extend adderall Phase 4 exploit prompt to accept puaf-physpuppet / puaf-smith / puaf-landa in addition to pe_v1/pe_v2/auto. Store in profile JSON. Backend: port kfd primitives (kopen/kread/kwrite) into kexploit/ as fallback engine — see SECTION F1."_
+- [x] `K1.6` 🟠 — Add kfd/PUAF fallback options as menu choices beside DarkSword  \
+  _Done 2026-09-05 (CLI half; MoE round deleg_58bba46a, parent-verified): exploit_method_valid() (after select_exploit) validates a method pick against select_exploit()'s per-model mapping (puaf-* needs the A9-A11 puaf family, pe_v1 A12-A17/M1-M4, pe_v2 A18; auto always ok); Phase 6 ask_choice list extended to "auto pe_v1 pe_v2 puaf-physpuppet puaf-smith puaf-landa"; mismatch goes through confirm() (keep with warning, else fall back to auto); puaf-* deploy prints the honest "kfd puaf backend not ported (F1.x) - deploying DarkSword pe_v1/pe_v2" line (EXPLOIT_METHOD consumer audit: profile save/load + display only, no build-arg consumer); profile load warns when restoring a puaf-* method. Mock test 17/17 (real functions extracted + stubbed warn/confirm). bash -n + audit + shellcheck clean. BACKEND STAYS OPEN: the kfd kopen/kread/kwrite port is ROADMAP F1.x research - puaf-* picks are carried, never faked._
 
 - [ ] `K1.7` 🟡 — Auto-select best exploit per device in adderall  
   _Prompt: "Enhance the DEV_MODEL case statement: A12-A17 → pe_v1, A18 → pe_v2, A10-A11 → puaf fallback, unsupported → warn and offer kernelcache-pull + XPF route."_
@@ -1495,7 +1495,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 ## L7 — Safety & Persistence
 
 - [ ] `L7.1` 🔴 — Non-persistent by default: nothing auto-runs at boot; exploit state lives only while the app is foreground. Document in-app.
-- [ ] `L7.2` 🔴 — Panic guard: crash counter + auto-disable after 3 crashes without success (port A3.1 exactly) — app-scoped flag files.
+- [x] `L7.2` 🔴 — Panic guard: crash counter + auto-disable after 3 crashes without success (port A3.1 exactly) — app-scoped flag files.
+  _Done 2026-09-05: pocs/hub_shell/hub_guard.{h,c} (pure C) — app-scoped flags under Library/Application Support (hub_last_success / hub_crash_count / hub_disable, limit 3), A3.1 semantics verbatim (increment only when no success flag and not disabled; disable at >=3; mark_success writes success + resets counter; disable removed manually). AppDelegate: dir resolve/create, register_launch at boot, 'panic guard' label line, probes report 'disabled (panic guard)' when guard blocks, success marked when exploit_is_done() (placeholder until L6.1 runner). Build: libengine + hub make 0 errors; hub_guard_* symbols nm-verified in the app binary. Device run pending; L3.4 (engine-side guard for the tweak) stays open._
 - [ ] `L7.3` 🟠 — Confirm gates: every destructive action (run exploit, SSV patch, escalate) requires an in-app confirm dialog with plain-English explanation (mirror the CLI's disclaimer pattern).
 - [ ] `L7.4` 🟡 — "What could go wrong" screen: worst case = kernel panic → reboot; nothing persists (mirror the CLI disclaimer text).
 
