@@ -6137,10 +6137,12 @@ EOF
         chains)
             cat <<'EOF'
 chains  -  the attack chain catalog (C5.3).
-  Five chains built from the repo's live bugs: A userspace read-escape
+  Seven chains built from the repo's live bugs: A userspace read-escape
   (bad_query/MCM), B kernel -> TCC.db, C media RCE -> escape, D 26.1+
-  kernel LPE, E SSV tamper. 'chains <a|b|c|d|e>' shows the stages of
-  one chain with versions and implementation status. Full writeup:
+  kernel LPE, E SSV tamper, F GestaltForge (novel), G FontStrike
+  (novel). 'chains <a|b|c|d|e|f|g|best>' shows the stages of one chain
+  with versions and implementation status; 'best' auto-selects per
+  device (iOS version + model, K5 matrix). Full writeup:
   research/attack_chains.md
 EOF
             ;;
