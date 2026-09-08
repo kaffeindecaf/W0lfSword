@@ -1803,18 +1803,34 @@ print(b,p)
         # match that (an old `^W0lfSword:` pattern never matched and hid findings)
         sc_warns=$(printf '%s\n' "$sc_out" | grep -c '^In W0lfSword line' || true)
     fi
+    # -- dead-function scan over the main script (AUD.9). Runs when the
+    #    vendored scanner is present (scripts/dead_fn_scan.py, added
+    #    2026-09-06); skipped with a hint otherwise. Wired in so AUD.9's
+    #    standing "re-run after every big feature round" cadence is
+    #    automatic: every audit re-checks that no `^name()` def has zero
+    #    references (quote-aware comment stripping, def line excluded).
+    local df_defs=0 df_dead=0 df_out=""
+    if [ -f scripts/dead_fn_scan.py ]; then
+        df_out=$(python3 scripts/dead_fn_scan.py W0lfSword 2>&1)
+        df_defs=$(printf '%s\n' "$df_out" | awk '/^function defs:/{print $3; exit}')
+        df_dead=$(printf '%s\n' "$df_out" | awk '/^DEAD FUNCTIONS:/{print $3; exit}')
+        df_defs=${df_defs:-0}; df_dead=${df_dead:-0}
+    fi
     # --json (J6.2): machine-readable audit result
     if $JSON_MODE; then
-        printf '%s' "$results" | SC_WARNS="$sc_warns" python3 -c '
+        printf '%s' "$results" | SC_WARNS="$sc_warns" DF_DEFS="$df_defs" DF_DEAD="$df_dead" python3 -c '
 import sys, json, os, shutil
 rows = []
 for line in sys.stdin.read().splitlines():
     f, b, p = line.split("|")
     rows.append({"file": f, "braces": int(b), "parens": int(p), "ok": b == "0" and p == "0"})
 sc_w = int(os.environ.get("SC_WARNS", "0"))
-print(json.dumps({"files": rows, "issues": sum(1 for r in rows if not r["ok"]) + sc_w,
-                  "passed": all(r["ok"] for r in rows) and sc_w == 0,
-                  "shellcheck": {"installed": shutil.which("shellcheck") is not None, "warnings": sc_w, "ok": sc_w == 0}},
+df_defs = int(os.environ.get("DF_DEFS", "0"))
+df_dead = int(os.environ.get("DF_DEAD", "0"))
+print(json.dumps({"files": rows, "issues": sum(1 for r in rows if not r["ok"]) + sc_w + df_dead,
+                  "passed": all(r["ok"] for r in rows) and sc_w == 0 and df_dead == 0,
+                  "shellcheck": {"installed": shutil.which("shellcheck") is not None, "warnings": sc_w, "ok": sc_w == 0},
+                  "dead_fn": {"scan": os.path.exists("scripts/dead_fn_scan.py"), "defs": df_defs, "dead": df_dead, "ok": df_dead == 0}},
                  indent=2))
 '
         return 0
@@ -1829,6 +1845,17 @@ print(json.dumps({"files": rows, "issues": sum(1 for r in rows if not r["ok"]) +
         fi
     else
         echo -e "  ${C_DIM}─${NC} shellcheck ${C_DIM}(not installed - optional step, skipped)${NC}"
+    fi
+    if [ -f scripts/dead_fn_scan.py ]; then
+        if [ "$df_dead" -eq 0 ]; then
+            ok "W0lfSword (dead-fn scan: $df_defs defs, 0 dead)"
+        else
+            echo -e "  ${C_RED}✗${NC} W0lfSword ${C_RED}(dead-fn scan: $df_dead dead function(s))${NC}"
+            $VERBOSE && printf '%s\n' "$df_out" | sed -n '/^DEAD FUNCTIONS:/,$p' | sed 's/^/      /'
+            issues=$((issues + df_dead))
+        fi
+    else
+        echo -e "  ${C_DIM}─${NC} dead-fn scan ${C_DIM}(scripts/dead_fn_scan.py missing - optional step, skipped)${NC}"
     fi
     if [ "$issues" -eq 0 ]; then
         echo ""; echo -e "  ${C_GRN}${B}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  AUDIT PASSED${NC}"
@@ -6395,7 +6422,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "tweaks (tw)"  "Tweak catalog  -  'tweaks install <id>' builds + deploys"
     echo ""
     section "Analysis & Config"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check + shellcheck"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check + shellcheck + dead-fn scan"
     printf "  ${C_EYE}%-14s${NC} %s\n" "doctor"       "Check environment"
     printf "  ${C_EYE}%-14s${NC} %s\n" "offsets"      "iOS version coverage"
     printf "  ${C_EYE}%-14s${NC} %s\n" "config (g)"   "Menu behavior: animations, colors, wolf, prompt  -  show | set <k> <v> | edit | reset"
