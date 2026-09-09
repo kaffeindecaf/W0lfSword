@@ -20,6 +20,15 @@ set -uo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR" || { echo "cannot cd to $PROJECT_DIR" >&2; exit 1; }
 
+# --version short-circuit  -  quiet, before the sudo banner and palette load
+# (raw escapes on purpose, same as the sudo banner below). Matches the
+# dispatch-case output in main() for the non-first-position fallback.
+if [ "$#" -gt 0 ] && { [ "$1" = "version" ] || [ "$1" = "--version" ] || [ "$1" = "-V" ]; }; then
+    echo -e "\033[38;5;153mW0lfSword v${VERSION}\033[0m  -  iOS Kernel Exploit Toolkit"
+    echo -e "\033[38;5;240mgithub.com/kaffeindecaf/W0lfSword\033[0m"
+    exit 0
+fi
+
 # ── Sudo check ───────────────────────────────────────────────
 SUDO_NEEDED_COMMANDS="adderall nojailbreak setup usbliter8"
 SUDO_UNSAFE_COMMANDS="build deploy monitor log status targets doctor offsets"  # work fine without
@@ -6411,6 +6420,7 @@ cmd_help() {
     section "Usage"
     echo -e "  ${C_FROST}./W0lfSword${NC}              Interactive menu (no args)"
     echo -e "  ${C_FROST}./W0lfSword${NC} -v <cmd>     Verbose output"
+    echo -e "  ${C_FROST}./W0lfSword${NC} version      Show version + repo"
     echo ""
     section "What You Need First"
     printf "  ${C_EYE}%-14s${NC} %s\n" "1. Jailbreak" "A jailbroken iPhone (Dopamine, palera1n...) with MobileSubstrate"
