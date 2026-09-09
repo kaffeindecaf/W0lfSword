@@ -2562,6 +2562,13 @@ device_compat_block() {
     echo ""
     echo -e "  ${C_FROST}compatibility:${NC}"
     exploit_compat_check "$v" "$m"
+    # AUD.8 - the gray hint lines under the table: the compat rows list which
+    # exploits apply, the hints say what that means and what to try next (and
+    # explain the empty-table cases below the offset range). Same pairing the
+    # menu and adderall already use. ios_recommendations guards on ios itself,
+    # so a missing/unknown version prints nothing extra.
+    echo ""
+    ios_recommendations "$v"
 }
 
 # AUD.7  -  saved-device WiFi fallback for `experimental device` (was USB
