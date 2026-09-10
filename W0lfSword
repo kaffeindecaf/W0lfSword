@@ -1,6 +1,6 @@
 #!/bin/bash
 # Single-source version  -  keep this in sync with control (A6.12).
-VERSION="1.4.0"
+VERSION="1.5.0"
 # Last used exploit method (set by cmd_adderall; saved/restored by profiles  -  K1.9)
 EXPLOIT_METHOD="auto"
 # ╔══════════════════════════════════════════════════════════════╗
@@ -184,7 +184,53 @@ retry() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  COLOR PALETTE  -  Arctic Wolf
+#  MAP  -  where things live (sections in file order)
+#  Generated from the section banners below; scripts/cli_consistency.py
+#  fails the audit if a section is added, renamed or reordered here.
+# ═══════════════════════════════════════════════════════════════
+#
+#    § 1  COLOR PALETTE  -  Arctic Wolf                  · the whole palette - one accent, one muted tone, three semantic colors
+#    § 2  COMMAND REGISTRY  -  single source of truth for the CLI surface · W0LF_COMMANDS - the single source of truth for the CLI surface
+#    § 3  UI FOUNDATION  -  every terminal primitive lives here · ok/err/warn, sections, boxes, spinner, wolf art, show_header
+#    § 4  CONFIG  -  .w0lfsword/config (plain key=value, # comments) · .w0lfsword/config - schema, get/set, template, load
+#    § 5  ERROR REPORTING  -  critical failures → verbose log → GitHub · critical failure -> verbose report -> GitHub issue
+#    § 6  ANIMATIONS  -  loading screen, wolf scramble, type effects · loading screen, wolf scramble, typing effects (config-gated)
+#    § 7  CORE HELPERS  -  global flags, version/SoC tables, compat gates · global flags, version/SoC tables, exploit selection, compat gates
+#    § 8  USB TEST  -  connectivity + pairing checks (harmless) · cable + pairing + data round-trip probe
+#    § 9  PANIC ANALYZER  -  classify .ips logs against the CVE catalog · classify .ips panic logs against the CVE catalog
+#    § 10 KERNELCACHE  -  offline XPF offset research (resolve/diff) · offline XPF offset research (resolve/diff)
+#    § 11 KCWATCH  -  automated kernel-delta watcher (research/kcwatch.md) · kernel-delta watcher: poll -> fetch -> resolve -> report
+#    § 12 ASCII ART  -  Arctic Wolf                      · the wolf - single source of truth
+#    § 13 UTILITY                                        · theos detection, file/mtime helpers, device IP + scanner
+#    § 14 ORIGINAL COMMANDS                              · core command bodies (build/deploy/status/audit/log/...)
+#    § 15 READINESS  -  device capability / exploit-readiness report · device capability / exploit-readiness report (live probes)
+#    § 16 EXPLOITS  -  technique matrix (K1.5)           · technique matrix (K1.5)
+#    § 17 CHAINS  -  attack chain catalog (C5.3)         · attack chain catalog (C5.3)
+#    § 18 CVE  -  tracked CVE catalog (C5.1/C5.2)        · tracked CVE catalog (C5.1/C5.2)
+#    § 19 POCLAB  -  proof-of-concept lab (C6): found-but-unimplemented bugs · proof-of-concept lab (C6)
+#    § 20 EXPERIMENTAL  -  developer section (red theme, verbose) · developer section (red theme, verbose)
+#    § 21 MOBILEGESTALT  -  full MobileGestalt editing (Chain F) · full MobileGestalt editing (Chain F)
+#    § 22 SBTWEAK  -  SpringBoard live tweaks via TaskRop RemoteCall · SpringBoard live tweaks via TaskRop RemoteCall
+#    § 23 POC  -  panic-PoC lab (research only  -  crashes the device) · panic-PoC lab (research only - crashes the device)
+#    § 24 FUZZ  -  ImageIO fuzzing harness (K4.2)        · ImageIO fuzzing harness (K4.2)
+#    § 25 MHA  -  MobileHouseArrest re-sign (K4.12)      · MobileHouseArrest re-sign (K4.12)
+#    § 26 BETA  -  Profiles                              · legacy tag on menu command bodies (profiles/device/history/monitor/quick)
+#    § 27 BETA  -  Device Manager                        · legacy tag on menu command bodies (profiles/device/history/monitor/quick)
+#    § 28 BETA  -  History                               · legacy tag on menu command bodies (profiles/device/history/monitor/quick)
+#    § 29 BETA  -  Monitor                               · legacy tag on menu command bodies (profiles/device/history/monitor/quick)
+#    § 30 BETA  -  Quick (one-shot exploit)              · legacy tag on menu command bodies (profiles/device/history/monitor/quick)
+#    § 31 INTERACTIVE MENU                               · menu_body, shortcuts line, dispatch, handlers, run_menu
+#    § 32 ADDERALL  -  Fully Automated Exploit Deployment · fully automated exploit deployment
+#    § 33 NOJAILBREAK  -  USB-only Filza install + exploit, no jailbreak · USB-only Filza install + exploit, no jailbreak
+#    § 34 SAFETY COMMANDS                                · safe mode, crash monitor, crash log
+#    § 35 NEW UTILITY COMMANDS                           · update / setup / reboot / export
+#    § 36 EXPLAIN  -  beginner-friendly long descriptions (K2.5) · beginner-friendly long descriptions (K2.5)
+#    § 37 COMMANDS  -  the index (generated from W0LF_COMMANDS) · the command index, generated from W0LF_COMMANDS
+#    § 38 HELP                                           · the curated help screen
+#    § 39 MAIN                                           · flag parsing, dispatch case, entry point
+
+# ═══════════════════════════════════════════════════════════════
+#  § 1  COLOR PALETTE  -  Arctic Wolf
 #  One accent (C_FROST), one muted tone (C_DIM), and three semantic
 #  colors: C_GRN success, C_AMB warning, C_RED error. C_WOLF is the
 #  banner brand color only. Bold (B) marks important words.
@@ -207,7 +253,350 @@ C_GREY=$C_DIM
 C_STEEL=$C_DIM
 
 # ═══════════════════════════════════════════════════════════════
-#  CONFIG  -  .w0lfsword/config (plain key=value, # comments)
+#  § 2  COMMAND REGISTRY  -  single source of truth for the CLI surface
+# ═══════════════════════════════════════════════════════════════
+# One row per user-facing command. Every surface is generated from this
+# table, so a command can no longer be half-wired (before this, the same
+# command was hand-written into six places and they drifted apart):
+#
+#   interactive menu rows + shortcuts line   menu_body()
+#   `./W0lfSword commands` index             cmd_commands()
+#   explain's fallback "Available:" list     explain_text()
+#   menu key -> handler dispatch             menu_dispatch()
+#   audit consistency check                  scripts/cli_consistency.py
+#
+# Fields (pipe-separated, "-" = empty; no field may contain a pipe):
+#   name      canonical CLI name - main() must have a dispatch case for it
+#   slot      interactive menu key (1-9, 0, or a letter). MENU ONLY.
+#   shortcut  key in the menu's shortcuts line. BOTH surfaces.
+#   aliases   extra CLI names, comma-separated. BOTH surfaces.
+#   group     exploit | device | diagnostics | research | safety |
+#             catalog | housekeeping | meta
+#   label     menu row title ("-" for commands with no menu row)
+#   summary   one-liner: menu row desc + commands index
+#   tag       root | crash | live | beta  ("-" for none)
+#   docs      1 = explain_text has an entry for this command
+#   handler   menu handler override ("-" = cmd_<name>)
+W0LF_COMMANDS=(
+    # ── exploit workflow ──────────────────────────────────────────
+    "quick|1|-|-|exploit|Quick Exploit|build → install → verify, one button|-|1|-"
+    "deploy|2|d|-|exploit|Deploy Only|install the tweak on the phone|-|1|-"
+    "monitor|3|m|-|exploit|Live Monitor|watch the phone's log in real time|-|1|-"
+    "build|-|b|-|exploit|Build|compile the tweak into a .deb|-|1|-"
+    "adderall|-|a|-|exploit|Adderall|auto-discover → build → deploy → verify|root|1|-"
+    "nojailbreak|nj|nj|-|exploit|NoJailbreak|USB install Filza + kernel R/W, no jailbreak (iOS 18-26.0.1)|root|1|-"
+    "usbliter8|9|-|ul8|exploit|usbliter8-arctic|A12/A13 tethered jailbreak · PWN DFU · CFW builder|root|1|menu_cmd_usbliter8"
+    "update|-|up|-|exploit|Update|git pull + rebuild + redeploy|-|0|-"
+    # ── phone & data ──────────────────────────────────────────────
+    "device|4|-|-|device|Device Manager|add / switch / device info|-|0|menu_cmd_device"
+    "profile|5|-|-|device|Profiles|save / load deploy settings|-|0|menu_cmd_profile"
+    "history|6|-|-|device|History|exploit success stats|-|0|menu_cmd_history"
+    # ── diagnostics & power ───────────────────────────────────────
+    "diag|7|-|diagnostics|diagnostics|Diagnostics|doctor · audit · status|-|0|menu_cmd_diagnostics"
+    "targets|8|-|t|diagnostics|Targets & Exploits|supported apps · technique matrix|-|0|menu_cmd_targets"
+    "chains|n|-|ch|diagnostics|Chains & CVEs|attack chain catalog · CVE tracker (C5)|-|1|menu_cmd_chains"
+    "config|g|g|cfg|diagnostics|Config|animations · colors · menu behavior|-|1|-"
+    "panic|p|p|-|diagnostics|Panic Analyzer|classify .ips crash logs → known CVEs (BB-032..037)|-|1|-"
+    "usbtest|u|u|-|diagnostics|USB Test|cable · pairing · data round-trip (harmless)|-|1|-"
+    "status|-|s|-|diagnostics|-|project health overview|-|1|-"
+    "log|-|l|-|diagnostics|Log|pull the phone's tweak log|-|1|menu_cmd_log"
+    "clean|-|c|-|diagnostics|-|clean build artifacts|-|0|-"
+    "audit|-|-|-|diagnostics|-|static analysis: braces, shellcheck, dead fns, CLI consistency|-|0|-"
+    "doctor|-|-|-|diagnostics|-|check the build environment|-|1|-"
+    "offsets|-|-|-|diagnostics|-|offset coverage per iOS version|-|1|-"
+    "crashlog|-|-|-|diagnostics|-|last crash-monitor log|-|0|-"
+    "export|-|-|-|diagnostics|-|zip logs + offsets for bug reports|-|0|-"
+    "report|-|-|-|diagnostics|-|error reports: list saved, or file one as a GitHub issue|-|1|-"
+    # ── research (device-crashing PoCs + offset tooling) ──────────
+    "poc|0|-|pocs|research|Panic PoCs|sep-panic / exr / applejpeg / dirtyslide|crash|1|-"
+    "fuzz|f|f|-|research|ImageIO Fuzzer|mutate DNG/HEIF → phone → crash capture (K4.2)|-|1|-"
+    "kernelcache|k|k|-|research|Kernelcache Diff|offline XPF offset research  -  resolve/diff kernelcaches|-|1|-"
+    "kcwatch|w|w|kw|research|kcwatch|auto kernel-delta watcher  -  poll → fetch → resolve → report|-|1|-"
+    "readiness|r|r|-|research|readiness|device capability + exploit-readiness report (live probes)|-|1|-"
+    "poclab|o|o|lab|research|PoC Lab|test found-but-unimplemented bugs (C6)|-|1|-"
+    "mobilegestalt|mg|mg|-|research|MobileGestalt|full MobileGestalt editing - set/unset/dump keys via Filza Arctic (26.0.1)|-|1|-"
+    "sbtweak|sbt|sbt|-|research|SB Tweak|SpringBoard live tweaks - 5-icon dock via RemoteCall (26.0.1)|live|1|-"
+    "experimental|ex|ex|exp|research|Experimental|unfinished exploits · novel chains (dev)|beta|1|-"
+    # ── safety & device control ───────────────────────────────────
+    "safe|-|sf|-|safety|-|UI hooks only, no kernel writes (on/off)|-|1|-"
+    "toggle|-|-|-|safety|-|enable/disable the tweak remotely|-|1|-"
+    "reboot|-|-|-|safety|-|reboot the phone over SSH|-|1|-"
+    "mha|-|-|-|safety|-|re-sign Filza as MobileHouseArrest (K4.12)|-|1|-"
+    # ── catalogs ──────────────────────────────────────────────────
+    "tweaks|-|tw|-|catalog|-|tweak catalog  -  'tweaks install <id>' builds + deploys|-|1|-"
+    "exploits|-|e|-|catalog|-|exploit technique matrix (K1.5)|-|1|-"
+    "cve|-|-|-|catalog|-|CVE tracker: kernel, userspace, sandbox, tcc, ssv, live|-|1|-"
+    # ── housekeeping ──────────────────────────────────────────────
+    "setup|-|-|install|housekeeping|-|install build tools for your OS|root|1|-"
+    "extract|-|-|-|housekeeping|-|unpack the built .deb and copy its tweak dylib out|-|0|-"
+    # ── meta (index + plumbing, no device work) ───────────────────
+    "commands|-|cmds|-|meta|-|this command index (groups, aliases, menu keys)|-|1|-"
+    "explain|-|x|-|meta|-|plain-English explanations of a command|-|0|-"
+    "help|-|-|h,?,-h,--help|meta|-|full command list with requirements|-|1|-"
+    "version|-|-|--version,-V|meta|-|version + repo|-|0|-"
+    "quit|-|q|exit|meta|-|leave the interactive menu|-|0|menu_cmd_quit"
+)
+
+# Render order + display titles for the interactive menu groups. Groups that
+# have no menu row simply never render (safety/catalog/housekeeping/meta).
+W0LF_GROUP_TITLES=(
+    "exploit|exploit"
+    "device|phone & data"
+    "diagnostics|diagnostics & power"
+    "research|research (device-crashing PoCs)"
+)
+
+group_title() {
+    local row g t
+    for row in "${W0LF_GROUP_TITLES[@]}"; do
+        g="${row%%|*}"; t="${row#*|}"
+        [ "$g" = "$1" ] && { printf '%s' "$t"; return 0; }
+    done
+    printf '%s' "$1"
+}
+
+# Colored tag for a menu row (registry `tag` field). One place, so the menu
+# and the commands index always agree.
+tag_text() {
+    case "${1:-}" in
+        root)  printf '%s' "${C_AMB}[root]${NC}";;
+        crash) printf '%s' "${C_RED}[crashes phone]${NC}";;
+        live)  printf '%s' "${C_AMB}[live SB]${NC}";;
+        beta)  printf '%s' "${C_AMB}[beta]${NC}";;
+        *)     printf '%s' "";;
+    esac
+}
+
+# Every interactive key the menu accepts, one per line: the menu slot, the
+# shortcuts-line key and each CLI alias (deduped by the caller). Command names
+# are matched too (see menu_dispatch) but are not listed here - the full
+# name -> key mapping is what `commands` prints.
+registry_keys() {
+    local entry name slot shortcut aliases group label summary tag docs handler
+    for entry in "${W0LF_COMMANDS[@]}"; do
+        IFS='|' read -r name slot shortcut aliases group label summary tag docs handler <<< "$entry"
+        [ "$slot" = "-" ] || printf '%s\n' "$slot"
+        [ "$shortcut" = "-" ] || printf '%s\n' "$shortcut"
+        [ "$aliases" = "-" ] || printf '%s\n' "${aliases//,/ }"
+    done
+}
+
+# registry_key_list <name> <slot> <shortcut> <aliases>  -  deduped "key · key"
+# column for the commands index. A key that merely repeats the command name,
+# or a shortcut that is also the menu slot, is listed once.
+registry_key_list() {
+    local name="$1" slot="$2" shortcut="$3" aliases="$4"
+    local keys="" seen=" $name " k
+    for k in "$slot" "$shortcut" $(printf '%s' "$aliases" | tr ',' ' '); do
+        case "$k" in ""|-) continue;; esac
+        case "$seen" in *" $k "*) continue;; esac
+        seen="$seen$k "
+        keys="${keys:+$keys · }$k"
+    done
+    printf '%s' "$keys"
+}
+
+# The "Available:" list for a bare `explain`. Generated from the registry's
+# docs=1 rows, so it can never drift from the cases explain_text actually
+# handles (the old hand-typed list silently omitted mha, readiness, report,
+# config, mobilegestalt, sbtweak and nj).
+explain_doc_index() {
+    local entry name slot shortcut aliases group label summary tag docs handler
+    local words="" line="Available:" first=1
+    for entry in "${W0LF_COMMANDS[@]}"; do
+        IFS='|' read -r name slot shortcut aliases group label summary tag docs handler <<< "$entry"
+        [ "$docs" = "1" ] || continue
+        words="$words$name "
+    done
+    for name in $words; do
+        if [ $(( ${#line} + ${#name} + 2 )) -gt 74 ]; then
+            printf '%s\n' "$line"
+            line="          $name"
+            continue
+        fi
+        if [ "$first" = 1 ]; then line="$line $name"; first=0
+        else line="$line, $name"; fi
+    done
+    printf '%s\n' "$line"
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  § 3  UI FOUNDATION  -  every terminal primitive lives here
+# ═══════════════════════════════════════════════════════════════
+
+show_header() {
+    echo ""
+    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '═' 60)"
+    printf "  ${C_SNOW}${B}W0lfSword${NC} ${C_DIM}v${VERSION}${NC}   ${C_WOLF}iOS Kernel Exploit Toolkit${NC}\n"
+    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '═' 60)"
+}
+
+# ── Drawing helpers ───────────────────────────────────────────
+
+line()  { printf "${C_DIM}%s${NC}\n" "$(repeat_char '─' "$1")"; }
+
+section() {
+    echo ""
+    printf "  ${C_FROST}${B}%s${NC}\n" "$1"
+    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 76)"
+}
+
+ok()   { printf "  ${C_GRN}✓${NC} %s\n" "$1"; }
+err()  { printf "  ${C_RED}✗${NC} %s\n" "$1"; }
+warn() { printf "  ${C_AMB}⚠${NC} %s\n" "$1"; }
+info() { printf "  ${C_FROST}ℹ${NC} %s\n" "$1"; }
+stage() { printf "  ${C_FROST}[%s]${NC} %s\n" "$1" "$2"; }
+hint() { printf "  ${C_DIM}  → %s${NC}\n" "$1"; }
+
+# ── Menu layout helpers ───────────────────────────────────────
+menu_group() { printf "  ${C_DIM}${B}%s${NC}\n" "$1"; }
+menu_opt() {
+    local n="$1" name="$2" desc="$3" tag="${4:-}"
+    printf "  ${C_FROST}${B}%2s.${NC} ${C_FROST}%-18s${NC} ${C_DIM}%s${NC} " "$n" "$name" "$desc"
+    if [ -n "$tag" ]; then echo -e "$tag"; else echo ""; fi
+}
+
+# Even boxed banner: $1 = color, $2 = text, $3 = width (default 44).
+# Padding is computed, so any title centers regardless of length.
+banner() {
+    local col="$1" txt="$2" w="${3:-44}"
+    local inner=$((w - 2))
+    local pad=$(( (inner - ${#txt}) / 2 )); [ "$pad" -lt 0 ] && pad=0
+    local l r; l=$(repeat_char ' ' "$pad"); r=$(repeat_char ' ' "$((inner - pad - ${#txt}))")
+    printf "  ${col}${B}╔%s╗${NC}\n" "$(repeat_char '═' "$w")"
+    printf "  ${col}${B}║${NC} ${col}${B}%s${NC} ${col}${B}║${NC}\n" "${l}${txt}${r}"
+    printf "  ${col}${B}╚%s╝${NC}\n" "$(repeat_char '═' "$w")"
+}
+
+# ── Plain-English disclaimers for beginners ───────────────────
+disclaimer() {
+    printf "  ${C_AMB}${B}── In plain English ──${NC}\n"
+    while IFS= read -r l; do
+        printf "  ${C_DIM}%s${NC}\n" "$l"
+    done
+    echo ""
+}
+
+# Global prerequisite notes (shown by several commands)
+FILZA_NOTE="W0lfSword expects Filza to already be installed on the phone. It does NOT sideload Filza for you  -  get it from TrollStore or your package manager first."
+JAILBREAK_NOTE="The phone needs to be jailbroken (Dopamine, palera1n, etc.) with MobileSubstrate, and OpenSSH running, or the tweak can never inject."
+PERSIST_NOTE="Nothing is permanent. Reboot the phone and everything resets  -  the exploit simply runs again the next time Filza opens."
+
+# ── PlumeImpactor helpers ────────────────────────────────────
+# adderall K1.2+: when Filza is missing from the device, offer to install
+# it via PlumeImpactor instead of just warning. PlumeImpactor is a GUI
+# app (iced/winit) with no CLI install mode, so the best we can do is
+# locate the binary, build the re-signed Filza-MHA.ipa (same artifact
+# cmd_nojailbreak produces), and launch the GUI with clear instructions.
+
+plumeimpactor_bin() {
+    # Returns a runnable PlumeImpactor invocation, or empty. Checks, in
+    # order: flatpak install, repo source build, AppImage in Downloads.
+    if grep -qi 'PlumeImpactor' < <(flatpak list --app 2>/dev/null); then
+        echo "flatpak run dev.khcrysalis.PlumeImpactor"
+        return 0
+    fi
+    if [ -x "$PROJECT_DIR/scripts/plumeimpactor" ]; then
+        echo "$PROJECT_DIR/scripts/plumeimpactor"
+        return 0
+    fi
+    for cand in "$HOME/Downloads/Impactor-linux-x86_64.appimage" \
+                "$HOME/Downloads/PlumeImpactor-linux-x86_64.AppImage"; do
+        [ -x "$cand" ] && { echo "$cand"; return 0; }
+    done
+    return 1
+}
+
+# Build the re-signed Filza-MHA.ipa (registerable bundle id) so the user
+# has something to drop into PlumeImpactor. Mirrors cmd_nojailbreak
+# phases 7-8. Sets OUT_IPA on success, returns 1 on failure.
+build_mha_ipa() {
+    local IPA_SRC=""
+    for cand in "$PROJECT_DIR/Filza.ipa" "$HOME/Downloads/Filza.ipa" "$PROJECT_DIR/packages/Filza.ipa"; do
+        [ -f "$cand" ] && { IPA_SRC="$cand"; break; }
+    done
+    if [ -z "$IPA_SRC" ]; then
+        err "No Filza.ipa found - put it in $PROJECT_DIR or $HOME/Downloads"
+        return 1
+    fi
+    check_theos || { err "THEOS not set"; return 1; }
+    local dylib
+    dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null \
+         || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
+    if [ -z "$dylib" ]; then
+        stage "build" "Building tweak dylib (MHA_IDENTITY=1)..."
+        local log; log=$(make all MHA_IDENTITY=1 2>&1); local ec=$?
+        if [ $ec -ne 0 ]; then err "Build failed (exit=$ec)"; return 1; fi
+        dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
+        [ -n "$dylib" ] || { err "Built dylib not found in .theos"; return 1; }
+    fi
+    # ldid is required by re-sign_mha.sh; prefer the repo build.
+    if ! command -v ldid &>/dev/null && [ -x "$PROJECT_DIR/scripts/ldid" ]; then
+        export PATH="$PROJECT_DIR/scripts:$PATH"
+    fi
+    OUT_IPA="$PROJECT_DIR/packages/Filza-MHA.ipa"
+    stage "re-sign" "Re-signing Filza with the tweak injected..."
+    if ! bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$OUT_IPA" \
+         "com.kaffeindecaf.w0lfsword.filza" >/tmp/mha_resign_adderall.log 2>&1 \
+         || [ ! -f "$OUT_IPA" ]; then
+        err "MHA re-sign failed - see /tmp/mha_resign_adderall.log"
+        return 1
+    fi
+    return 0
+}
+
+# Prompt + launch PlumeImpactor so the user can install Filza. Returns 0
+# if the GUI was launched (user takes it from there), 1 if unavailable.
+plumeimpactor_install() {
+    section "Filza Install  -  PlumeImpactor"
+    echo ""
+    if ! confirm "Filza is not installed. Launch PlumeImpactor to install it?"; then
+        echo -e "  ${C_DIM}Skipped - the deploy can continue, but the tweak will never run without Filza.${NC}"
+        return 1
+    fi
+    local PI; PI=$(plumeimpactor_bin)
+    if [ -z "$PI" ]; then
+        warn "PlumeImpactor not found"
+        echo -e "  ${C_DIM}Install it first (flatpak: flatpak install flathub dev.khcrysalis.PlumeImpactor),${NC}"
+        echo -e "  ${C_DIM}then re-run adderall. Meanwhile I can still build the .ipa for you.${NC}"
+    fi
+    if build_mha_ipa; then
+        ok "Ready: $OUT_IPA"
+    else
+        warn "Could not build the re-signed Filza .ipa - install stock Filza manually."
+    fi
+    if [ -n "$PI" ]; then
+        echo -e "  ${C_FROST}Launching PlumeImpactor...${NC}"
+        echo -e "  ${C_DIM}  In PlumeImpactor: sign in with your Apple ID, then drag${NC}"
+        if [ -n "$OUT_IPA" ] && [ -f "$OUT_IPA" ]; then
+            echo -e "  ${C_DIM}  ${C_EYE}$OUT_IPA${NC}${C_DIM} onto the window and install.${NC}"
+        else
+            echo -e "  ${C_DIM}  the Filza.ipa you have into the window and install.${NC}"
+        fi
+        echo -e "  ${C_DIM}  Wait for the install to finish, then press Enter here to continue.${NC}"
+        # Launch in the background; GUI needs a display. If we have none
+        # (headless run), tell the user to launch it themselves.
+        if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+            ( $PI >/dev/null 2>&1 & )
+            read -r -p "  " _ans
+        else
+            echo -e "  ${C_AMB}⚠${NC} No display in this shell - launch PlumeImpactor yourself:"
+            echo -e "    ${C_FROST}$PI${NC}"
+            echo -e "  ${C_DIM}  Install $OUT_IPA, then press Enter to continue.${NC}"
+            read -r -p "  " _ans
+        fi
+        ok "Proceeding - verify Filza is installed on the device now."
+        return 0
+    fi
+    return 1
+}
+
+# ── Verbose relay ─────────────────────────────────────────────
+
+vlog() { $VERBOSE && printf "  ${C_DIM}[v] %s${NC}\n" "$*" || true; }
+
+# ═══════════════════════════════════════════════════════════════
+#  § 4  CONFIG  -  .w0lfsword/config (plain key=value, # comments)
 #  Edit by hand or: ./W0lfSword config set <key> <value>
 # ═══════════════════════════════════════════════════════════════
 
@@ -346,7 +735,7 @@ load_config() {
 load_config
 
 # ═══════════════════════════════════════════════════════════════
-#  ERROR REPORTING  -  critical failures → verbose log → GitHub
+#  § 5  ERROR REPORTING  -  critical failures → verbose log → GitHub
 # ═══════════════════════════════════════════════════════════════
 
 REPORT_DIR="$DATA_DIR/reports"
@@ -454,43 +843,6 @@ crit() {
     return 1
 }
 
-cmd_report() {
-    local sub="${1:-list}"
-    case "$sub" in
-        list|ls)
-            show_header
-            echo ""
-            section "Error reports  -  $REPORT_DIR"
-            if [ -d "$REPORT_DIR" ] && ls "$REPORT_DIR"/crash-*.txt &>/dev/null; then
-                local f
-                for f in "$REPORT_DIR"/crash-*.txt; do
-                    local head; head=$(head -1 "$f")
-                    printf "  ${C_FROST}%s${NC}  %s\n" "$(basename "$f")" "$head"
-                done
-                echo ""
-                echo -e "  ${C_DIM}file one as a GitHub issue: ./W0lfSword report <file>${NC}"
-            else
-                echo -e "  ${C_DIM}no saved reports yet  -  critical errors land here automatically${NC}"
-            fi
-            ;;
-        *)
-            local f="$1"
-            [ -f "$f" ] || f="$REPORT_DIR/$f"
-            if [ ! -f "$f" ]; then
-                err "report not found: $1"
-                hint "saved reports: ./W0lfSword report list"
-                return 1
-            fi
-            local msg cmdline
-            msg=$(grep '^error:' "$f" | head -1 | sed 's/^error:[[:space:]]*//')
-            cmdline=$(grep '^command:' "$f" | head -1 | sed 's/^command:[[:space:]]*//; s#.*/W0lfSword ##')
-            [ -n "$cmdline" ] && CRIT_CMD="$cmdline"
-            report_to_github "$f" "${msg:-unknown error}"
-            ;;
-    esac
-    echo ""
-}
-
 cmd_config() {
     local sub="${1:-show}"
     case "$sub" in
@@ -546,7 +898,7 @@ cmd_config() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  ANIMATIONS  -  loading screen, wolf scramble, type effects
+#  § 6  ANIMATIONS  -  loading screen, wolf scramble, type effects
 #  All gated by config + TTY: never fire in --json or piped output.
 # ═══════════════════════════════════════════════════════════════
 
@@ -579,7 +931,7 @@ type_text() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  GLOBAL FLAGS
+#  § 7  CORE HELPERS  -  global flags, version/SoC tables, compat gates
 # ═══════════════════════════════════════════════════════════════
 
 VERBOSE=false
@@ -862,6 +1214,10 @@ ios_recommendations() {
     fi
 }
 
+# ═══════════════════════════════════════════════════════════════
+#  § 8  USB TEST  -  connectivity + pairing checks (harmless)
+# ═══════════════════════════════════════════════════════════════
+
 # ── USB test  -  harmless connectivity + pairing checks ─────────
 # Read-only round-trips over usbmuxd: pairing validation, device
 # identity, a lockdown diagnostics request, and a short syslog
@@ -963,6 +1319,10 @@ cmd_usbtest() {
     hint "Next: sudo ./W0lfSword adderall"
 }
 
+# ═══════════════════════════════════════════════════════════════
+#  § 9  PANIC ANALYZER  -  classify .ips logs against the CVE catalog
+# ═══════════════════════════════════════════════════════════════
+
 # ── Panic log analyzer ────────────────────────────────────────
 # Classifies .ips crash reports / panic logs against known CVEs and
 # the BUG_BOUNTY findings (BB-032..037) via scripts/panic_analyzer.py.
@@ -1020,6 +1380,10 @@ cmd_panic() {
             ;;
     esac
 }
+
+# ═══════════════════════════════════════════════════════════════
+#  § 10 KERNELCACHE  -  offline XPF offset research (resolve/diff)
+# ═══════════════════════════════════════════════════════════════
 
 # ── Kernelcache research  -  offline XPF offset work (K4.1 CLI) ─
 # resolve/diff kernelcaches with the host-side XPF patchfinder,
@@ -1117,7 +1481,7 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  KCWATCH  -  automated kernel-delta watcher (research/kcwatch.md)
+#  § 11 KCWATCH  -  automated kernel-delta watcher (research/kcwatch.md)
 # ═══════════════════════════════════════════════════════════════
 
 cmd_kcwatch() {
@@ -1159,176 +1523,13 @@ EOF
     esac
 }
 
-# ── Drawing helpers ───────────────────────────────────────────
-
-line()  { printf "${C_DIM}%s${NC}\n" "$(repeat_char '─' "$1")"; }
-
-section() {
-    echo ""
-    printf "  ${C_FROST}${B}%s${NC}\n" "$1"
-    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 76)"
-}
-
-ok()   { printf "  ${C_GRN}✓${NC} %s\n" "$1"; }
-err()  { printf "  ${C_RED}✗${NC} %s\n" "$1"; }
-warn() { printf "  ${C_AMB}⚠${NC} %s\n" "$1"; }
-info() { printf "  ${C_FROST}ℹ${NC} %s\n" "$1"; }
-stage() { printf "  ${C_FROST}[%s]${NC} %s\n" "$1" "$2"; }
-hint() { printf "  ${C_DIM}  → %s${NC}\n" "$1"; }
-
-# ── Menu layout helpers ───────────────────────────────────────
-menu_group() { printf "  ${C_DIM}${B}%s${NC}\n" "$1"; }
-menu_opt() {
-    local n="$1" name="$2" desc="$3" tag="${4:-}"
-    printf "  ${C_FROST}${B}%2s.${NC} ${C_FROST}%-18s${NC} ${C_DIM}%s${NC} " "$n" "$name" "$desc"
-    if [ -n "$tag" ]; then echo -e "$tag"; else echo ""; fi
-}
-
-# Even boxed banner: $1 = color, $2 = text, $3 = width (default 44).
-# Padding is computed, so any title centers regardless of length.
-banner() {
-    local col="$1" txt="$2" w="${3:-44}"
-    local inner=$((w - 2))
-    local pad=$(( (inner - ${#txt}) / 2 )); [ "$pad" -lt 0 ] && pad=0
-    local l r; l=$(repeat_char ' ' "$pad"); r=$(repeat_char ' ' "$((inner - pad - ${#txt}))")
-    printf "  ${col}${B}╔%s╗${NC}\n" "$(repeat_char '═' "$w")"
-    printf "  ${col}${B}║${NC} ${col}${B}%s${NC} ${col}${B}║${NC}\n" "${l}${txt}${r}"
-    printf "  ${col}${B}╚%s╝${NC}\n" "$(repeat_char '═' "$w")"
-}
-
-# ── Plain-English disclaimers for beginners ───────────────────
-disclaimer() {
-    printf "  ${C_AMB}${B}── In plain English ──${NC}\n"
-    while IFS= read -r l; do
-        printf "  ${C_DIM}%s${NC}\n" "$l"
-    done
-    echo ""
-}
-
-# Global prerequisite notes (shown by several commands)
-FILZA_NOTE="W0lfSword expects Filza to already be installed on the phone. It does NOT sideload Filza for you  -  get it from TrollStore or your package manager first."
-JAILBREAK_NOTE="The phone needs to be jailbroken (Dopamine, palera1n, etc.) with MobileSubstrate, and OpenSSH running, or the tweak can never inject."
-PERSIST_NOTE="Nothing is permanent. Reboot the phone and everything resets  -  the exploit simply runs again the next time Filza opens."
-
-# ── PlumeImpactor helpers ────────────────────────────────────
-# adderall K1.2+: when Filza is missing from the device, offer to install
-# it via PlumeImpactor instead of just warning. PlumeImpactor is a GUI
-# app (iced/winit) with no CLI install mode, so the best we can do is
-# locate the binary, build the re-signed Filza-MHA.ipa (same artifact
-# cmd_nojailbreak produces), and launch the GUI with clear instructions.
-
-plumeimpactor_bin() {
-    # Returns a runnable PlumeImpactor invocation, or empty. Checks, in
-    # order: flatpak install, repo source build, AppImage in Downloads.
-    if grep -qi 'PlumeImpactor' < <(flatpak list --app 2>/dev/null); then
-        echo "flatpak run dev.khcrysalis.PlumeImpactor"
-        return 0
-    fi
-    if [ -x "$PROJECT_DIR/scripts/plumeimpactor" ]; then
-        echo "$PROJECT_DIR/scripts/plumeimpactor"
-        return 0
-    fi
-    for cand in "$HOME/Downloads/Impactor-linux-x86_64.appimage" \
-                "$HOME/Downloads/PlumeImpactor-linux-x86_64.AppImage"; do
-        [ -x "$cand" ] && { echo "$cand"; return 0; }
-    done
-    return 1
-}
-
-# Build the re-signed Filza-MHA.ipa (registerable bundle id) so the user
-# has something to drop into PlumeImpactor. Mirrors cmd_nojailbreak
-# phases 7-8. Sets OUT_IPA on success, returns 1 on failure.
-build_mha_ipa() {
-    local IPA_SRC=""
-    for cand in "$PROJECT_DIR/Filza.ipa" "$HOME/Downloads/Filza.ipa" "$PROJECT_DIR/packages/Filza.ipa"; do
-        [ -f "$cand" ] && { IPA_SRC="$cand"; break; }
-    done
-    if [ -z "$IPA_SRC" ]; then
-        err "No Filza.ipa found - put it in $PROJECT_DIR or $HOME/Downloads"
-        return 1
-    fi
-    check_theos || { err "THEOS not set"; return 1; }
-    local dylib
-    dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null \
-         || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
-    if [ -z "$dylib" ]; then
-        stage "build" "Building tweak dylib (MHA_IDENTITY=1)..."
-        local log; log=$(make all MHA_IDENTITY=1 2>&1); local ec=$?
-        if [ $ec -ne 0 ]; then err "Build failed (exit=$ec)"; return 1; fi
-        dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
-        [ -n "$dylib" ] || { err "Built dylib not found in .theos"; return 1; }
-    fi
-    # ldid is required by re-sign_mha.sh; prefer the repo build.
-    if ! command -v ldid &>/dev/null && [ -x "$PROJECT_DIR/scripts/ldid" ]; then
-        export PATH="$PROJECT_DIR/scripts:$PATH"
-    fi
-    OUT_IPA="$PROJECT_DIR/packages/Filza-MHA.ipa"
-    stage "re-sign" "Re-signing Filza with the tweak injected..."
-    if ! bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$IPA_SRC" "$dylib" "$OUT_IPA" \
-         "com.kaffeindecaf.w0lfsword.filza" >/tmp/mha_resign_adderall.log 2>&1 \
-         || [ ! -f "$OUT_IPA" ]; then
-        err "MHA re-sign failed - see /tmp/mha_resign_adderall.log"
-        return 1
-    fi
-    return 0
-}
-
-# Prompt + launch PlumeImpactor so the user can install Filza. Returns 0
-# if the GUI was launched (user takes it from there), 1 if unavailable.
-plumeimpactor_install() {
-    section "Filza Install  -  PlumeImpactor"
-    echo ""
-    if ! confirm "Filza is not installed. Launch PlumeImpactor to install it?"; then
-        echo -e "  ${C_DIM}Skipped - the deploy can continue, but the tweak will never run without Filza.${NC}"
-        return 1
-    fi
-    local PI; PI=$(plumeimpactor_bin)
-    if [ -z "$PI" ]; then
-        warn "PlumeImpactor not found"
-        echo -e "  ${C_DIM}Install it first (flatpak: flatpak install flathub dev.khcrysalis.PlumeImpactor),${NC}"
-        echo -e "  ${C_DIM}then re-run adderall. Meanwhile I can still build the .ipa for you.${NC}"
-    fi
-    if build_mha_ipa; then
-        ok "Ready: $OUT_IPA"
-    else
-        warn "Could not build the re-signed Filza .ipa - install stock Filza manually."
-    fi
-    if [ -n "$PI" ]; then
-        echo -e "  ${C_FROST}Launching PlumeImpactor...${NC}"
-        echo -e "  ${C_DIM}  In PlumeImpactor: sign in with your Apple ID, then drag${NC}"
-        if [ -n "$OUT_IPA" ] && [ -f "$OUT_IPA" ]; then
-            echo -e "  ${C_DIM}  ${C_EYE}$OUT_IPA${NC}${C_DIM} onto the window and install.${NC}"
-        else
-            echo -e "  ${C_DIM}  the Filza.ipa you have into the window and install.${NC}"
-        fi
-        echo -e "  ${C_DIM}  Wait for the install to finish, then press Enter here to continue.${NC}"
-        # Launch in the background; GUI needs a display. If we have none
-        # (headless run), tell the user to launch it themselves.
-        if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-            ( $PI >/dev/null 2>&1 & )
-            read -r -p "  " _ans
-        else
-            echo -e "  ${C_AMB}⚠${NC} No display in this shell - launch PlumeImpactor yourself:"
-            echo -e "    ${C_FROST}$PI${NC}"
-            echo -e "  ${C_DIM}  Install $OUT_IPA, then press Enter to continue.${NC}"
-            read -r -p "  " _ans
-        fi
-        ok "Proceeding - verify Filza is installed on the device now."
-        return 0
-    fi
-    return 1
-}
-
-# ── Verbose relay ─────────────────────────────────────────────
-
-vlog() { $VERBOSE && printf "  ${C_DIM}[v] %s${NC}\n" "$*" || true; }
 
 # ── Data dir ──────────────────────────────────────────────────
 
 mkdir -p "$DATA_DIR/profiles" "$DATA_DIR"
 
 # ═══════════════════════════════════════════════════════════════
-#  ASCII ART  -  Arctic Wolf
+#  § 12 ASCII ART  -  Arctic Wolf
 # ═══════════════════════════════════════════════════════════════
 
 # single source of truth for the art; show_wolf and the boot scramble
@@ -1491,15 +1692,9 @@ reveal_lines() {
     printf "\033[?25h"
 }
 
-show_header() {
-    echo ""
-    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '═' 60)"
-    printf "  ${C_SNOW}${B}W0lfSword${NC} ${C_DIM}v${VERSION}${NC}   ${C_WOLF}iOS Kernel Exploit Toolkit${NC}\n"
-    printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '═' 60)"
-}
 
 # ═══════════════════════════════════════════════════════════════
-#  UTILITY
+#  § 13 UTILITY
 # ═══════════════════════════════════════════════════════════════
 
 check_theos() {
@@ -1592,7 +1787,7 @@ scan_devices() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  ORIGINAL COMMANDS
+#  § 14 ORIGINAL COMMANDS
 # ═══════════════════════════════════════════════════════════════
 
 cmd_build() {
@@ -1825,9 +2020,40 @@ print(b,p)
         df_dead=$(printf '%s\n' "$df_out" | awk '/^DEAD FUNCTIONS:/{print $3; exit}')
         df_defs=${df_defs:-0}; df_dead=${df_dead:-0}
     fi
+    # -- script syntax (AUD.10). The audit checked the ObjC sources and ran
+    #    the shellcheck pass over the main script, but NOTHING verified that
+    #    the other shell/python files in the repo even parse - a broken
+    #    scripts/*.sh only failed at run time, inside the command that needed
+    #    it. Covers tracked + untracked repo files, excluding vendored trees.
+    local syn_bad=0 syn_n=0 syn_out="" sfile
+    while IFS= read -r sfile; do
+        [ -f "$sfile" ] || continue
+        case "$sfile" in *.sh) syn_n=$((syn_n + 1))
+            bash -n "$sfile" 2>/dev/null || { syn_bad=$((syn_bad + 1)); syn_out="$syn_out$sfile (bash -n failed)"$'\n'; } ;;
+        *.py)  syn_n=$((syn_n + 1))
+            python3 -c 'import ast,sys; ast.parse(open(sys.argv[1],encoding="utf-8",errors="replace").read())' "$sfile" 2>/dev/null \
+                || { syn_bad=$((syn_bad + 1)); syn_out="$syn_out$sfile (python parse failed)"$'\n'; } ;;
+        esac
+    done < <(find . -maxdepth 3 \
+                \( -name .git -o -name .theos -o -name __pycache__ -o -name node_modules \
+                   -o -name referenceforAI -o -name packages -o -name .w0lfsword \
+                   -o -path ./scripts/usbliter8_arctic/tools \) -prune -o \
+                -type f \( -name '*.sh' -o -name '*.py' \) -print 2>/dev/null | sort)
+    # -- CLI consistency (AUD.10). The command registry inside W0lfSword is the
+    #    single source of truth for the menu, the shortcuts line, the commands
+    #    index and explain's fallback list; the vendored checker proves they
+    #    still agree (registry <-> dispatch, key collisions, handlers, docs).
+    local cc_find=0 cc_out="" cc_rows=0
+    if [ -f scripts/cli_consistency.py ]; then
+        cc_out=$(python3 scripts/cli_consistency.py W0lfSword 2>&1)
+        cc_find=$(printf '%s\n' "$cc_out" | awk '/^findings:/{print $2; exit}')
+        cc_rows=$(printf '%s\n' "$cc_out" | awk '/^  registry rows:/{print $3; exit}')
+        cc_find=${cc_find:-0}; cc_rows=${cc_rows:-0}
+    fi
     # --json (J6.2): machine-readable audit result
     if $JSON_MODE; then
-        printf '%s' "$results" | SC_WARNS="$sc_warns" DF_DEFS="$df_defs" DF_DEAD="$df_dead" python3 -c '
+        printf '%s' "$results" | SC_WARNS="$sc_warns" DF_DEFS="$df_defs" DF_DEAD="$df_dead" \
+            SYN_N="$syn_n" SYN_BAD="$syn_bad" CC_ROWS="$cc_rows" CC_FIND="$cc_find" python3 -c '
 import sys, json, os, shutil
 rows = []
 for line in sys.stdin.read().splitlines():
@@ -1836,10 +2062,17 @@ for line in sys.stdin.read().splitlines():
 sc_w = int(os.environ.get("SC_WARNS", "0"))
 df_defs = int(os.environ.get("DF_DEFS", "0"))
 df_dead = int(os.environ.get("DF_DEAD", "0"))
-print(json.dumps({"files": rows, "issues": sum(1 for r in rows if not r["ok"]) + sc_w + df_dead,
-                  "passed": all(r["ok"] for r in rows) and sc_w == 0 and df_dead == 0,
+syn_n = int(os.environ.get("SYN_N", "0"))
+syn_bad = int(os.environ.get("SYN_BAD", "0"))
+cc_rows = int(os.environ.get("CC_ROWS", "0"))
+cc_find = int(os.environ.get("CC_FIND", "0"))
+issues = sum(1 for r in rows if not r["ok"]) + sc_w + df_dead + syn_bad + cc_find
+print(json.dumps({"files": rows, "issues": issues,
+                  "passed": issues == 0,
                   "shellcheck": {"installed": shutil.which("shellcheck") is not None, "warnings": sc_w, "ok": sc_w == 0},
-                  "dead_fn": {"scan": os.path.exists("scripts/dead_fn_scan.py"), "defs": df_defs, "dead": df_dead, "ok": df_dead == 0}},
+                  "dead_fn": {"scan": os.path.exists("scripts/dead_fn_scan.py"), "defs": df_defs, "dead": df_dead, "ok": df_dead == 0},
+                  "script_syntax": {"checked": syn_n, "failed": syn_bad, "ok": syn_bad == 0},
+                  "cli_consistency": {"check": os.path.exists("scripts/cli_consistency.py"), "registry_rows": cc_rows, "findings": cc_find, "ok": cc_find == 0}},
                  indent=2))
 '
         return 0
@@ -1866,12 +2099,69 @@ print(json.dumps({"files": rows, "issues": sum(1 for r in rows if not r["ok"]) +
     else
         echo -e "  ${C_DIM}─${NC} dead-fn scan ${C_DIM}(scripts/dead_fn_scan.py missing - optional step, skipped)${NC}"
     fi
+    if [ "$syn_bad" -eq 0 ]; then
+        ok "repo scripts ($syn_n shell/python files parse)"
+    else
+        echo -e "  ${C_RED}✗${NC} repo scripts ${C_RED}($syn_bad of $syn_n files do not parse)${NC}"
+        printf '%s' "$syn_out" | sed 's/^/      /'
+        issues=$((issues + syn_bad))
+    fi
+    if [ -f scripts/cli_consistency.py ]; then
+        if [ "$cc_find" -eq 0 ]; then
+            ok "W0lfSword (CLI consistency: $cc_rows commands, registry = dispatch = menu = help)"
+        else
+            echo -e "  ${C_RED}✗${NC} W0lfSword ${C_RED}(CLI consistency: $cc_find finding(s))${NC}"
+            printf '%s\n' "$cc_out" | sed -n '/ERROR/p' | sed 's/^/      /'
+            issues=$((issues + cc_find))
+        fi
+    else
+        echo -e "  ${C_DIM}─${NC} CLI consistency ${C_DIM}(scripts/cli_consistency.py missing - optional step, skipped)${NC}"
+    fi
     if [ "$issues" -eq 0 ]; then
         echo ""; echo -e "  ${C_GRN}${B}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  AUDIT PASSED${NC}"
     else
         echo ""; echo -e "  ${C_RED}${B}$issues issue(s) found${NC}"
         crit "audit found $issues issue(s) in sources/script"
     fi
+}
+
+cmd_clean() {
+    $VERBOSE || spinner "cleaning"
+    make clean >/dev/null 2>&1 || true
+    rm -rf /tmp/w0lf_extract_* W0lfSword.dylib FilzaApplySandboxExt.dylib 2>/dev/null || true
+    ok "Clean complete"
+}
+
+cmd_doctor() {
+    show_header
+    echo ""
+    section "Toolchain"
+    local ok=true
+    if check_theos; then
+        echo -e "  ${C_GRN}✓${NC} THEOS          ${C_DIM}${THEOS}${NC}"
+    else
+        echo -e "  ${C_RED}✗${NC} THEOS          ${C_DIM}export THEOS=~/theos (Linux) / /opt/theos (macOS)${NC}"; ok=false
+    fi
+    if command -v clang &>/dev/null;    then echo -e "  ${C_GRN}✓${NC} clang";          else echo -e "  ${C_RED}✗${NC} clang"; ok=false; fi
+    if command -v dpkg-deb &>/dev/null; then echo -e "  ${C_GRN}✓${NC} dpkg-deb";       else echo -e "  ${C_RED}✗${NC} dpkg-deb ${C_DIM}(brew install dpkg / apt install dpkg)${NC}"; ok=false; fi
+    if command -v git &>/dev/null;      then echo -e "  ${C_GRN}✓${NC} git";            else echo -e "  ${C_AMB}⚠${NC} git (recommended)"; fi
+    if command -v ssh &>/dev/null;      then echo -e "  ${C_GRN}✓${NC} ssh";            else echo -e "  ${C_AMB}⚠${NC} ssh (for deployment)"; fi
+    if command -v python3 &>/dev/null;  then echo -e "  ${C_GRN}✓${NC} python3";        else echo -e "  ${C_AMB}⚠${NC} python3 (for audit)"; fi
+    if command -v ldid &>/dev/null;     then echo -e "  ${C_GRN}✓${NC} ldid";           else echo -e "  ${C_DIM}─${NC} ldid (optional)"; fi
+    if [ "$IS_MACOS" -eq 1 ]; then
+        if xcode-select -p &>/dev/null && xcrun --sdk iphoneos --show-sdk-path &>/dev/null; then
+            echo -e "  ${C_GRN}✓${NC} Xcode iPhoneOS SDK  ${C_DIM}$(xcrun --sdk iphoneos --show-sdk-path)${NC}"
+        else
+            echo -e "  ${C_RED}✗${NC} Xcode iPhoneOS SDK  ${C_DIM}run: xcode-select --install, then open Xcode once${NC}"; ok=false
+        fi
+    fi
+    echo ""
+    if $ok; then
+        echo -e "  ${C_GRN}${B}All tools ready. Go break something.${NC}"
+    else
+        echo -e "  ${C_RED}${B}Missing tools  -  install before building.${NC}"
+    fi
+    echo ""
 }
 
 cmd_log() {
@@ -1984,7 +2274,7 @@ print(json.dumps({"version_blocks": blocks, "soc_coverage": socs, "total_blocks"
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  READINESS  -  device capability / exploit-readiness report
+#  § 15 READINESS  -  device capability / exploit-readiness report
 # ═══════════════════════════════════════════════════════════════
 
 cmd_readiness() {
@@ -2183,7 +2473,7 @@ cmd_targets() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  EXPLOITS  -  technique matrix (K1.5)
+#  § 16 EXPLOITS  -  technique matrix (K1.5)
 # ═══════════════════════════════════════════════════════════════
 
 cmd_exploits() {
@@ -2215,7 +2505,7 @@ cmd_exploits() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  CHAINS  -  attack chain catalog (C5.3)
+#  § 17 CHAINS  -  attack chain catalog (C5.3)
 # ═══════════════════════════════════════════════════════════════
 
 cmd_chains() {
@@ -2355,7 +2645,7 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  CVE  -  tracked CVE catalog (C5.1/C5.2)
+#  § 18 CVE  -  tracked CVE catalog (C5.1/C5.2)
 # ═══════════════════════════════════════════════════════════════
 
 cmd_cve() {
@@ -2446,7 +2736,7 @@ cmd_cve() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  POCLAB  -  proof-of-concept lab (C6): found-but-unimplemented bugs
+#  § 19 POCLAB  -  proof-of-concept lab (C6): found-but-unimplemented bugs
 # ═══════════════════════════════════════════════════════════════
 
 poclab_concepts() {
@@ -2505,7 +2795,7 @@ cmd_poclab() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  EXPERIMENTAL  -  developer section (red theme, verbose)
+#  § 20 EXPERIMENTAL  -  developer section (red theme, verbose)
 # ═══════════════════════════════════════════════════════════════
 
 # experimental exploit catalog: found-but-unimplemented, research-grade.
@@ -2789,7 +3079,7 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  MOBILEGESTALT  -  full MobileGestalt editing (Chain F)
+#  § 21 MOBILEGESTALT  -  full MobileGestalt editing (Chain F)
 # ═══════════════════════════════════════════════════════════════
 # Drives the on-device mobilegestalt module (mobilegestalt/mobilegestalt.m)
 # through the app's Documents dir over USB/AFC (non-jailbroken Filza Arctic
@@ -3337,7 +3627,7 @@ else:
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  SBTWEAK  -  SpringBoard live tweaks via TaskRop RemoteCall
+#  § 22 SBTWEAK  -  SpringBoard live tweaks via TaskRop RemoteCall
 # ═══════════════════════════════════════════════════════════════
 # Drives the in-tweak sbtweak module (sbtweak/sbtweak.m), which uses the
 # repo's dormant kexploit/RemoteCall.m to make remote Objective-C calls into
@@ -3450,7 +3740,7 @@ cmd_experimental() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  POC  -  panic-PoC lab (research only  -  crashes the device)
+#  § 23 POC  -  panic-PoC lab (research only  -  crashes the device)
 # ═══════════════════════════════════════════════════════════════
 
 POC_DIR="$PROJECT_DIR/pocs"
@@ -3618,7 +3908,7 @@ cmd_poc() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  FUZZ  -  ImageIO fuzzing harness (K4.2)
+#  § 24 FUZZ  -  ImageIO fuzzing harness (K4.2)
 # ═══════════════════════════════════════════════════════════════
 
 cmd_fuzz() {
@@ -3643,7 +3933,7 @@ cmd_fuzz() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  MHA  -  MobileHouseArrest re-sign (K4.12)
+#  § 25 MHA  -  MobileHouseArrest re-sign (K4.12)
 # ═══════════════════════════════════════════════════════════════
 
 cmd_mha() {
@@ -3675,45 +3965,6 @@ EOF
 
     stage "2/2" "Re-signing $ipa as com.apple.mobile.MobileHouseArrest..."
     bash "$PROJECT_DIR/scripts/re-sign_mha.sh" "$ipa" "$dylib" "$out"
-}
-
-cmd_clean() {
-    $VERBOSE || spinner "cleaning"
-    make clean >/dev/null 2>&1 || true
-    rm -rf /tmp/w0lf_extract_* W0lfSword.dylib FilzaApplySandboxExt.dylib 2>/dev/null || true
-    ok "Clean complete"
-}
-
-cmd_doctor() {
-    show_header
-    echo ""
-    section "Toolchain"
-    local ok=true
-    if check_theos; then
-        echo -e "  ${C_GRN}✓${NC} THEOS          ${C_DIM}${THEOS}${NC}"
-    else
-        echo -e "  ${C_RED}✗${NC} THEOS          ${C_DIM}export THEOS=~/theos (Linux) / /opt/theos (macOS)${NC}"; ok=false
-    fi
-    if command -v clang &>/dev/null;    then echo -e "  ${C_GRN}✓${NC} clang";          else echo -e "  ${C_RED}✗${NC} clang"; ok=false; fi
-    if command -v dpkg-deb &>/dev/null; then echo -e "  ${C_GRN}✓${NC} dpkg-deb";       else echo -e "  ${C_RED}✗${NC} dpkg-deb ${C_DIM}(brew install dpkg / apt install dpkg)${NC}"; ok=false; fi
-    if command -v git &>/dev/null;      then echo -e "  ${C_GRN}✓${NC} git";            else echo -e "  ${C_AMB}⚠${NC} git (recommended)"; fi
-    if command -v ssh &>/dev/null;      then echo -e "  ${C_GRN}✓${NC} ssh";            else echo -e "  ${C_AMB}⚠${NC} ssh (for deployment)"; fi
-    if command -v python3 &>/dev/null;  then echo -e "  ${C_GRN}✓${NC} python3";        else echo -e "  ${C_AMB}⚠${NC} python3 (for audit)"; fi
-    if command -v ldid &>/dev/null;     then echo -e "  ${C_GRN}✓${NC} ldid";           else echo -e "  ${C_DIM}─${NC} ldid (optional)"; fi
-    if [ "$IS_MACOS" -eq 1 ]; then
-        if xcode-select -p &>/dev/null && xcrun --sdk iphoneos --show-sdk-path &>/dev/null; then
-            echo -e "  ${C_GRN}✓${NC} Xcode iPhoneOS SDK  ${C_DIM}$(xcrun --sdk iphoneos --show-sdk-path)${NC}"
-        else
-            echo -e "  ${C_RED}✗${NC} Xcode iPhoneOS SDK  ${C_DIM}run: xcode-select --install, then open Xcode once${NC}"; ok=false
-        fi
-    fi
-    echo ""
-    if $ok; then
-        echo -e "  ${C_GRN}${B}All tools ready. Go break something.${NC}"
-    else
-        echo -e "  ${C_RED}${B}Missing tools  -  install before building.${NC}"
-    fi
-    echo ""
 }
 
 cmd_tweaks() {
@@ -3969,7 +4220,7 @@ PYEOF
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  BETA  -  Profiles
+#  § 26 BETA  -  Profiles
 # ═══════════════════════════════════════════════════════════════
 
 cmd_profile() {
@@ -4040,7 +4291,7 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  BETA  -  Device Manager
+#  § 27 BETA  -  Device Manager
 # ═══════════════════════════════════════════════════════════════
 
 cmd_device() {
@@ -4094,7 +4345,7 @@ cmd_device() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  BETA  -  History
+#  § 28 BETA  -  History
 # ═══════════════════════════════════════════════════════════════
 
 cmd_history() {
@@ -4142,7 +4393,7 @@ cmd_history() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  BETA  -  Monitor
+#  § 29 BETA  -  Monitor
 # ═══════════════════════════════════════════════════════════════
 
 cmd_monitor() {
@@ -4160,7 +4411,7 @@ cmd_monitor() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  BETA  -  Quick (one-shot exploit)
+#  § 30 BETA  -  Quick (one-shot exploit)
 # ═══════════════════════════════════════════════════════════════
 
 cmd_quick() {
@@ -4240,7 +4491,7 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  INTERACTIVE MENU
+#  § 31 INTERACTIVE MENU
 # ═══════════════════════════════════════════════════════════════
 
 # emits the menu content (header, devices, groups, shortcuts); the
@@ -4289,46 +4540,53 @@ menu_body() {
     fi
     echo ""
 
-    menu_group "exploit"
-    menu_opt 1 "Quick Exploit"    "build → install → verify, one button"
-    menu_opt 2 "Deploy Only"      "install the tweak on the phone"
-    menu_opt 3 "Live Monitor"     "watch the phone's log in real time"
-    [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
-
-    menu_group "phone & data"
-    menu_opt 4 "Device Manager"   "add / switch / device info"
-    menu_opt 5 "Profiles"         "save / load deploy settings"
-    menu_opt 6 "History"          "exploit success stats"
-    [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
-
-    menu_group "diagnostics & power"
-    menu_opt 7 "Diagnostics"      "doctor · audit · status"
-    menu_opt 8 "Targets & Exploits" "supported apps · technique matrix"
-    menu_opt n "Chains & CVEs"      "attack chain catalog · CVE tracker (C5)"
-    menu_opt o "PoC Lab"            "test found-but-unimplemented bugs (C6)"
-    menu_opt g "Config"             "animations · colors · menu behavior"
-    menu_opt 9 "usbliter8-arctic" "A12/A13 tethered jailbreak · PWN DFU · CFW builder" "${C_AMB}[root]${NC}"
-    menu_opt u "USB Test"         "cable · pairing · data round-trip (harmless)"
-    menu_opt p "Panic Analyzer"   "classify .ips crash logs → known CVEs (BB-032..037)"
-    [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
-
-    menu_group "research (device-crashing PoCs)"
-    menu_opt 0 "Panic-PoC Lab"    "sep-panic / exr / applejpeg / dirtyslide" "${C_RED}[crashes phone]${NC}"
-    menu_opt f "ImageIO Fuzzer"   "mutate DNG/HEIF → phone → crash capture (K4.2)"
-    menu_opt k "Kernelcache Diff" "offline XPF offset research  -  resolve/diff kernelcaches"
-    menu_opt w "kcwatch"          "auto kernel-delta watcher  -  poll → fetch → resolve → report"
-    menu_opt r "readiness"        "device capability + exploit-readiness report (live probes)"
-    menu_opt nj "NoJailbreak"     "USB install Filza + kernel R/W, no jailbreak needed (18-26.0.1)"
-    menu_opt mg "MobileGestalt"   "full MobileGestalt editing - set/unset/dump keys via Filza Arctic (26.0.1)"
-    menu_opt sbt "SB Tweak"       "SpringBoard live tweaks - 5-icon dock via RemoteCall (26.0.1)" "${C_AMB}[live SB]${NC}"
-    menu_opt ex "Experimental"    "unfinished exploits · novel chains (dev)" "${C_AMB}[beta]${NC}"
-    [ "$CFG_MENU_COMPACT" = "on" ] || echo ""
+    # Menu rows come straight from W0LF_COMMANDS (group order + registry
+    # order), so adding a command to the table is all it takes to render it.
+    local g entry name slot shortcut aliases group label summary tag docs handler rows
+    for g in exploit device diagnostics research; do
+        rows=0
+        for entry in "${W0LF_COMMANDS[@]}"; do
+            IFS='|' read -r name slot shortcut aliases group label summary tag docs handler <<< "$entry"
+            [ "$group" = "$g" ] || continue
+            case "$slot" in ""|-) continue;; esac
+            if [ "$rows" -eq 0 ]; then menu_group "$(group_title "$g")"; fi
+            menu_opt "$slot" "$label" "$summary" "$(tag_text "$tag")"
+            rows=$((rows + 1))
+        done
+        if [ "$rows" -gt 0 ] && [ "$CFG_MENU_COMPACT" != "on" ]; then echo ""; fi
+    done
 
     echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────────────${NC}"
-    printf "  ${C_FROST}b${NC} build  ${C_FROST}d${NC} deploy  ${C_FROST}a${NC} adderall  ${C_FROST}nj${NC} nojailbreak  ${C_FROST}sf${NC} safe  ${C_FROST}s${NC} status  ${C_FROST}l${NC} log\n"
-    printf "  ${C_FROST}m${NC} monitor  ${C_FROST}c${NC} clean  ${C_FROST}x${NC} explain  ${C_FROST}tw${NC} tweaks  ${C_FROST}e${NC} exploits  ${C_FROST}f${NC} fuzz  ${C_FROST}u${NC} usbtest  ${C_FROST}p${NC} panic  ${C_FROST}k${NC} kernelcache  ${C_FROST}w${NC} kcwatch  ${C_FROST}r${NC} readiness  ${C_FROST}g${NC} config  ${C_FROST}mg${NC} mobilegestalt  ${C_FROST}poc${NC} panic-lab  ${C_FROST}q${NC} quit\n"
+    menu_shortcuts_line
     echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo (adderall, setup, usbliter8) · ${C_RED}[crashes phone]${C_DIM} = research PoCs, device reboots${NC}"
+    echo -e "  ${C_DIM}  ${C_FROST}commands${C_DIM} = full index (groups · aliases · menu keys)${NC}"
     echo ""
+}
+
+# Shortcuts line - generated from the registry's `shortcut` field, so it can
+# never advertise a key run_menu does not accept (the old hand-typed line
+# listed sf/n/o/sbt/ex and four of those were not even wired). Wraps on
+# VISIBLE width: the ANSI bytes around each key are not counted.
+menu_shortcuts_line() {
+    local max=108 entry name slot shortcut aliases group label summary tag docs handler
+    local indent="               " w=2 item
+    # NOTE: every color goes in the printf FORMAT, never in a %s argument -
+    # the palette vars are literal "\033[.." backslash strings, so passing one
+    # through %s prints the raw escape as text (and wrapping must count VISIBLE
+    # width, not the bytes of those escapes).
+    printf "  "
+    for entry in "${W0LF_COMMANDS[@]}"; do
+        IFS='|' read -r name slot shortcut aliases group label summary tag docs handler <<< "$entry"
+        case "$shortcut" in ""|-) continue;; esac
+        item=$(( ${#shortcut} + 1 + ${#name} + 2 ))
+        if [ $(( w + item )) -gt "$max" ]; then
+            printf "\n%s" "$indent"
+            w=${#indent}
+        fi
+        printf "${C_FROST}%s${NC} %s  " "$shortcut" "$name"
+        w=$(( w + item ))
+    done
+    printf "\n"
 }
 
 draw_menu() {
@@ -4415,91 +4673,115 @@ EOF
     touch "$DATA_DIR/.has_run"
 }
 
+# ── Menu handlers ─────────────────────────────────────────────
+# One function per interactive menu row. These used to be inline `case`
+# branches (60 lines of mixed prompts, composites and one-off arg passing)
+# sprinkled through run_menu; naming them keeps run_menu readable and lets
+# the registry point at them by name.
+
+# Menu composites: rows whose label promises more than one command.
+cmd_diag() { cmd_doctor; echo ""; cmd_audit; echo ""; cmd_status; }
+menu_cmd_diagnostics() { cmd_diag || true; }
+
+menu_cmd_targets()   { cmd_targets || true; echo ""; cmd_exploits || true; }
+menu_cmd_chains()    { cmd_chains  || true; echo ""; cmd_cve      || true; }
+menu_cmd_history()   { { cmd_history stats; echo ""; cmd_history show; } || true; }
+menu_cmd_log()       { cmd_log 50 || true; }
+
+# Prompt-backed rows: show the accepted subcommands, read them, dispatch.
+menu_cmd_device() {
+    echo -e "  ${C_FROST}Device commands:${NC} list | add <ip> | switch <ip> | info [ip]"
+    echo -ne "  ${C_FROST}device ▸${NC} "
+    local -a dargs=(); read -r -a dargs || true
+    echo ""; cmd_device "${dargs[@]}" || true
+}
+
+menu_cmd_profile() {
+    echo -e "  ${C_FROST}Profile commands:${NC} list | save <name> | load <name>"
+    echo -ne "  ${C_FROST}profile ▸${NC} "
+    local -a pargs=(); read -r -a pargs || true
+    echo ""; cmd_profile "${pargs[@]}" || true
+}
+
+menu_cmd_usbliter8() {
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "  ${C_AMB}⚠ usbliter8 needs root for USB/DFU access${NC}"
+        echo -e "  ${C_DIM}Exit and re-run with: ${C_FROST}sudo ./W0lfSword${NC}"
+    else
+        run_usbliter8 || true
+    fi
+}
+
+menu_cmd_quit() {
+    echo ""
+    if anim_on; then
+        printf "  ${C_WOLF}"
+        type_text "~ howl later ~"
+        printf "${NC}"
+    else
+        echo -e "  ${C_WOLF}~ howl later ~${NC}"
+    fi
+    echo ""; exit 0
+}
+
+# menu_dispatch <key>  -  resolve an interactive key through the registry.
+# Accepts the menu slot, the shortcuts-line key, a CLI alias or the full
+# command name (case-insensitive, so `B` and `CLEAN` work). This is the ONLY
+# place a key turns into a command, so the menu cannot accept a key the
+# registry does not list.
+menu_dispatch() {
+    local raw="${1:-}"
+    local choice; choice=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')
+    [ -n "$choice" ] || { echo -e "  ${C_RED}Unknown:${NC} ${C_DIM}(empty)${NC}"; echo -e "  ${C_DIM}type ${C_FROST}commands${C_DIM} for the index, ${C_FROST}help${C_DIM} for usage${NC}"; return 1; }
+    local entry name slot shortcut aliases group label summary tag docs handler a
+    for entry in "${W0LF_COMMANDS[@]}"; do
+        IFS='|' read -r name slot shortcut aliases group label summary tag docs handler <<< "$entry"
+        local hit=false
+        [ "$choice" = "$name" ] && hit=true
+        case "$choice" in "$slot"|"$shortcut") hit=true;; esac
+        if [ "$hit" = false ] && [ "$aliases" != "-" ]; then
+            for a in ${aliases//,/ }; do [ "$choice" = "$a" ] && { hit=true; break; }; done
+        fi
+        [ "$hit" = true ] || continue
+        case "$handler" in ""|-) handler="cmd_$name";; esac
+        if ! declare -F "$handler" >/dev/null; then
+            err "menu: '$choice' maps to $handler() which is not defined"
+            hint "registry row '$name' has a stale handler - run ./W0lfSword audit"
+            return 1
+        fi
+        "$handler" || true
+        return 0
+    done
+    echo -e "  ${C_RED}Unknown:${NC} '$raw'"
+    echo -e "  ${C_DIM}type ${C_FROST}commands${C_DIM} for the index (names + keys), ${C_FROST}help${C_DIM} for usage${NC}"
+    printf "  ${C_DIM}keys: %s${NC}\n" "$(registry_keys | sort -u | tr '\n' ' ')"
+    return 1
+}
+
 run_menu() {
     FIRST_DRAW=true
     show_loading
     first_run_wizard
+    local choice
     while true; do
         draw_menu
-        read -r choice
+        # EOF (stdin closed, piped input exhausted, CI) must leave the menu -
+        # `read` failing at EOF used to fall through with an empty choice and
+        # the loop spun forever printing "Unknown".
+        if ! read -r choice; then
+            echo ""
+            echo -e "  ${C_DIM}stdin closed - leaving the menu${NC}"
+            break
+        fi
         spinner "loading"
         echo ""
-        case "$choice" in
-            1) cmd_quick || true;;
-            2) cmd_deploy || true;;
-            3) cmd_monitor || true;;
-            4) echo -e "  ${C_FROST}Device commands:${NC} list | add <ip> | switch <ip> | info [ip]"
-               echo -ne "  ${C_FROST}device ▸${NC} "; read -r -a dargs || true
-               echo ""; cmd_device "${dargs[@]}" || true;;
-            5) echo -e "  ${C_FROST}Profile commands:${NC} list | save <name> | load <name>"
-               echo -ne "  ${C_FROST}profile ▸${NC} "; read -r -a pargs || true
-               echo ""; cmd_profile "${pargs[@]}" || true;;
-            6) { cmd_history stats; echo ""; cmd_history show; } || true;;
-            7) { cmd_doctor; echo ""; cmd_audit; echo ""; cmd_status; } || true;;
-            8) { cmd_targets || true; echo ""; cmd_exploits || true; };;
-            tweaks|tw)    cmd_tweaks || true;;
-            0|poc)        cmd_poc || true;;
-            panic)        cmd_panic || true;;
-            kernelcache)  cmd_kernelcache || true;;
-            kcwatch|kw)   cmd_kcwatch || true;;
-            readiness|r)  cmd_readiness || true;;
-            f|fuzz)       cmd_fuzz || true;;
-            exploits|e)   cmd_exploits || true;;
-            chains|ch)    cmd_chains || true;;
-            cve)          cmd_cve || true;;
-            poclab|o)     cmd_poclab || true;;
-            mobilegestalt|mg) cmd_mobilegestalt || true;;
-            sbtweak|sbt) cmd_sbtweak || true;;
-            experimental|ex) cmd_experimental || true;;
-            g|cfg|config) cmd_config || true;;
-            # usbliter8-arctic
-            9|ul8|usbliter8)
-                if [ "$EUID" -ne 0 ]; then
-                    echo -e "  ${C_AMB}⚠ usbliter8 needs root for USB/DFU access${NC}"
-                    echo -e "  ${C_DIM}Exit and re-run with: ${C_FROST}sudo ./W0lfSword${NC}"
-                else
-                    run_usbliter8 "$@" || true
-                fi
-                ;;
-            u|usbtest)    cmd_usbtest || true;;
-            # Quick shortcuts
-            b|B|build)    cmd_build || true;;
-            d|D|deploy)   cmd_deploy || true;;
-            a|A|adderall) cmd_adderall || true;;
-            nj|nojailbreak) cmd_nojailbreak || true;;
-            update|up)   cmd_update || true;;
-            setup|install) cmd_setup || true;;
-            reboot)       cmd_reboot || true;;
-            export)       cmd_export || true;;
-            s|S|status)   cmd_status || true;;
-            l|L|log)      cmd_log 50 || true;;
-            m|M|monitor)  cmd_monitor || true;;
-            c|C|clean)    cmd_clean || true;;
-            doctor)       cmd_doctor || true;;
-            audit)        cmd_audit || true;;
-            offsets)      cmd_offsets || true;;
-            targets|t)    cmd_targets || true;;
-            q|Q|quit|exit)
-                echo ""
-                if anim_on; then
-                    printf "  ${C_WOLF}"
-                    type_text "~ howl later ~"
-                    printf "${NC}"
-                else
-                    echo -e "  ${C_WOLF}~ howl later ~${NC}"
-                fi
-                echo ""; exit 0;;
-            help|h|\?) cmd_help || true;;
-            explain|x) cmd_explain || true;;
-            *)
-                echo -e "  ${C_RED}Unknown  -  try 1-9, b/d/a/nj/sf/s/l/m/c/x/tw/e/f/u/p/k/w/ch/n/o/mg/sbt/ex/g, or q${NC}";;
-        esac
+        menu_dispatch "$choice" || true
         echo ""; echo -ne "  ${C_DIM}── Press enter to continue ──${NC}"; read -r || true; echo ""
     done
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  ADDERALL  -  Fully Automated Exploit Deployment
+#  § 32 ADDERALL  -  Fully Automated Exploit Deployment
 # ═══════════════════════════════════════════════════════════════
 
 # Prompt helper  -  respects --yes and config confirm_risky=off
@@ -5244,7 +5526,7 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  NOJAILBREAK  -  USB-only Filza install + exploit, no jailbreak
+#  § 33 NOJAILBREAK  -  USB-only Filza install + exploit, no jailbreak
 # ═══════════════════════════════════════════════════════════════
 
 cmd_nojailbreak() {
@@ -5617,7 +5899,7 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  SAFETY COMMANDS
+#  § 34 SAFETY COMMANDS
 # ═══════════════════════════════════════════════════════════════
 
 cmd_safe() {
@@ -5699,6 +5981,43 @@ stop_crash_monitor() {
     CRASH_MONITOR_PID=""
 }
 
+cmd_report() {
+    local sub="${1:-list}"
+    case "$sub" in
+        list|ls)
+            show_header
+            echo ""
+            section "Error reports  -  $REPORT_DIR"
+            if [ -d "$REPORT_DIR" ] && ls "$REPORT_DIR"/crash-*.txt &>/dev/null; then
+                local f
+                for f in "$REPORT_DIR"/crash-*.txt; do
+                    local head; head=$(head -1 "$f")
+                    printf "  ${C_FROST}%s${NC}  %s\n" "$(basename "$f")" "$head"
+                done
+                echo ""
+                echo -e "  ${C_DIM}file one as a GitHub issue: ./W0lfSword report <file>${NC}"
+            else
+                echo -e "  ${C_DIM}no saved reports yet  -  critical errors land here automatically${NC}"
+            fi
+            ;;
+        *)
+            local f="$1"
+            [ -f "$f" ] || f="$REPORT_DIR/$f"
+            if [ ! -f "$f" ]; then
+                err "report not found: $1"
+                hint "saved reports: ./W0lfSword report list"
+                return 1
+            fi
+            local msg cmdline
+            msg=$(grep '^error:' "$f" | head -1 | sed 's/^error:[[:space:]]*//')
+            cmdline=$(grep '^command:' "$f" | head -1 | sed 's/^command:[[:space:]]*//; s#.*/W0lfSword ##')
+            [ -n "$cmdline" ] && CRIT_CMD="$cmdline"
+            report_to_github "$f" "${msg:-unknown error}"
+            ;;
+    esac
+    echo ""
+}
+
 cmd_crashlog() {
     local logfile="$DATA_DIR/last_crash.log"
     if [ -f "$logfile" ] && [ -s "$logfile" ]; then
@@ -5723,7 +6042,7 @@ cmd_crashlog() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  NEW UTILITY COMMANDS
+#  § 35 NEW UTILITY COMMANDS
 # ═══════════════════════════════════════════════════════════════
 
 cmd_update() {
@@ -5932,7 +6251,7 @@ cmd_export() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  EXPLAIN  -  beginner-friendly long descriptions (K2.5)
+#  § 36 EXPLAIN  -  beginner-friendly long descriptions (K2.5)
 # ═══════════════════════════════════════════════════════════════
 
 explain_text() {
@@ -6364,6 +6683,23 @@ usbtest  -  prove the USB link before you deploy anything.
   the phone. Run this first if adderall can't find the device.
 EOF
             ;;
+        commands|cmds)
+            cat <<'EOF'
+commands  -  the command index.
+  Every user-facing command in one table, grouped, with its CLI aliases
+  and its interactive menu key. The index, the menu, the menu shortcuts
+  line and this help text are all generated from one registry inside the
+  script, so they cannot disagree with each other.
+
+  'commands <name>'  detail for one command (aliases, group, menu key,
+                     flags like [root] or [crashes phone]).
+  'commands <group>' just that group: exploit, device, diagnostics,
+                     research, safety, catalog, housekeeping, meta.
+  'commands --json'  machine-readable, for scripts and editors.
+
+  Use 'explain <name>' for the long-form writeup of a single command.
+EOF
+            ;;
         help)
             cat <<'EOF'
 W0lfSword  -  iOS kernel exploit toolkit, one script.
@@ -6383,11 +6719,8 @@ EOF
             cat <<'EOF'
 explain  -  plain-English explanations of commands.
 Usage: ./W0lfSword explain <command>   (e.g. explain adderall)
-Available: adderall, build, deploy, quick, safe, toggle, setup,
-           doctor, status, monitor, log, reboot, offsets, tweaks,
-           exploits, chains, cve, poclab, experimental, poc, fuzz, usbliter8,
-           usbtest, panic, kernelcache, help
 EOF
+            explain_doc_index
             ;;
     esac
 }
@@ -6411,7 +6744,119 @@ cmd_explain() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  HELP
+#  § 37 COMMANDS  -  the index (generated from W0LF_COMMANDS)
+# ═══════════════════════════════════════════════════════════════
+
+# `./W0lfSword commands`         every command, grouped
+# `./W0lfSword commands <name>`  one command in detail
+# `./W0lfSword commands --json`  machine-readable
+cmd_commands() {
+    local want="" a
+    for a in "$@"; do
+        case "$a" in
+            --json) JSON_MODE=true;;
+            ""|-*)  ;;
+            *) [ -z "$want" ] && want="$a";;
+        esac
+    done
+
+    if $JSON_MODE; then
+        local entry
+        for entry in "${W0LF_COMMANDS[@]}"; do printf '%s\n' "$entry"; done | python3 -c '
+import sys, json
+rows = []
+for line in sys.stdin:
+    f = line.strip().split("|")
+    if len(f) != 10: continue
+    name, slot, shortcut, aliases, group, label, summary, tag, docs, handler = f
+    none = lambda v: None if v in ("", "-") else v
+    rows.append({"name": name, "group": group,
+                 "menu_slot": none(slot), "shortcut": none(shortcut),
+                 "aliases": [] if none(aliases) is None else aliases.split(","),
+                 "label": none(label), "summary": summary, "tag": none(tag),
+                 "docs": docs == "1", "handler": none(handler)})
+print(json.dumps({"count": len(rows), "commands": rows}, indent=2))
+'
+        return 0
+    fi
+
+    show_header
+    echo ""
+
+    # detail view for one command, or a filtered index for a group name
+    local group_filter=""
+    if [ -n "$want" ]; then
+        for a in exploit device diagnostics research safety catalog housekeeping meta; do
+            [ "$want" = "$a" ] && group_filter="$a"
+        done
+    fi
+    if [ -n "$want" ] && [ -z "$group_filter" ]; then
+        local entry name slot shortcut aliases group label summary tag docs handler hit=0
+        for entry in "${W0LF_COMMANDS[@]}"; do
+            IFS='|' read -r name slot shortcut aliases group label summary tag docs handler <<< "$entry"
+            [ "$want" = "$name" ] && hit=1 && break
+            case ",$aliases," in *",$want,"*) hit=1; break;; esac
+        done
+        if [ "$hit" = 0 ]; then
+            err "Unknown command: $want"
+            hint "Run ./W0lfSword commands for the full index."
+            echo ""
+            return 1
+        fi
+        section "commands: $name"
+        echo ""
+        printf "  ${C_FROST}%-11s${NC} %s\n" "usage"   "./W0lfSword $name"
+        [ "$aliases" = "-" ] || printf "  ${C_FROST}%-11s${NC} %s\n" "aliases" "${aliases//,/ }"
+        [ "$slot" = "-" ]    || printf "  ${C_FROST}%-11s${NC} %s ${C_DIM}(menu row)${NC}\n" "menu key" "$slot"
+        [ "$shortcut" = "-" ] || printf "  ${C_FROST}%-11s${NC} %s ${C_DIM}(menu shortcut + CLI key)${NC}\n" "key" "$shortcut"
+        printf "  ${C_FROST}%-11s${NC} %s\n" "group"    "$group"
+        printf "  ${C_FROST}%-11s${NC} %s\n" "does"     "$summary"
+        case "$tag" in
+            root)  printf "  ${C_FROST}%-11s${NC} ${C_AMB}needs sudo (root)${NC}\n"  "flag";;
+            crash) printf "  ${C_FROST}%-11s${NC} ${C_RED}crashes the device${NC}\n" "flag";;
+            live)  printf "  ${C_FROST}%-11s${NC} ${C_AMB}touches live SpringBoard${NC}\n" "flag";;
+            beta)  printf "  ${C_FROST}%-11s${NC} ${C_AMB}dev/beta surface${NC}\n" "flag";;
+        esac
+        if [ "$docs" = "1" ]; then
+            hint "./W0lfSword explain $name   (plain-English detail)"
+        fi
+        echo ""
+        return 0
+    fi
+
+    section "Command index"
+    local g entry name2 slot shortcut aliases group label summary tag docs handler rows keys k maxw=0
+    # pass 1: longest key column (slot + shortcut + aliases, deduped), so every
+    # row's summary lines up no matter how many keys a command has
+    for entry in "${W0LF_COMMANDS[@]}"; do
+        IFS='|' read -r name2 slot shortcut aliases group label summary tag docs handler <<< "$entry"
+        [ -n "$group_filter" ] && [ "$group_filter" != "$group" ] && continue
+        keys=$(registry_key_list "$name2" "$slot" "$shortcut" "$aliases")
+        [ "${#keys}" -gt "$maxw" ] && maxw=${#keys}
+    done
+    for g in exploit device diagnostics research safety catalog housekeeping meta; do
+        [ -n "$group_filter" ] && [ "$group_filter" != "$g" ] && continue
+        rows=0
+        for entry in "${W0LF_COMMANDS[@]}"; do
+            IFS='|' read -r name2 slot shortcut aliases group label summary tag docs handler <<< "$entry"
+            [ "$group" = "$g" ] || continue
+            if [ "$rows" -eq 0 ]; then
+                echo ""
+                menu_group "$(group_title "$g")"
+            fi
+            keys=$(registry_key_list "$name2" "$slot" "$shortcut" "$aliases")
+            printf "  ${C_FROST}%-13s${NC} ${C_DIM}%-${maxw}s${NC} %s\n" "$name2" "$keys" "$summary"
+            rows=$((rows + 1))
+        done
+    done
+    echo ""
+    hint "menu key = interactive menu row · key = works in the menu and on the CLI"
+    hint "detail for one command: ./W0lfSword commands <name> · docs: ./W0lfSword explain <name>"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════
+#  § 38 HELP
 # ═══════════════════════════════════════════════════════════════
 
 cmd_help() {
@@ -6439,7 +6884,8 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "tweaks (tw)"  "Tweak catalog  -  'tweaks install <id>' builds + deploys"
     echo ""
     section "Analysis & Config"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check + shellcheck + dead-fn scan"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "audit"        "Static analysis + brace check + shellcheck + dead-fn scan + CLI consistency"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "commands"     "Full command index (cmds): groups · aliases · menu keys  --json"
     printf "  ${C_EYE}%-14s${NC} %s\n" "doctor"       "Check environment"
     printf "  ${C_EYE}%-14s${NC} %s\n" "offsets"      "iOS version coverage"
     printf "  ${C_EYE}%-14s${NC} %s\n" "config (g)"   "Menu behavior: animations, colors, wolf, prompt  -  show | set <k> <v> | edit | reset"
@@ -6484,14 +6930,15 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "usbtest (u)"     "USB cable + pairing + data round-trip (harmless)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "panic"           "classify .ips panic logs → known CVEs (BB-032..037)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "kernelcache"     "offline XPF offset research: resolve / diff / extract"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "extract"        "unpack the built .deb and copy its tweak dylib out"
     echo ""
-    echo -e "  ${C_DIM}Flags: -v verbose  -vv debug  -y/--yes skip prompts  --json machine-readable (status/offsets/audit)  adderall --usb: force USB SSH${NC}"
-    echo -e "  ${C_DIM}Tip: from menu, type 'b' to build, 'a' for adderall.${NC}"
+    echo -e "  ${C_DIM}Flags: -v verbose  -vv debug  -y/--yes skip prompts  -x/--explain explain a command  --json machine-readable (status/offsets/audit/commands)  adderall --usb: force USB SSH${NC}"
+    echo -e "  ${C_DIM}Tip: from menu, type 'b' to build, 'a' for adderall. Full index: ./W0lfSword commands${NC}"
     echo ""
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  MAIN
+#  § 39 MAIN
 # ═══════════════════════════════════════════════════════════════
 
 main() {
@@ -6528,54 +6975,19 @@ main() {
         echo -e "  ${C_DIM}Auto-loaded profile 'default'${NC}"
     fi
 
+    # The case list mirrors W0LF_COMMANDS: every registry name + alias is a
+    # pattern here, and every pattern here is a registry row (the audit
+    # compares the two, so neither can silently grow a stray command).
     case "$cmd" in
-        "") run_menu "$@";;
-        build)     cmd_build "${args[@]}";;
-        extract)   cmd_extract "${args[@]}";;
-        deploy)    cmd_deploy "${args[@]}";;
-        status)    cmd_status "${args[@]}";;
-        audit)     cmd_audit "${args[@]}";;
-        log)       cmd_log "${args[@]}";;
-        toggle)    cmd_toggle "${args[@]}";;
-        offsets)   cmd_offsets "${args[@]}";;
-        targets)   cmd_targets "${args[@]}";;
-        exploits)  cmd_exploits "${args[@]}";;
-        chains)    cmd_chains "${args[@]}";;
-        cve)       cmd_cve "${args[@]}";;
-        poclab)    cmd_poclab "${args[@]}";;
-        mobilegestalt|mg) cmd_mobilegestalt "${args[@]}";;
-        sbtweak|sbt) cmd_sbtweak "${args[@]}";;
-        experimental|exp) cmd_experimental "${args[@]}";;
-        report)    cmd_report "${args[@]}";;
-        config|cfg|g) cmd_config "${args[@]}";;
-        poc)       cmd_poc "${args[@]}";;
-        fuzz)      cmd_fuzz "${args[@]}";;
-        kcwatch)   cmd_kcwatch "${args[@]}";;
-        readiness|r) cmd_readiness "${args[@]}";;
-        mha)       cmd_mha "${args[@]}";;
-        tweaks)    cmd_tweaks "${args[@]}";;
-        clean)     cmd_clean "${args[@]}";;
-        doctor)    cmd_doctor "${args[@]}";;
+        "")        run_menu "$@";;
+        # ── exploit workflow ──────────────────────────────────────
         quick)     cmd_quick "${args[@]}";;
+        deploy|d)  cmd_deploy "${args[@]}";;
+        monitor|m) cmd_monitor "${args[@]}";;
+        build|b)   cmd_build "${args[@]}";;
         adderall|a) cmd_adderall "${args[@]}";;
         nojailbreak|nj) cmd_nojailbreak "${args[@]}";;
-        safe)      cmd_safe "${args[@]}";;
-        crashlog)  cmd_crashlog "${args[@]}";;
-        update)    cmd_update "${args[@]}";;
-        setup|install) cmd_setup "${args[@]}";;
-        reboot)    cmd_reboot "${args[@]}";;
-        export)    cmd_export "${args[@]}";;
-        profile)   cmd_profile "${args[@]}";;
-        device)    cmd_device "${args[@]}";;
-        history)   cmd_history "${args[@]}";;
-        monitor)   cmd_monitor "${args[@]}";;
-        usbtest)   cmd_usbtest "${args[@]}";;
-        panic)     cmd_panic "${args[@]}";;
-        kernelcache) cmd_kernelcache "${args[@]}";;
-        explain)   cmd_explain "${args[@]}";;
-        # Add quick version command
-     version|--version|-V) echo -e "${C_WOLF}W0lfSword v${VERSION}${NC}  -  iOS Kernel Exploit Toolkit"; echo -e "${C_DIM}github.com/kaffeindecaf/W0lfSword${NC}";;
-        help|h|--help|-h) cmd_help "${args[@]}";;
+        update|up) cmd_update "${args[@]}";;
         usbliter8|ul8)
             if [ "$EUID" -ne 0 ]; then
                 echo -e "  ${C_RED}✗ usbliter8 needs root for USB/DFU access${NC}"
@@ -6583,7 +6995,54 @@ main() {
                 exit 1
             fi
             shift; run_usbliter8 "$@" ;;
-        *) echo -e "${C_RED}Unknown: $cmd${NC}"; echo -e "Run ${C_FROST}./W0lfSword${NC} for interactive menu";;
+        # ── phone & data ──────────────────────────────────────────
+        device)    cmd_device "${args[@]}";;
+        profile)   cmd_profile "${args[@]}";;
+        history)   cmd_history "${args[@]}";;
+        # ── diagnostics ───────────────────────────────────────────
+        diag|diagnostics) cmd_diag "${args[@]}";;
+        targets|t) cmd_targets "${args[@]}";;
+        chains|ch) cmd_chains "${args[@]}";;
+        config|cfg|g) cmd_config "${args[@]}";;
+        panic|p)   cmd_panic "${args[@]}";;
+        usbtest|u) cmd_usbtest "${args[@]}";;
+        status|s)  cmd_status "${args[@]}";;
+        log|l)     cmd_log "${args[@]}";;
+        clean|c)   cmd_clean "${args[@]}";;
+        audit)     cmd_audit "${args[@]}";;
+        doctor)    cmd_doctor "${args[@]}";;
+        offsets)   cmd_offsets "${args[@]}";;
+        crashlog)  cmd_crashlog "${args[@]}";;
+        export)    cmd_export "${args[@]}";;
+        report)    cmd_report "${args[@]}";;
+        # ── research ──────────────────────────────────────────────
+        poc|pocs)  cmd_poc "${args[@]}";;
+        fuzz|f)    cmd_fuzz "${args[@]}";;
+        kernelcache|k) cmd_kernelcache "${args[@]}";;
+        kcwatch|kw|w) cmd_kcwatch "${args[@]}";;
+        readiness|r) cmd_readiness "${args[@]}";;
+        poclab|lab|o) cmd_poclab "${args[@]}";;
+        mobilegestalt|mg) cmd_mobilegestalt "${args[@]}";;
+        sbtweak|sbt) cmd_sbtweak "${args[@]}";;
+        experimental|exp|ex) cmd_experimental "${args[@]}";;
+        # ── safety ────────────────────────────────────────────────
+        safe|sf)   cmd_safe "${args[@]}";;
+        toggle)    cmd_toggle "${args[@]}";;
+        reboot)    cmd_reboot "${args[@]}";;
+        mha)       cmd_mha "${args[@]}";;
+        # ── catalogs ──────────────────────────────────────────────
+        tweaks|tw) cmd_tweaks "${args[@]}";;
+        exploits|e) cmd_exploits "${args[@]}";;
+        cve)       cmd_cve "${args[@]}";;
+        # ── housekeeping ──────────────────────────────────────────
+        setup|install) cmd_setup "${args[@]}";;
+        extract)   cmd_extract "${args[@]}";;
+        # ── meta ──────────────────────────────────────────────────
+        commands|cmds) cmd_commands "${args[@]}";;
+        explain|x) cmd_explain "${args[@]}";;
+        version|--version|-V) echo -e "${C_WOLF}W0lfSword v${VERSION}${NC}  -  iOS Kernel Exploit Toolkit"; echo -e "${C_DIM}github.com/kaffeindecaf/W0lfSword${NC}";;
+        help|h|--help|-h) cmd_help "${args[@]}";;
+        *) echo -e "${C_RED}Unknown: $cmd${NC}"; echo -e "Run ${C_FROST}./W0lfSword commands${NC} for the index, or ${C_FROST}./W0lfSword${NC} for the menu";;
     esac
 }
 

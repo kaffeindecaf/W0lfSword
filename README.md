@@ -11,7 +11,7 @@ jailbroken iPhone with Filza into a full root file browser. The same
 repo holds host-side tools that pull kernel offsets from any iOS build
 on your computer, no device needed.
 
-Current release: v1.4.0
+Current release: v1.5.0
 
 ## Quick start
 
@@ -159,7 +159,8 @@ as root. See BUILD.md for the details.
 
 Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 `d` deploy, `a` adderall, `u` usbtest, `p` panic, `k` kernelcache,
-`s` status, `l` log.
+`s` status, `l` log. `./W0lfSword commands` prints the full index - every
+command with its group, CLI aliases and interactive key.
 
 | Command | Does | Example |
 |---------|------|---------|
@@ -207,6 +208,9 @@ Run `./W0lfSword` bare for the interactive menu. Shortcuts: `b` build,
 | `status/offsets/audit --json` | machine-readable output for scripts and CI | `./W0lfSword status --json` |
 | `clean` / `update` / `audit` / `export` | housekeeping and diagnostics | `./W0lfSword update` |
 | `help` | full list with requirements | `./W0lfSword help` |
+| `commands (cmds)` | command index: every command with its group, aliases and interactive key. `<name>` = detail for one, `<group>` = one group, `--json` = machine-readable | `./W0lfSword commands mobilegestalt` |
+| `diag` | doctor + audit + status in one pass (menu row 7) | `./W0lfSword diag` |
+| `extract` | unpack the built .deb and copy its tweak dylib out | `./W0lfSword extract` |
 
 Log colors: green success, red errors, yellow retries, cyan structure, dim
 details. Devices, profiles and history live in `.w0lfsword/` (gitignored).
@@ -294,6 +298,37 @@ AltStore) build with `BUNDLE_ID=com.kaffeindecaf.w0lfsword.filza` (or run
 developer portal rejects every com.apple.* identifier with API error
 9400, including the sharing extension, so the MHA identity can never be
 registered through a sideloader.
+
+<details>
+<summary><b>What's new in v1.5.0</b></summary>
+
+- One command registry. `W0LF_COMMANDS` inside the script is now the single
+  source of truth for the whole CLI surface: the interactive menu rows, the
+  shortcuts line, `explain`'s "Available:" list and the new `commands` index
+  are all generated from it, and `menu_dispatch` resolves every interactive
+  key through it. Adding a command is one table row, not six edits.
+- `commands (cmds)` - the index: grouped listing with aliases and menu keys,
+  `<name>` for detail, `<group>` to filter, `--json` for scripts.
+- Menu keys and CLI names now agree. `sf` (safe) was advertised but never
+  wired; four menu keys (`n`, `o`, `sbt`, `ex`) were missing from the
+  shortcuts line; `ch`, `kw`, `lab`, `pocs`, `tw`, `o`, `p` and friends now
+  work on the command line too. `diag` is the new doctor+audit+status alias.
+- Menu regrouped: `usbliter8` moved into the exploit group, `PoC Lab` into
+  research, `0` renamed from "Panic-PoC Lab" to "Panic PoCs" (it is not the
+  PoC lab), and row `n` now actually shows the CVE tracker its label promised.
+- Script reorganized: a generated MAP at the top lists all 39 sections, the
+  UI primitives (ok/err/section/banner/spinner/show_header) live in one UI
+  foundation section instead of being wedged between kcwatch and the wolf art,
+  and `report` / `clean` / `doctor` moved next to their sibling commands.
+- Audit grew two checks: every shell + python file in the repo must parse,
+  and a vendored `scripts/cli_consistency.py` proves the registry, the
+  dispatch case, the menu keys, the handlers, the explain docs, the section
+  MAP and the control-file version all still agree (it fails the audit when
+  one drifts).
+- Fixed: the menu spun forever printing "Unknown" on closed stdin, and the
+  shortcuts line now wraps on visible width with real colors.
+
+</details>
 
 <details>
 <summary><b>What's new in v1.4.0</b></summary>
