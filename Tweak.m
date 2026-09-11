@@ -28,6 +28,11 @@
 #include "TweakExploit.h"
 #include "mobilegestalt/mobilegestalt.h"
 #include "sbtweak/sbtweak.h"
+// Route A terminal (ROADMAP 0.11 / TRM.3): in-process shell + the TRM.1/2/4/5
+// device probes. Pure C, no substrate, no exec.
+#include "terminal/trm_common.h"
+#include "terminal/trm_shell.h"
+#include "terminal/trm_probe.h"
 
 #include "utils/tweak_log.h"
 
@@ -217,6 +222,11 @@ static UIButton *g_hudArrow = nil;     // collapsed-state arrow button
 static UITextView *g_hudLogView = nil;
 static UILabel *g_hudStatusLabel = nil;
 static UIProgressView *g_hudProgressView = nil;
+// Route A terminal input row (ROADMAP 0.11): a text field + RUN, sitting under
+// the log view. The log view IS the terminal output — the in-process shell
+// writes through TweakLog, which lands in the ring this panel polls.
+static UITextField *g_hudInput = nil;
+static CGFloat g_hudKeyboardOffset = 0;   // keyboard height while editing
 static char g_hudDevInfo[64] = {0};    // "iPhone14,7 iOS 26.0.1" set in TweakInit
 // MRC build: an autoreleased NSString cache dangles after the pool drains
 // and crashes the timer callback (objc_msgSend on freed memory). Cache the
@@ -285,13 +295,21 @@ static void hudLayout(void) {
     const CGFloat winH = win.bounds.size.height;
     CGFloat menuTop = hudMenuTopY();
     if (menuTop < 34) menuTop = 34;
+    // While the keyboard is up, lift the whole panel so the input row stays
+    // visible (the panel bottom otherwise sits exactly where the keyboard is).
+    if (g_hudKeyboardOffset > 0) {
+        menuTop -= g_hudKeyboardOffset;
+        if (menuTop < 34) menuTop = 34;
+    }
 
     if (g_hudExpanded) {
         const CGFloat headerH = 34;
-        CGFloat totalH = MIN(winH * 0.5 + headerH, menuTop);
-        if (totalH < headerH) totalH = headerH;
+        const CGFloat inputH = 30;
+        CGFloat totalH = MIN(winH * 0.5 + headerH + inputH, menuTop);
+        if (totalH < headerH + inputH) totalH = headerH + inputH;
         g_hudContainer.frame = CGRectMake(0, menuTop - totalH, winW, totalH);
-        g_hudLogView.frame = CGRectMake(0, headerH, winW, totalH - headerH);
+        g_hudLogView.frame = CGRectMake(0, headerH, winW, totalH - headerH - inputH);
+        if (g_hudInput) g_hudInput.frame = CGRectMake(4, totalH - inputH, winW - 92, inputH - 4);
         g_hudLogView.hidden = NO;
         g_hudContainer.hidden = NO;
         g_hudArrow.hidden = YES;
@@ -477,6 +495,47 @@ static void hudExportLog(void) {
     }
 }
 
+// --- Route A terminal (ROADMAP 0.11 / TRM.3) ------------------------------
+// The shell runs IN-PROCESS (terminal/trm_shell.c): no posix_spawn, no pty, no
+// sandbox rule to relax, full kernel R/W through the escape that is already
+// live. Its output goes through TweakLog into the ring this panel polls, so
+// the log view doubles as the terminal screen.
+//
+// A C ARRAY CANNOT BE CAPTURED BY A BLOCK ("cannot refer to declaration with
+// an array type inside block") — wrap the line in a struct, which is captured
+// by value. That also keeps the MRC rule honest: nothing autoreleased crosses
+// into the background block.
+typedef struct { char s[1024]; } trm_cmd_buf;
+
+static void hudTerminalRun(NSString *raw) {
+    NSString *line = raw ? [raw stringByTrimmingCharactersInSet:
+                                  [NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
+    if (line.length == 0) return;
+
+    trm_cmd_buf buf;
+    if (![line getCString:buf.s maxLength:sizeof(buf.s) encoding:NSUTF8StringEncoding]) {
+        TweakLog("[trm] command too long or not UTF-8 — ignored");
+        return;
+    }
+    TweakLog("[trm] %s", buf.s);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        int rc = trm_shell_exec_line(buf.s);
+        TweakLog("[trm] rc=%d (%s)", rc,
+                 rc == 0 ? "ok" : rc == 2 ? "gated — run `unsafe 1`" : "error");
+    });
+}
+
+// One-tap research report: the TRM.1/2/4/5 probes plus a scripted read-only
+// shell smoke test. Both are safe on the daily driver with no unsafe flag.
+static void hudTerminalProbe(void) {
+    TweakLog("[trm] running the TRM device probe + shell selftest (read-only) — [TRM] lines below");
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        trm_probe_run_all("hud");
+        trm_shell_selftest();
+        TweakLog("[trm] probe done: %s", trm_probe_verdict());
+    });
+}
+
 static void hudInstall(void) {
     if (g_hudContainer || g_hudArrow) return;
     UIWindow *win = [UIApplication sharedApplication].keyWindow;
@@ -548,12 +607,52 @@ static void hudInstall(void) {
     logView.indicatorStyle = UIScrollViewIndicatorStyleWhite;
     logView.hidden = YES;
 
+    // Terminal input row (route A in-process shell + one-tap TRM probe).
+    // ASCII placeholder on purpose (non-ASCII literals land in __cfstring as
+    // UTF-16, which makes dylib greps confusing).
+    UITextField *input = [[UITextField alloc] initWithFrame:CGRectMake(4, 34, w - 92, 26)];
+    input.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.95];
+    input.textColor = [UIColor colorWithWhite:0.9 alpha:1];
+    input.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightRegular];
+    input.placeholder = @"w0lf> command (help)";
+    input.autocorrectionType = UITextAutocorrectionTypeNo;
+    input.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    input.spellCheckingType = UITextSpellCheckingTypeNo;
+    input.returnKeyType = UIReturnKeyGo;
+    input.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    input.layer.zPosition = 10001;
+    [input addAction:[UIAction actionWithHandler:^(UIAction *a) {
+        hudTerminalRun(g_hudInput.text);
+        g_hudInput.text = @"";
+    }] forControlEvents:UIControlEventEditingDidEndOnExit];
+
+    UIButton *runBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    runBtn.frame = CGRectMake(w - 88, 34, 40, 26);
+    runBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [runBtn setTitle:@"RUN" forState:UIControlStateNormal];
+    runBtn.titleLabel.font = [UIFont monospacedSystemFontOfSize:9.0 weight:UIFontWeightBold];
+    [runBtn addAction:[UIAction actionWithHandler:^(UIAction *a) {
+        hudTerminalRun(g_hudInput.text);
+        g_hudInput.text = @"";
+    }] forControlEvents:UIControlEventTouchUpInside];
+
+    UIButton *trmBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    trmBtn.frame = CGRectMake(w - 46, 34, 42, 26);
+    trmBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [trmBtn setTitle:@"TRM" forState:UIControlStateNormal];
+    trmBtn.titleLabel.font = [UIFont monospacedSystemFontOfSize:9.0 weight:UIFontWeightBold];
+    [trmBtn addAction:[UIAction actionWithHandler:^(UIAction *a) { hudTerminalProbe(); }]
+        forControlEvents:UIControlEventTouchUpInside];
+
     [container addSubview:status];
     [container addSubview:close];
     [container addSubview:logBtn];
     [container addSubview:rerunBtn];
     [container addSubview:progress];
     [container addSubview:logView];
+    [container addSubview:input];
+    [container addSubview:runBtn];
+    [container addSubview:trmBtn];
     [win addSubview:container];
     [win addSubview:arrow];
 
@@ -562,7 +661,24 @@ static void hudInstall(void) {
     g_hudLogView = logView;
     g_hudStatusLabel = status;
     g_hudProgressView = progress;
+    g_hudInput = input;
     g_hudExpanded = NO;
+
+    // Lift the panel while the keyboard is up, or the input row (which sits on
+    // the tab bar) would be exactly where the keyboard appears.
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc addObserverForName:UIKeyboardWillShowNotification object:nil queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification *n) {
+        CGRect kb = [n.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+        g_hudKeyboardOffset = kb.size.height;
+        hudLayout();
+    }];
+    [nc addObserverForName:UIKeyboardWillHideNotification object:nil queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification *n) {
+        (void)n;
+        g_hudKeyboardOffset = 0;
+        hudLayout();
+    }];
 
     NSTimer *timer = [NSTimer timerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *t) {
         hudRefresh();
@@ -1588,6 +1704,15 @@ __attribute__((constructor)) void TweakInit(void) {
     }
     TweakLog("[Tweak] bundleID=%s", tstr([[NSBundle mainBundle] bundleIdentifier]));
     TweakLog("[Tweak] home=%s", tstr(NSHomeDirectory()));
+
+    // Route A terminal context (ROADMAP 0.11): the shell + probes are pure C,
+    // so the container path and the bundle executable are pushed in here. The
+    // terminal is available immediately — it needs no escape to start (its
+    // kernel commands report "kernel R/W not live yet" until there is one).
+    trm_set_context(tstr(NSHomeDirectory()), tstr([[NSBundle mainBundle] executablePath]));
+    TweakLog("[Tweak] terminal context: home=%s bundle_exec=%s (%d shell commands)",
+             trm_ctx_home(), trm_ctx_bundle_exec() ? trm_ctx_bundle_exec() : "(unknown)",
+             trm_shell_command_count());
 
     // iOS range gate: the exploit chain covers 17.0 through 26.0.1 (DarkSword
     // is patched on 26.1+). Outside that range the tweak stays quiet: no

@@ -76,6 +76,15 @@ resized, SPTM status), extract a kernelcache from an IPSW, and classify
 crash logs. This is the part that caught a wrong `itk_space` offset in
 the repo's own table.
 
+The route A terminal shell is host-testable too — the shell core is plain
+C, so it is compiled on Linux against stubbed kernel helpers and run
+through 65 assertions (parser, path resolution, every filesystem command,
+the `unsafe` gating, kernel command routing) before a sideload is spent:
+
+```bash
+bash scripts/run_trm_host_test.sh      # 65/65 checks, no device involved
+```
+
 ![adderall demo](docs/demo.png)
 
 <details>
@@ -246,6 +255,8 @@ for logs.
 | Zip/unzip | Via Filza's own minizip, function pointers validated |
 | Userspace read escape | bad_query containermanagerd traversal (26.0–26.6.1) + MCM bridge. Container reads work even before the kernel exploit (K4.10/K4.11) |
 | On-screen HUD | collapsible status panel in Filza: exploit state + device/iOS line, live log, LOG button (exports the log to Documents/w0lfsword-log.txt for sharing), RERUN button (fresh exploit attempt without relaunching) |
+| Terminal (route A, 0.11) | in-process shell under the HUD panel (text field + RUN): 39 commands with no exec and no pty, so it needs nothing from the sandbox profile. `ls/cat/cd/stat/mkdir/rm/mv/cp/chmod/ps/df/…` plus kernel R/W (`kread`, `kwrite8/16/32/64`, `proc`, `sbxinfo`, `ssvw`). Read-only by default; kernel writes, `chmod`, `rm -r` and the SSV write need an explicit `unsafe 1` |
+| Exec/pty probes (0.11) | the HUD TRM button (or the shell's `probe`) runs the TRM.1/2/4/5 measurement: sandbox_check matrix, exec inventory of /bin /usr/bin /usr/libexec, `fork()`, a real `posix_spawn("/bin/sh")`, an off-SSV copy-exec test, the pty sequence, and a sealed-volume read/write verdict — ending in one `[TRM][VERDICT]` line naming the route the device actually supports. Also runs automatically after a successful escape |
 | Safety ladder | release builds default to STAGED auto: readonly compatibility check → light krw write probe → full chain only if both pass; a failed stage is a final verdict with the device left clean (status 6, no retries). Test builds default to READONLY (zero kernel writes). Switch modes on-device via Documents/w0lf_test_mode: (absent)=staged, 1=readonly, 2=writetest, 3=full immediate |
 | Failure cleanup | on the final give-up the tweak removes everything it created (SSV diag files, /var/lib/filza, thousands of spray sockets) so a failed run leaves the device clean |
 | Unsupported-iOS gate | outside 17.0–26.0.1 the tweak goes quiet (status 5, no probes, no writes); a staged incompatibility (bad offsets / wrong device) stops at status 6; jailbroken devices still get helper mode so the browser works |

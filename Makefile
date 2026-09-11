@@ -56,6 +56,11 @@ FilzaApplySandboxExt_FILES += SSV/SSVUtils.m
 # --- utils ---
 FilzaApplySandboxExt_FILES += utils/hexdump.c utils/process.c utils/permission_utils.m utils/state.m utils/tweak_log.m
 
+# --- terminal (ROADMAP 0.11) ---
+# Route A in-process shell + the TRM.1/2/4/5 device probes. Plain C, no
+# substrate, no exec: usable on both the MHA (non-jailbroken) and deb paths.
+FilzaApplySandboxExt_FILES += terminal/trm_common.c terminal/trm_probe.c terminal/trm_shell.c
+
 # --- kpf ---
 FilzaApplySandboxExt_FILES += kpf/patchfinder.m
 

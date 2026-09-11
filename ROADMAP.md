@@ -254,29 +254,78 @@
   (`/bin/sh`, `/usr/bin/*`), whether AMFI/code-signing blocks spawning
   a platform binary from a sideloaded app, and what entitlements (if
   any) the caller needs. Document the exact failure mode when it fails.
+  _Instrumented 2026-09-11: `terminal/trm_probe.c` answers all of it on
+  the next launch — a 16-operand `sandbox_check` matrix (process-exec,
+  process-fork, file-* on /dev/ptmx, sealed paths), a per-entry exec
+  inventory of /bin /usr/bin /usr/sbin /sbin /usr/libexec (exec bit +
+  Mach-O magic + the profile's verdict per path), `fork()`, and a real
+  `posix_spawn("/bin/sh", -c "id; uname -a; echo TRM1-SPAWN-OK")` with
+  stdout/stderr captured into the container. Runs automatically in the
+  post-escape path and on demand (HUD `TRM`, shell `probe`)._
 - [ ] `TRM.2` ⚪ — Fallback: bundled static shell. Build a static
   arm64 shell (bash/zsh/dash or busybox-style multi-call) and exec it
   from inside the app bundle (the app's own signature covers it).
   Test whether dyld/kernel accepts exec of a bundled binary under the
   sideload signature; if not, note the signing requirement precisely.
+  _Instrumented 2026-09-11: the probe's TRM.2 stand-in copies `/bin/sh`
+  into the container (bytes + Apple signature intact, location changed)
+  and execs the copy — that isolates "off-SSV exec" from "signing".
+  A real bundle-resident helper is a build-side item: it needs a signed
+  sidecar binary (Theos tool target + nested-code signing in
+  re-sign_mha.sh), which is only worth doing once TRM.1's verdict says
+  exec is reachable at all._
 - [ ] `TRM.3` ⚪ — Fallback: in-process shell (no exec at all). Link a
   minimal C shell into the tweak dylib and implement builtins directly
   (ls/cat/cd/echo/rm/mv + kread/kwrite/dd helpers exposed as commands).
   This route has no code-signing or exec dependency and still gets full
   kernel R/W; decide if it is enough for the intended debugging use.
+  _Done 2026-09-11 (route A implemented): `terminal/trm_shell.c` — 39
+  commands, in-process, no exec and no pty. Filesystem (ls -l/-a, cat,
+  head, stat, mkdir/rmdir/rm -r, mv, cp, touch, chmod), process/system
+  (id, uname, date, uptime, df, env, sleep, ps via sysctl, kernel-side
+  `proc <name>`), and kernel R/W (`krw` status, `kread` hexdump,
+  `kwrite8/16/32/64`, `sbxinfo` = label/sandbox/cred addresses, plus the
+  probe commands `probe`/`verdict`/`execsurf`/`spawn`/`ptytest`/`ssvw`).
+  Read-only by default; kernel writes, `rm -r`, `chmod` and the SSV
+  write need an explicit `unsafe 1`. UI: a text field + RUN + TRM button
+  under the HUD log panel (the panel's log view is the terminal)._
 - [ ] `TRM.4` ⚪ — PTY + UI: posix_openpt/grantpt/unlockpt + a
   terminal view (UITextView-backed, or a WKWebView running xterm.js)
   wired to the pty master over a background queue; keyboard/ANSI
   handling; how the pty behaves inside the app sandbox after escape.
+  _Instrumented 2026-09-11: the probe runs the full pty sequence
+  (sandbox verdict on /dev/ptmx, posix_openpt, grantpt, unlockpt,
+  ptsname, slave open, master→slave and slave→master round trip) with
+  the errno of every step. The UI half is deliberately NOT built yet —
+  it is wasted work if the profile denies /dev/ptmx (expected: it is a
+  device-access rule our extension rewrite does not touch). The route A
+  UI (text field + log view) ships now and needs no pty._
 - [ ] `TRM.5` ⚪ — Privilege model: confirm the shell inherits uid=0 +
   the patched sandbox extensions after fork/exec (they should, since
   creds/extension sets are process attributes), and decide whether the
   terminal gets SSV write helpers (overwrite_system_file) or
   read/write only outside the sealed volume by default.
-- [ ] `TRM.6` ⚪ — Decide scope: is this a debug console for the
+  _Instrumented 2026-09-11: `id`/`sbxinfo` report BOTH the posix creds
+  and the kernel-side creds (uid/gid/groups[0] read through
+  proc_ro→ucred), so an inheritance question becomes a one-line
+  comparison; the probe adds a sealed-volume read/write verdict on
+  SystemVersion.plist. Route A decision (implemented): kernel writes,
+  `chmod`, `rm -r` and the SSV write helper (`ssvw` → ssv_write) are all
+  behind `unsafe 1`, read-only is the default._
+- [x] `TRM.6` ⚪ — Decide scope: is this a debug console for the
   developer (HUD-adjacent, gated behind w0lf_test_mode) or a user
   feature? Security boundary note required either way (a terminal with
   kernel R/W is the most powerful surface in the app).
+  _Done 2026-09-11: debug console, shipped HUD-adjacent and always
+  available (it needs no escape to start), NOT gated behind
+  w0lf_test_mode — a terminal that only exists in test builds is useless
+  for exactly the on-device debugging it exists for. Boundary: every
+  command in the shell is read-only by default; kernel writes (`kwrite*`),
+  `chmod`, `rm -r` and `ssvw` (SSV overwrite via ssv_write) return a
+  refusal (rc=2) until the operator types `unsafe 1`, and the refusal
+  line says why. `rm -r` additionally refuses `/`, `/System`, `/var`.
+  Nothing in the terminal touches the main device's kernel without that
+  explicit flag, so a stray tap on RUN cannot corrupt anything._
 
 > First-pass findings (offline, 2026-09-11 — no device attached, so
 > everything below is desk research + code reading, nothing is
@@ -331,6 +380,70 @@
 > decide A vs B vs C. Until then `TRM.1` stays open and the honest
 > recommendation is to build A (cheap, no unknowns) and probe B/C
 > behind `w0lf_test_mode`.
+
+### Round 2 (2026-09-11) — route A built, exec/pty probes wired
+
+> Still no device attached, so the three datapoints above are still
+> unmeasured. What changed is that the measurement is now automated and
+> the recommended route exists as running code.
+
+> **1. Route A is implemented and host-verified.** `terminal/trm_shell.c`
+> (+ `trm_common.c`, `trm_probe.c`) is a 39-command in-process shell
+> linked into the dylib: filesystem commands over POSIX, kernel commands
+> over the escape (`kread`, `kwrite8/16/32/64`, `proc`, `sbxinfo`,
+> `ssvw`), and the probe commands. It uses NO exec and NO pty, so it works
+> the moment the escape is live and needs nothing from the sandbox
+> profile. UI is a text field + RUN + TRM button under the HUD log panel
+> (the log view is the terminal screen; the shell's output goes through
+> TweakLog into the ring the panel already polls).
+> `bash scripts/run_trm_host_test.sh` builds the shell on the host with
+> kernel/mach stubs and runs 65 assertions (parser, path resolution,
+> every filesystem command, unsafe gating, kernel command routing) —
+> **65/65 pass**, so parsing/dispatch bugs are caught without a sideload.
+> Verification on the device build: `make package` clean, audit PASSED,
+> and the shipped dylib contains the new markers
+> (`TRM][EXEC`×6, `TRM][VERDICT`, `TRM2-CONTAINER-EXEC-OK`, …).
+
+> **2. Deliberate limits of route A.** No ANSI/xterm (plain text into a
+> UITextView), no globbing, no pipes, no redirection, no variables — the
+> parser handles whitespace + quotes + `#` comments only. That is a
+> security decision as much as a scoping one: a terminal with kernel R/W
+> should not also grow a rich interpreter (word splitting, `$()`,
+> redirection into an escaped filesystem). If xterm.js is wanted later,
+> it belongs in front of a pty (TRM.4), not in front of this parser.
+
+> **3. Precedent check (why A is not a compromise).** The App Store
+> terminals all avoid exec: a-Shell/LibTerm implement commands
+> in-process via `ios_system` (no spawning at all), and iSH ships a
+> usermode x86 emulator running Alpine — its FAQ/community consensus is
+> that creating executable pages is what fails review. MTJailed
+> advertises a remote shell for non-jailbroken devices for the same
+> reason. So "terminal with kernel R/W" in a sideloaded app realistically
+> means in-process (A) unless we relax the sandbox label itself (B) or
+> borrow a privileged daemon (C) — exactly the A/B/C split above.
+> Refs: github.com/holzschu/a-shell, ish.app, github.com/MTJailed/MTJailed-Native.
+
+> **4. The probes run themselves.** `trm_probe_run_all()` is called in
+> TweakExploit's post-escape path right after `probeSystemPaths()`, and
+> again from the HUD `TRM` button or the shell's `probe` command. One
+> launch on the 26.0.1 daily driver therefore produces the full TRM.1-5
+> dataset: the `sandbox_check` matrix, the per-directory exec inventory,
+> `fork()`, the real `/bin/sh` spawn (rc + errno + captured output), the
+> off-SSV copy-exec test, the pty sequence, and the sealed-volume
+> read/write verdict — ending in one `[TRM][VERDICT]` line that names the
+> route the measurements support. Pull it with
+> `afcclient --documents <bundle> cat Documents/FilzaTweak.log | grep TRM`.
+
+> **5. What is NOT done.** The pty UI (TRM.4's second half) is
+> intentionally absent until the pty probe says /dev/ptmx is reachable —
+> building a terminal view for a device we cannot open is wasted work.
+> A real bundle-resident helper binary (TRM.2) needs a signed sidecar
+> (Theos tool target + nested signing in `re-sign_mha.sh`), also deferred
+> until TRM.1 says exec is reachable at all. Route B (neutralising the
+> sandbox label with krw) and route C (spawning through a privileged
+> daemon via `kexploit/RemoteCall.m`) are untouched: the shell's
+> `sbxinfo` prints the exact sandbox object address route B would have to
+> patch, and the `sbxtest` builtin re-measures the profile afterwards.
 
 ---
 
