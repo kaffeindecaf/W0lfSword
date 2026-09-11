@@ -3,6 +3,10 @@
 VERSION="1.5.0"
 # Last used exploit method (set by cmd_adderall; saved/restored by profiles  -  K1.9)
 EXPLOIT_METHOD="auto"
+# J8.5  -  target bundle ID from the active profile ("" = detect/ask as before).
+# Different Filza builds ship different IDs (com.tigisoftware.Filza vs
+# ...Filza000), so a profile may pin one instead of relying on detection.
+PROFILE_TARGET=""
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                      W0lfSword v$VERSION                      ║
 # ║  iOS Kernel Exploit Toolkit  -  Interactive Exploit Menu       ║
@@ -328,6 +332,7 @@ W0LF_COMMANDS=(
     "cve|-|-|-|catalog|-|CVE tracker: kernel, userspace, sandbox, tcc, ssv, live|-|1|-"
     # ── housekeeping ──────────────────────────────────────────────
     "setup|-|-|install|housekeeping|-|install build tools for your OS|root|1|-"
+    "diff|-|-|df|housekeeping|-|colour-coded diff of uncommitted changes|-|1|-"
     "extract|-|-|-|housekeeping|-|unpack the built .deb and copy its tweak dylib out|-|0|-"
     # ── meta (index + plumbing, no device work) ───────────────────
     "commands|-|cmds|-|meta|-|this command index (groups, aliases, menu keys)|-|1|-"
@@ -447,6 +452,39 @@ warn() { printf "  ${C_AMB}⚠${NC} %s\n" "$1"; }
 info() { printf "  ${C_FROST}ℹ${NC} %s\n" "$1"; }
 stage() { printf "  ${C_FROST}[%s]${NC} %s\n" "$1" "$2"; }
 hint() { printf "  ${C_DIM}  → %s${NC}\n" "$1"; }
+
+# J8.1  -  repaint the menu without the full-screen erase flash. `clear` (the
+# terminfo cup+ed sequence) blanks the whole screen and makes terminals with
+# smooth scrolling scroll the old frame out; cursor-home + clear-to-end
+# repaints in place. Anything non-interactive (piped output, dumb terminal,
+# TERM unset) falls back to a plain newline so logs stay readable.
+screen_reset() {
+    if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM}" != "dumb" ]; then
+        printf '\033[H\033[J'
+    else
+        printf '\n'
+    fi
+}
+
+# J8.4  -  smooth in-place progress bar: [▓▓▓▓▓░░░░░]  50%
+# $1 = current step, $2 = total steps, $3 = plain label, $4 = bar width (10).
+# The label is plain text on purpose: colour vars are literal \033 strings and
+# only expand inside a printf FORMAT, never as %s arguments.
+progress_bar() {
+    local cur="$1" total="$2" label="${3:-Working}" width="${4:-10}"
+    case "$cur" in ''|*[!0-9]*) return 1;; esac
+    case "$total" in ''|*[!0-9]*) return 1;; esac
+    [ "$total" -gt 0 ] || return 1
+    [ "$cur" -gt "$total" ] && cur="$total"
+    local filled=$(( cur * width / total ))
+    local empty=$(( width - filled ))
+    local pct=$(( cur * 100 / total ))
+    local bar="" i
+    for ((i=0; i<filled; i++)); do bar+="▓"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+    printf "\r  ${C_EYE}%s${NC} [%s] ${C_DIM}%3d%%${NC}" "$label" "$bar" "$pct"
+    return 0
+}
 
 # ── Menu layout helpers ───────────────────────────────────────
 menu_group() { printf "  ${C_DIM}${B}%s${NC}\n" "$1"; }
@@ -939,6 +977,21 @@ DEBUG=false
 YES_MODE=false
 EXPLAIN=false
 # JSON_MODE is pre-scanned from argv near the top (before the sudo banner)
+
+# J8.3  -  verbose survives across menu sessions. The menu's `:verbose` toggle
+# writes this file and the interactive loop reads it back on entry, so turning
+# verbose on once doesn't mean re-typing -v on every launch. An explicit -v on
+# the command line still wins for that invocation.
+VERBOSE_STATE_FILE="$DATA_DIR/state/verbose"
+verbose_persist() {
+    mkdir -p "$DATA_DIR/state" 2>/dev/null || true
+    printf '%s\n' "$VERBOSE" 2>/dev/null > "$VERBOSE_STATE_FILE" || true
+}
+verbose_restore() {
+    [ -f "$VERBOSE_STATE_FILE" ] || return 0
+    [ "$(cat "$VERBOSE_STATE_FILE" 2>/dev/null)" = "true" ] && VERBOSE=true
+    return 0
+}
 
 # ── Spinner animation (0.5s) ──────────────────────────────────
 
@@ -4328,47 +4381,50 @@ cmd_profile() {
     local action="${1:-list}" name="${2:-}"
     case "$action" in
         save)
-            [ -z "$name" ] && { echo -e "${C_RED}Usage:${NC} profile save <name>"; return 1; }
+            # J8.5: optional --target/--method/--retries so a profile can pin a
+            # Filza bundle ID (4.0.0 vs 4.0.2 ship different IDs) and an exploit
+            # method instead of inheriting whatever the last run used.
+            local target="" method="" retries="5" i=3
+            while [ "$i" -le "$#" ]; do
+                case "${!i}" in
+                    --target)  i=$((i+1)); target="${!i}";;
+                    --method)  i=$((i+1)); method="${!i}";;
+                    --retries) i=$((i+1)); retries="${!i}";;
+                esac
+                i=$((i+1))
+            done
+            [ -z "$name" ] && { echo -e "${C_RED}Usage:${NC} profile save <name> [--target <bundle-id>] [--method <exploit>] [--retries N]"; return 1; }
+            case "$retries" in ''|*[!0-9]*) err "--retries must be a number"; return 1;; esac
+            [ -z "$target" ] && target="${PROFILE_TARGET:-com.tigisoftware.Filza}"
+            [ -z "$method" ] && method="$EXPLOIT_METHOD"
             local ip; ip=$(get_device_ip)
             cat > "$DATA_DIR/profiles/$name.json" << EOF
 {
   "name": "$name",
   "device_ip": "${ip:-}",
-  "target": "com.tigisoftware.Filza",
-  "exploit_method": "$EXPLOIT_METHOD",
-  "retry_count": 5,
+  "target": "$target",
+  "exploit_method": "$method",
+  "retry_count": $retries,
   "ssv_enabled": true,
   "saved_at": "$(date -Iseconds)"
 }
 EOF
-            echo "$name" > "$DATA_DIR/active_profile"
-            ok "Profile saved: ${C_EYE}$name${NC}"
+            # Redirect order matters: `2>/dev/null` must come BEFORE the `>`
+            # that may fail, otherwise bash prints its own "Permission denied"
+            # to the not-yet-redirected stderr (tested).
+            if ! echo "$name" 2>/dev/null > "$DATA_DIR/active_profile"; then
+                warn "saved, but it could not be marked active - $DATA_DIR/active_profile is not writable"
+                hint "a previous 'sudo ./W0lfSword' run created it as root: sudo chown \$USER \"$DATA_DIR/active_profile\""
+            fi
+            PROFILE_TARGET="$target"
+            printf "  ${C_GRN}✓${NC} Profile saved: ${C_EYE}%s${NC}\n" "$name"
             [ -n "$ip" ] && info "Device: $ip"
+            info "Target: $target"
             return 0
             ;;
         load)
             [ -z "$name" ] && { err "Usage: profile load <name>"; return 1; }
-            if [ -f "$DATA_DIR/profiles/$name.json" ]; then
-                echo "$name" > "$DATA_DIR/active_profile"
-                local saved_ip; saved_ip=$(python3 -c "import json; print(json.load(open('$DATA_DIR/profiles/$name.json')).get('device_ip',''))" 2>/dev/null || echo "")
-                [ -n "$saved_ip" ] && echo "$saved_ip" > "$DATA_DIR/active_device"
-                # K1.9: restore the last-used exploit method from the profile
-                local saved_method; saved_method=$(python3 -c "import json; print(json.load(open('$DATA_DIR/profiles/$name.json')).get('exploit_method',''))" 2>/dev/null || echo "")
-                [ -n "$saved_method" ] && EXPLOIT_METHOD="$saved_method"
-                ok "Loaded: ${C_EYE}$name${NC}"
-                [ -n "$saved_ip" ] && info "Device: $saved_ip"
-                [ -n "$saved_method" ] && info "Exploit: $saved_method"
-                # K1.6: warn when a profile restores an unported puaf-* backend
-                # (carried forward, but the kfd port is still F1.x).
-                case "$saved_method" in
-                    puaf-physpuppet|puaf-smith|puaf-landa)
-                        warn "profile '$name' carries the unported kfd puaf backend ($saved_method) - F1.x"
-                        ;;
-                esac
-                return 0
-            else
-                err "Profile '$name' not found"
-            fi
+            profile_apply "$name" || err "Profile '$name' not found"
             ;;
         list)
             section "Profiles"
@@ -4376,12 +4432,15 @@ EOF
                 local active; active=$(cat "$DATA_DIR/active_profile" 2>/dev/null || echo "")
                 for f in "$DATA_DIR/profiles/"*.json; do
                     local n; n=$(basename "$f" .json)
-                    local dip; dip=$(python3 -c "import json; print(json.load(open('$f')).get('device_ip','-'))" 2>/dev/null || echo "-")
-                    local em; em=$(python3 -c "import json; print(json.load(open('$f')).get('exploit_method','auto'))" 2>/dev/null || echo "auto")
-                    local ts; ts=$(python3 -c "import json; print(json.load(open('$f')).get('saved_at','-'))" 2>/dev/null | cut -dT -f1 || echo "-")
-                    local marker=" "
-                    [ "$active" = "$n" ] && marker="${C_EYE}*${NC}"
-                    printf "  %s ${C_EYE}%-14s${NC} ${C_DIM}ip:${NC} %-18s ${C_DIM}exploit:${NC} %-8s ${C_DIM}saved:${NC} %s\n" "$marker" "$n" "$dip" "$em" "$ts"
+                    local dip em ts tg
+                    dip=$(profile_field "$n" device_ip); dip="${dip:--}"
+                    em=$(profile_field "$n" exploit_method); em="${em:-auto}"
+                    tg=$(profile_field "$n" target); tg="${tg:-com.tigisoftware.Filza}"
+                    ts=$(profile_field "$n" saved_at); ts=$(printf '%s' "$ts" | cut -dT -f1); ts="${ts:--}"
+                    local mark=" "
+                    [ "$active" = "$n" ] && mark="*"
+                    printf "  ${C_EYE}%s${NC} ${C_EYE}%-14s${NC} ${C_DIM}ip:${NC} %-18s ${C_DIM}exploit:${NC} %-8s ${C_DIM}target:${NC} %-28s ${C_DIM}saved:${NC} %s\n" \
+                        "$mark" "$n" "$dip" "$em" "$tg" "$ts"
                 done
             else
                 echo -e "  ${C_DIM}No profiles yet. Use 'profile save <name>'${NC}"
@@ -4389,6 +4448,60 @@ EOF
             ;;
         *) echo -e "${C_RED}Usage:${NC} profile save|load|list [name]";;
     esac
+}
+
+# Read one field out of a profile JSON. The path/key go through argv, not
+# string interpolation: a profile name with a quote in it must not be able to
+# break the python one-liner (the old inline form did).
+profile_field() {
+    local name="$1" key="$2" f="$DATA_DIR/profiles/$1.json"
+    [ -f "$f" ] || return 0
+    python3 -c 'import json,sys
+try:
+    print(json.load(open(sys.argv[1])).get(sys.argv[2], "") or "")
+except Exception:
+    print("")' "$f" "$key" 2>/dev/null || echo ""
+}
+
+# J8.2/J8.5  -  the single place a profile is applied: active_profile, device
+# IP, exploit method and target bundle. Used by `profile load` and by the
+# menu's autoload of the `default` profile.
+profile_apply() {
+    local name="$1" silent="${2:-}" f="$DATA_DIR/profiles/$1.json"
+    [ -f "$f" ] || return 1
+    # A root-owned data dir (from an earlier `sudo ./W0lfSword` run) must not
+    # abort the load: the values below still apply, only the marker/write is lost.
+    # (`2>/dev/null` first - see the redirect-order note in profile save.)
+    echo "$name" 2>/dev/null > "$DATA_DIR/active_profile" || true
+    local saved_ip saved_method saved_target
+    saved_ip=$(profile_field "$name" device_ip)
+    saved_method=$(profile_field "$name" exploit_method)
+    saved_target=$(profile_field "$name" target)
+    [ -n "$saved_ip" ] && echo "$saved_ip" 2>/dev/null > "$DATA_DIR/active_device" || true
+    [ -n "$saved_method" ] && EXPLOIT_METHOD="$saved_method"
+    PROFILE_TARGET="$saved_target"
+    [ "$silent" = "silent" ] && return 0
+    printf "  ${C_GRN}✓${NC} Loaded: ${C_EYE}%s${NC}\n" "$name"
+    [ -n "$saved_ip" ] && info "Device: $saved_ip"
+    [ -n "$saved_method" ] && info "Exploit: $saved_method"
+    [ -n "$saved_target" ] && info "Target: $saved_target"
+    # K1.6: warn when a profile restores an unported puaf-* backend
+    # (carried forward, but the kfd port is still F1.x).
+    case "$saved_method" in
+        puaf-physpuppet|puaf-smith|puaf-landa)
+            warn "profile '$name' carries the unported kfd puaf backend ($saved_method) - F1.x"
+            ;;
+    esac
+    return 0
+}
+
+# J8.2  -  auto-load the profile named `default` on menu entry. Silent, since
+# the menu prints the active device/method itself; a missing profile is a
+# no-op (not an error).
+profile_autoload() {
+    [ -f "$DATA_DIR/profiles/default.json" ] || return 0
+    profile_apply default silent || return 0
+    return 0
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -4545,7 +4658,7 @@ EOF
     ok "Deployed + restarted"
 
     stage "3/4" "Waiting for exploit... (phone is working)"
-    local dots=""; for ((i=0; i<10; i++)); do dots+="."; echo -ne "\r  ${C_EYE}[3/4]${NC} Waiting for exploit${dots}"; sleep 1; done
+    local i; for ((i=1; i<=10; i++)); do progress_bar "$i" 10 "[3/4] Waiting for exploit"; sleep 1; done
     echo ""
 
     stage "4/4" "Verifying... (reading phone logs)"
@@ -4700,7 +4813,7 @@ draw_menu() {
         WOLF_ON_SCREEN=false
         FIRST_DRAW=false
     else
-        clear
+        screen_reset
         # wolf in the menu too, per show_wolf=menu
         if $FIRST_DRAW; then
             [ "$CFG_SHOW_WOLF" = "menu" ] && show_wolf
@@ -4863,6 +4976,11 @@ run_menu() {
     FIRST_DRAW=true
     show_loading
     first_run_wizard
+    # J8.2/J8.3  -  session continuity: a saved `default` profile and the last
+    # :verbose toggle are applied on entry, so the menu starts in the state the
+    # user left it in instead of resetting to defaults every launch.
+    profile_autoload
+    verbose_restore
     local choice
     while true; do
         draw_menu
@@ -4874,6 +4992,21 @@ run_menu() {
             echo -e "  ${C_DIM}stdin closed - leaving the menu${NC}"
             break
         fi
+        # J8.3  -  menu-local `:verbose` toggle (persisted, so it survives the
+        # next launch). `:verbose` flips, `:verbose on|off` sets explicitly.
+        case "$choice" in
+            :verbose*)
+                case "${choice#:verbose}" in
+                    *off*) VERBOSE=false;;
+                    *on*)  VERBOSE=true;;
+                    *)     if $VERBOSE; then VERBOSE=false; else VERBOSE=true; fi;;
+                esac
+                verbose_persist
+                if $VERBOSE; then ok "verbose ON (remembered for the next session)"; else ok "verbose OFF (remembered for the next session)"; fi
+                sleep 1
+                continue
+                ;;
+        esac
         spinner "loading"
         echo ""
         menu_dispatch "$choice" || true
@@ -5374,7 +5507,9 @@ EOF
     section "Phase 6  -  Configuration (on this computer)"
     echo ""
 
-    local TARGET_BUNDLE="com.tigisoftware.Filza"
+    # J8.5: a profile may pin the target bundle (Filza vs Filza000); it beats
+    # the hardcoded default, and on-device detection still refines it below.
+    local TARGET_BUNDLE="${PROFILE_TARGET:-com.tigisoftware.Filza}"
     # Detect the installed Filza bundle ID from the phone instead of guessing
     # from version numbers (ROADMAP A2.1: Filza versioning is misleading  - 
     # 4.0.0 is newer than 4.0.2). Falls back to the question when unreachable.
@@ -5538,10 +5673,9 @@ EOF
         echo "{\"timestamp\":\"$(date -Iseconds)\",\"device\":\"$IP\",\"ios\":\"$IOS_VER\",\"result\":\"safe_mode\"}" >> "$DATA_DIR/history.json"
         return 0
     fi
-    local dots=""
-    for ((i=0; i<12; i++)); do
-        dots+="."
-        printf "\r  ${C_EYE}[3/5]${NC} Waiting for exploit${dots}"
+    local i
+    for ((i=1; i<=12; i++)); do
+        progress_bar "$i" 12 "[3/5] Waiting for exploit"
         sleep 1
     done
     echo ""
@@ -6352,6 +6486,71 @@ cmd_export() {
 }
 
 # ═══════════════════════════════════════════════════════════════
+#  J7.3/J8.6  -  colour-coded diff (what changed, readable)
+# ═══════════════════════════════════════════════════════════════
+# `git diff --color` colours the LINE; this colours the CODE inside the line
+# (keywords, types, strings, comments) per language, so a 40-line ObjC hunk is
+# readable without parsing every word. The colouring lives in
+# scripts/colorize_diff.py (host-tested in tests/test_colorize_diff.py).
+#
+#   diff                 uncommitted changes (worktree vs HEAD)
+#   diff --staged        what the next commit would take
+#   diff --stat          summary only, no colouring needed
+#   diff <rev>           one revision (e.g. diff HEAD~3)
+#   diff <revA> <revB>   between two revisions
+# Output is piped, so colour defaults OFF unless stdout is a terminal;
+# --color=always forces it (use with `less -R`).
+cmd_diff() {
+    [ -d "$PROJECT_DIR/.git" ] || { err "not a git checkout: $PROJECT_DIR"; return 1; }
+    local color_mode="auto" git_args=() a verbatim=0
+    for a in "$@"; do
+        case "$a" in
+            --color=*) color_mode="${a#--color=}";;
+            --no-color) color_mode="never";;
+            --color) color_mode="always";;
+            --staged|-staged) git_args+=("--staged");;
+            --stat) git_args+=("--stat"); verbatim=1;;
+            -h|--help) explain_text diff; return 0;;
+            *) git_args+=("$a");;
+        esac
+    done
+
+    # A non-git argument (a typo like `diff main..`) should fail with git's own
+    # message rather than an empty screen.
+    local raw_diff
+    if ! raw_diff=$(git -C "$PROJECT_DIR" diff --no-color "${git_args[@]}" 2>&1); then
+        err "git diff failed"
+        printf '%s\n' "$raw_diff" | sed 's/^/  /' >&2
+        return 1
+    fi
+    if [ -z "$raw_diff" ]; then
+        ok "no changes${git_args[0]:+ (${git_args[0]})}"
+        hint "try: diff HEAD~1   or   diff <revA> <revB>"
+        return 0
+    fi
+
+    # Files touched, for the footer (cheap: header lines only).
+    local files; files=$(printf '%s\n' "$raw_diff" | grep -c '^diff --git' || true)
+
+    if [ "$verbatim" -eq 1 ]; then
+        printf '%s\n' "$raw_diff"
+        return 0
+    fi
+
+    # Colour policy: keep the terminal default sane (auto) but never emit
+    # escapes into a pipe unless asked.
+    local py_args=()
+    case "$color_mode" in
+        always) py_args+=("--color=always");;
+        never)  py_args+=("--no-color");;
+        *) : ;;
+    esac
+    printf '%s\n' "$raw_diff" | python3 "$PROJECT_DIR/scripts/colorize_diff.py" "${py_args[@]}"
+    printf "  ${C_DIM}%s file(s) changed${NC}\n" "$files"
+    hint "diff --staged | diff --stat | diff <revA> <revB>"
+}
+
+# ═══════════════════════════════════════════════════════════════
 #  § 36 EXPLAIN  -  beginner-friendly long descriptions (K2.5)
 # ═══════════════════════════════════════════════════════════════
 
@@ -6498,6 +6697,23 @@ setup (alias: install)  -  install build tools ON THIS COMPUTER.
   clang, dpkg, SSH, git, python3, libimobiledevice, and THEOS.
   Nothing is installed on the phone. The phone only needs OpenSSH,
   a jailbreak, and Filza already present.
+EOF
+            ;;
+        diff|df)
+            cat <<'EOF'
+diff (alias: df)  -  show what changed in this repo, with the CODE coloured.
+  Git colours the line; this colours the code inside the line  -  ObjC/C
+  keywords, types, strings and comments  -  so a long hunk is readable.
+
+    ./W0lfSword diff                 uncommitted changes (worktree vs HEAD)
+    ./W0lfSword diff --staged        what the next commit would take
+    ./W0lfSword diff --stat          summary only
+    ./W0lfSword diff HEAD~3          since a revision
+    ./W0lfSword diff <revA> <revB>   between two revisions
+
+  Colour follows the terminal: plain when piped into a file or another
+  command, coloured on a TTY. Force it with --color=always (pair with
+  `less -R`) or disable with --no-color / NO_COLOR=1.
 EOF
             ;;
         doctor)
@@ -7100,6 +7316,7 @@ main() {
         device)    cmd_device "${args[@]}";;
         profile)   cmd_profile "${args[@]}";;
         history)   cmd_history "${args[@]}";;
+        diff|df)   cmd_diff "${args[@]}";;
         # ── diagnostics ───────────────────────────────────────────
         diag|diagnostics) cmd_diag "${args[@]}";;
         targets|t) cmd_targets "${args[@]}";;

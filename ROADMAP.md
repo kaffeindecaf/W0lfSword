@@ -1362,29 +1362,31 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [x] `J7.1` 🟢 — Arctic wolf ASCII art + themed header  
   _Done: show_header() with ╔═╗ box, arctic palette consistent with main W0lfSword._
 
-- [ ] `J7.2` 🟢 — Sound on exploit success (optional, macOS only)
+- [ ] `J7.2` 🟢 — Sound on exploit success (optional, macOS only)  
+  _Still open: this host is Linux (the CLI must not shell out to `afplay`), so it needs a macOS-gated path before it can be written honestly._
 
-- [ ] `J7.3` 🟢 — Colored diff output comparing builds
+- [x] `J7.3` 🟢 — Colored diff output comparing builds  
+  _Done 2026-09-11 (with J8.6): `./W0lfSword diff [--staged|--stat|<rev>|<revA> <revB>]` runs git diff through scripts/colorize_diff.py, which colours the CODE inside the +/- lines per language (ObjC/C keywords, types, strings, comments; python and shell rules; the extensionless CLI itself maps to shell). Colour auto-detects a TTY so piped output stays plain; --color=always / --no-color / NO_COLOR override. Host tests: tests/test_colorize_diff.py (19 checks, includes the pass-through and the process-level CLI contract)._
 
 ## J8 — Beta UX (newly added 2026-08-10)
 
-- [ ] `J8.1` 🟡 — Clear screen on menu entry / re-draw support  
-  _The `draw_menu()` function calls `clear` but on some terminals this causes flicker. Switch to `tput` or ANSI cursor-home for smoother redraw._
+- [x] `J8.1` 🟡 — Clear screen on menu entry / re-draw support  
+  _Done 2026-09-11: `screen_reset()` now backs the menu's redraw path, emitting ANSI cursor-home + clear-to-end instead of `clear`, so terminals stop scrolling the old frame out; non-TTY / TERM=dumb falls back to a newline so piped logs stay clean._
 
-- [ ] `J8.2` 🟢 — Default profile auto-load on startup  
-  _Check for `default` profile in .w0lfsword/profiles/ and load it automatically if present._
+- [x] `J8.2` 🟢 — Default profile auto-load on startup  
+  _Done 2026-09-11: `profile_autoload()` runs on menu entry and silently applies `.w0lfsword/profiles/default.json` (device IP, exploit method, target bundle) via the new shared `profile_apply()`; a missing default profile is a no-op, not an error._
 
-- [ ] `J8.3` 🟢 — Verbose mode remembers state across menu sessions  
-  _Currently -v only works on direct commands, not in the interactive menu. Add a `:verbose` toggle command in the menu._
+- [x] `J8.3` 🟢 — Verbose mode remembers state across menu sessions  
+  _Done 2026-09-11: `:verbose` (also `:verbose on|off`) toggles verbose inside the menu and persists it to `.w0lfsword/state/verbose`; `verbose_restore()` reads it back on menu entry. Direct commands keep the -v flag as the per-invocation override._
 
-- [ ] `J8.4` 🟢 — ASCII progress bar during Quick Exploit wait period  
-  _Replace the 10 dots with a smooth filling bar: [▓▓▓▓░░░░░░] 40%._
+- [x] `J8.4` 🟢 — ASCII progress bar during Quick Exploit wait period  
+  _Done 2026-09-11: `progress_bar <cur> <total> [label] [width]` renders `[▓▓▓▓▓░░░░░]  50%` in place; both wait loops (quick 3/4 and adderall 3/5) use it instead of accumulating dots. Guards non-numeric input (returns 1, no crash) and never emits colour vars as %s arguments._
 
-- [ ] `J8.5` 🟢 — Exploit profile: per-app target selection  
-  _Allow profile to specify target bundle ID, so different profiles can target different Filza versions (Filza vs Filza000)._
+- [x] `J8.5` 🟢 — Exploit profile: per-app target selection  
+  _Done 2026-09-11: `profile save <name> [--target <bundle-id>] [--method <exploit>] [--retries N]`; the target is stored, shown in `profile list`, restored by load/autoload into `PROFILE_TARGET`, and seeds the quick path's `TARGET_BUNDLE` (detection on the phone still refines it). Profile fields are read through `profile_field()` with argv-passed paths, so a profile name containing a quote or space can no longer break the python one-liner._
 
-- [ ] `J8.6` 🟢 — Color-coded diff subcommand  
-  _`./W0lfSword-Beta diff` shows uncommitted changes with syntax-aware coloring for .m/.xm/.h files._
+- [x] `J8.6` 🟢 — Color-coded diff subcommand  
+  _Done 2026-09-11 with J7.3 (one implementation, both items): the `diff` command (alias `df`, housekeeping group, explain docs) + scripts/colorize_diff.py. Also fixed two pre-existing bugs found while wiring it: the profile list's active marker printed literal `\033[..m` escapes, and a root-owned `.w0lfsword/active_profile` (from an earlier sudo run) aborted `profile save` with a raw shell error instead of a warning + chown hint._
 
 ---
 
