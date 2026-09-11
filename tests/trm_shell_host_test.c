@@ -63,6 +63,28 @@ static void run(const char *line, const char *label) {
     printf("  rc=%d  %-38s | %s\n", rc, label ? label : line, g_count > 0 ? g_last[0] : "(no output)");
 }
 
+// --- small filesystem helpers for the TRM.2 redirection section -----------
+static int file_has(const char *path, const char *needle) {
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char buf[4096];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = '\0';
+    fclose(f);
+    return strstr(buf, needle) != NULL;
+}
+
+static int file_line_count(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    int lines = 0, c;
+    while ((c = fgetc(f)) != EOF) {
+        if (c == '\n') lines++;
+    }
+    fclose(f);
+    return lines;
+}
+
 // Run a command built from the container path.
 static int run_fmt(const char *fmt, const char *arg, const char *label) {
     char line[PATH_MAX + 64];
@@ -344,6 +366,46 @@ int main(void) {
     printf("\n[7] selftest path (the device smoke test, stubbed deps)\n");
     trm_shell_selftest();
     check(1, "trm_shell_selftest() ran without crashing");
+
+    printf("\n[8] redirection (TRM.2)\n");
+    {
+        unlink("redir_out.txt");
+        run("echo hello world > redir_out.txt", "write with >");
+        check(saw("written to"), "reports 'written to' after a redirect");
+        check(file_has("redir_out.txt", "hello world"), "the payload landed in the file");
+
+        run("echo second >> redir_out.txt", "append with >>");
+        check(file_has("redir_out.txt", "second"), ">> added the second line");
+        check(file_line_count("redir_out.txt") == 2, ">> did not truncate (2 lines)");
+
+        run("echo third > redir_out.txt", "truncate again");
+        check(file_line_count("redir_out.txt") == 1, "plain > truncates back to 1 line");
+        check(!file_has("redir_out.txt", "second"), "the truncated content is gone");
+
+        g_count = 0;
+        trm_shell_exec_line("echo only_in_file > redir_out.txt");
+        int leaked = 0;
+        for (int i = 0; i < g_count && i < 256; i++) {
+            if (strstr(g_last[i], "only_in_file")) leaked = 1;
+        }
+        check(!leaked, "the redirected payload did not print to the terminal");
+        check(file_has("redir_out.txt", "only_in_file"), "and it is in the file");
+
+        g_count = 0;
+        int rrc = trm_shell_exec_line("echo x > /proc/definitely/not/writable.txt");
+        check(rrc != 0, "an unwritable target fails");
+        check(g_count > 0, "the failure is still reported in the terminal");
+
+        g_count = 0;
+        rrc = trm_shell_exec_line("echo x >");
+        check(rrc != 0, "a missing path after '>' is refused");
+
+        run("echo a>b", "no-space '>' stays part of the argument");
+        check(!saw("written to"), "'>' inside a word is not a redirect");
+
+        run("echo after", "the shell still works afterwards");
+        check(saw("after"), "normal commands are unaffected");
+    }
 
     char cmd[PATH_MAX + 32];
     snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);

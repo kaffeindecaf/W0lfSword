@@ -31,6 +31,18 @@ char *trm_ctx_docs_path(char *out, size_t n, const char *name);
 typedef void (*trm_out_fn)(const char *line, void *ctx);
 void trm_set_default_output(trm_out_fn fn, void *ctx);
 void trm_out(const char *fmt, ...);
+// Emits to the default sink even while a redirect is active: errors and notices
+// must stay visible in the terminal (TRM.2).
+void trm_out_always(const char *fmt, ...);
+
+// --- output redirection (TRM.2) -------------------------------------------
+// `cmd > file` truncates, `cmd >> file` appends. While a redirect is open every
+// trm_out line goes to the file instead of the sink; nested redirects are
+// refused (-2). trm_redirect_active() returns the number of lines written so the
+// caller can report "N line(s) written to ..." after closing.
+int trm_redirect_open(const char *path, int append);   // 0 ok, -1 open failed, -2 nested
+int trm_redirect_active(void);                         // lines written so far
+void trm_redirect_close(void);
 
 #ifdef __cplusplus
 }

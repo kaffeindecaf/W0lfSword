@@ -90,7 +90,7 @@ static void sh_err(const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
-    trm_out("[sh] ! %s", msg);
+    trm_out_always("[sh] ! %s", msg);   // TRM.2: errors stay in the terminal
 }
 
 static void sh_hexdump(uint64_t base, const uint8_t *b, size_t len) {
@@ -1302,28 +1302,109 @@ int trm_shell_exec_line(const char *line) {
     while (*line == ' ' || *line == '\t') line++;
     if (!*line || *line == '#') return 0;
 
+    // --- TRM.2: `cmd > file` and `cmd >> file` ------------------------------
+    // A standalone '>' token splits the line: before it is the command, after it
+    // the target path. The redirect opens BEFORE the command runs, so an
+    // unwritable target fails without executing anything. Limitation, stated
+    // rather than hidden: this shell has no quoting (sh_parse splits on
+    // whitespace), so a '>' that is part of an argument cannot be distinguished
+    // from a redirect.
+    char cmdline[1024];
+    char redirPath[PATH_MAX] = {0};
+    int redirecting = 0, appendMode = 0;
+    {
+        const char *hit = NULL;
+        for (const char *p = line; *p; p++) {
+            if (*p != '>') continue;
+            if (p != line && p[-1] != ' ' && p[-1] != '\t') continue;   // inside a word
+            int app = 0;
+            const char *q = p;
+            if (q[1] == '>') { app = 1; q++; }
+            // The '>' token must be followed by whitespace or end-of-line; the
+            // end-of-line case is a MALFORMED redirect (`echo x >`) which must be
+            // refused, not silently treated as an argument (host test, 2026-09-11).
+            if (q[1] != '\0' && q[1] != ' ' && q[1] != '\t') continue;
+            hit = p;
+            appendMode = app;
+            break;
+        }
+        if (hit) {
+            size_t n = (size_t)(hit - line);
+            while (n > 0 && (line[n - 1] == ' ' || line[n - 1] == '\t')) n--;
+            if (n == 0) {
+                sh_err("redirection: nothing to run before '%s'", appendMode ? ">>" : ">");
+                return 2;
+            }
+            if (n >= sizeof(cmdline)) n = sizeof(cmdline) - 1;
+            memcpy(cmdline, line, n);
+            cmdline[n] = '\0';
+
+            const char *pp = hit + (appendMode ? 2 : 1);
+            while (*pp == ' ' || *pp == '\t') pp++;
+            snprintf(redirPath, sizeof(redirPath), "%s", pp);
+            size_t pl = strlen(redirPath);
+            while (pl > 0 && (redirPath[pl - 1] == ' ' || redirPath[pl - 1] == '\t')) redirPath[--pl] = '\0';
+            if (!redirPath[0]) {
+                sh_err("redirection: missing path after '%s'", appendMode ? ">>" : ">");
+                return 2;
+            }
+
+            char rbuf[PATH_MAX];
+            const char *rp = sh_resolve(redirPath, rbuf, sizeof(rbuf));
+            if (trm_redirect_open(rp, appendMode) != 0) {
+                sh_err("redirection: cannot write %s: %s", rp, strerror(errno));
+                return 1;
+            }
+            // sh_resolve returns its INPUT unchanged for plain paths, so copying
+            // unconditionally would be snprintf(str, n, "%s", str) - overlapping
+            // source and destination is UB and produced an EMPTY path in the host
+            // test (the redirect worked, the report said "written to ").
+            if (rp != redirPath) {
+                snprintf(redirPath, sizeof(redirPath), "%s", rp);
+            }
+            redirecting = 1;
+            line = cmdline;
+        }
+    }
+
     static char argv[TRM_MAX_ARGS][TRM_MAX_ARG_LEN];
     int argc = 0;
     sh_parse(line, &argc, argv);
-    if (argc == 0) return 0;
 
-    const trm_cmd *c = sh_lookup(argv[0]);
-    if (!c) {
-        sh_err("%s: command not found (this shell implements commands in-process; `spawn %s` runs a platform binary if the profile allows it)", argv[0], argv[0]);
-        return 1;
+    int rc = 0;
+    if (argc == 0) goto done;
+
+    {
+        const trm_cmd *c = sh_lookup(argv[0]);
+        if (!c) {
+            sh_err("%s: command not found (this shell implements commands in-process; `spawn %s` runs a platform binary if the profile allows it)", argv[0], argv[0]);
+            rc = 1;
+            goto done;
+        }
+        if (c->needs_unsafe && !g_unsafe) {
+            sh_err("%s is gated - run `unsafe 1` first", c->name);
+            rc = 2;
+            goto done;
+        }
+        if (c->pkg != TRM_PKG_NONE && !g_pkgEnabled[c->pkg]) {
+            sh_err("%s is part of the '%s' package - install it: `pkg install %s` (or Settings > Packages)",
+                   c->name, kPkgNames[c->pkg], kPkgNames[c->pkg]);
+            rc = 2;
+            goto done;
+        }
+        char *cargv[TRM_MAX_ARGS];
+        for (int i = 0; i < argc; i++) cargv[i] = argv[i];
+        rc = c->fn(argc, cargv);
     }
-    if (c->needs_unsafe && !g_unsafe) {
-        sh_err("%s is gated - run `unsafe 1` first", c->name);
-        return 2;
+
+done:
+    if (redirecting) {
+        int lines = trm_redirect_active();
+        trm_redirect_close();
+        trm_out("[sh] %d line(s) %s %s", lines,
+                appendMode ? "appended to" : "written to", redirPath);
     }
-    if (c->pkg != TRM_PKG_NONE && !g_pkgEnabled[c->pkg]) {
-        sh_err("%s is part of the '%s' package - install it: `pkg install %s` (or Settings > Packages)",
-               c->name, kPkgNames[c->pkg], kPkgNames[c->pkg]);
-        return 2;
-    }
-    char *cargv[TRM_MAX_ARGS];
-    for (int i = 0; i < argc; i++) cargv[i] = argv[i];
-    return c->fn(argc, cargv);
+    return rc;
 }
 
 const char *trm_shell_prompt(void) { return g_prompt; }
