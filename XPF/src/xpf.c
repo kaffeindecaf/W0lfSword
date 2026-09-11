@@ -428,6 +428,12 @@ int xpf_start_with_kernel_path(const char *kernelPath)
 void xpf_item_register(const char *name, void *finder, void *ctx)
 {
 	XPFItem *newItem = malloc(sizeof(XPFItem));
+	if (!newItem) {
+		// Registering nothing is better than memset(NULL): the finder is
+		// simply absent from the table and xpf_find_* reports "not found".
+		fprintf(stderr, "xpf_item_register: out of memory registering '%s'\n", name);
+		return;
+	}
 	memset(newItem, 0x0, sizeof(XPFItem));
 	newItem->name = name;
 	newItem->ctx = ctx;

@@ -9,6 +9,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <string.h>
 
 #include "hexdump.h"
 
@@ -51,7 +53,16 @@ void hexdump(const void* data, size_t size) {
 void hexdump_file(const char *path, size_t size)
 {
     int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        fprintf(stderr, "hexdump_file: open(%s) failed: %s\n", path, strerror(errno));
+        return;
+    }
     void *buf = malloc(size);
+    if (!buf) {
+        fprintf(stderr, "hexdump_file: malloc(%zu) failed\n", size);
+        close(fd);
+        return;
+    }
     ssize_t n = read(fd, buf, size);
     close(fd);
     if (n > 0)

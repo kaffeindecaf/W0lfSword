@@ -4513,15 +4513,23 @@ cmd_device() {
     case "$action" in
         add)
             [ -z "$arg" ] && { echo -e "${C_RED}Usage:${NC} device add <ip> [--name <label>]"; return 1; }
-            local dname="${3:-$arg}"
+            # Accept the documented `--name <label>` form AND a bare positional
+            # label. The old `dname="${3:-$arg}"` stored the literal string
+            # "--name" as the device name whenever the flag form was used.
+            local dname="$arg"
+            if [ "${3:-}" = "--name" ]; then
+                [ -n "${4:-}" ] && dname="$4"
+            elif [ -n "${3:-}" ]; then
+                dname="$3"
+            fi
             echo "$arg" > "$DATA_DIR/active_device"
             grep -q "^$arg " "$DATA_DIR/devices.list" 2>/dev/null || echo "$arg $dname" >> "$DATA_DIR/devices.list"
-            ok "Device added: ${C_EYE}$arg${NC} ($dname)"
+            printf "  ${C_GRN}✓${NC} Device added: ${C_EYE}%s${NC} (%s)\n" "$arg" "$dname"
             ;;
         switch)
             [ -z "$arg" ] && { err "Usage: device switch <ip>"; return 1; }
             echo "$arg" > "$DATA_DIR/active_device"
-            ok "Active device: ${C_EYE}$arg${NC}"
+            printf "  ${C_GRN}✓${NC} Active device: ${C_EYE}%s${NC}\n" "$arg"
             ;;
         list)
             section "Devices"
@@ -6481,7 +6489,7 @@ cmd_export() {
     fi
     rm -rf "$tmpdir"
     
-    ok "Export saved: ${C_EYE}${outfile}${NC} ($(du -h "$outfile" | cut -f1))"
+    printf "  ${C_GRN}✓${NC} Export saved: ${C_EYE}%s${NC} (%s)\n" "$outfile" "$(du -h "$outfile" | cut -f1)"
     log_script "exported to $outfile"
 }
 
