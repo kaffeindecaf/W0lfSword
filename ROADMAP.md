@@ -319,6 +319,53 @@
      One panic rotated the SE's log set; a second on the daily driver would
      rotate the SG.7 evidence too.
 
+- [ ] `SG.9` 🔴 — **ON-DEVICE FINDING 2026-09-11 (third run, and the log now
+  names the stage).** W0lfTerm 0.7 on the SE (18.4.1/A13), user picked
+  `staged` and typed `exploit`. Device rebooted; both the app log and the panic
+  survived this time (the app log because 0.7 fsyncs it - worth having). App
+  log tail before the reboot:
+
+      18:04:55 [+] pcbStartOffset: 0 (filt=0x148 gencnt=0x78)
+      18:04:55 [+] inpListNextPointer: 0xffffffdf02ebc400
+      18:04:55 [+] icmp6Filter: 0xffffffe0d1ee0640
+      18:04:55 [STAGED] stage 1/2 pass — readonly layout validated on-device
+               (filt=0x148 gencnt=0x78), zero writes so far; corrupting single socket
+      18:05:00 [-] physical_oob_read retry #50 still failing (race not winning)
+      (18:06:01 panic, 18:06:29 next boot, banner correctly reports "mode: staged")
+
+  Panic: `panic-full-2026-09-11-180601.0002.ips`, identical signature to SG.8 -
+  `zone bound checks: buffer 0xffffffe0d1f26550 of length 32 overflows object
+  0xffffffe0d1f26500 of size 96 in zone [data.kalloc.96] @zalloc.c:1322`,
+  `Panicked task ... pid 586: W0lfTerm`.
+
+  Reading: stage 1/2 (the layout check) passes, then the **write probe**
+  (`[STAGED] ... corrupting single socket` -> `physical_oob_write_mo` of the
+  corrupted PCB page) runs, and the very next lines are the read-back that
+  feeds the restore failing (race not winning, 50+ retries). So the corruption
+  was left in a LIVE inpcb whose icmp6 filter pointer the kernel then
+  dereferenced/freed. The 32-byte writer is `early_kwrite32bytes` (via
+  `kwrite_zone_element`'s shifted RMW), and the object it overran is a
+  kalloc.96 - the probe's own restore path (`early_kwrite64` of the saved filt
+  pointer) is what walks off the object when the saved offsets do not describe
+  the real allocation on this iOS.
+
+  Remediation, in order:
+  1. **The restore must be unconditional.** Today the saved values are written
+     back only after a successful OOB read-back; when the race loses (exactly
+     what the log shows) the corruption stays. Restore on every path, bounded
+     retries, and log the outcome either way.
+  2. **Never probe with a pointer the kernel dereferences concurrently.** The
+     filt pointer is read by the kernel on the next packet/socket operation.
+     Probe a field that is inert until WE touch it (`so_usecount`,
+     `inp_depend6_chksum` - the full path already writes those) or a scratch
+     object we allocated ourselves.
+  3. **A kalloc size probe before any write near an object's tail**, or clamp
+     `kwrite_zone_element` to refuse a write whose 32-byte block is not provably
+     inside the target object (read the zone element header when the address is
+     kalloc-backed).
+  4. Keep `readonly` the only mode offered on unproven device/iOS pairs; all
+     three panics so far (SG.7, SG.8, SG.9) came from a write-capable ladder.
+
 ## 0.11 — Terminal with full kernel R/W (research, 2026-09-10)
 
 > Question to answer: can the escaped Filza process run a real terminal
