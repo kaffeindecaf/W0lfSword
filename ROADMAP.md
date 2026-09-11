@@ -265,6 +265,60 @@
   daily driver.** W0lfTerm 0.4 defaults to no auto-run and readonly mode, and
   prints an explicit warning before any mode that writes kernel memory.
 
+- [ ] `SG.8` 🔴 — **ON-DEVICE FINDING 2026-09-11 (same day, second device):
+  the SE bed panicked too, and this time the log names the fault.** W0lfTerm
+  0.5 on the iPhone12,8 (SE2, A13/T8030) / iOS 18.4.1 (22E252), user typed
+  `exploit`; the SE rebooted and came back on USB in ~20 s. Panic pulled with
+  `idevicecrashreport -e` (saved: `~/Desktop/w0lf-crashlogs/se-panic-18.4.1/`):
+
+      panic-full-2026-09-11-173836.0002.ips
+      panic(cpu 2 caller 0xfffffff019274fec): zone bound checks: buffer
+      0xffffffe0d0254a50 of length 32 overflows object 0xffffffe0d0254a00 of
+      size 96 in zone 0xfffffff01b167340[data.kalloc.96] @zalloc.c:1322
+      Panicked task 0xffffffe0ce04de30: 5033 pages, 6 threads: pid 544: W0lfTerm
+
+  Reading: the faulting task is OUR app (pid 544 W0lfTerm) and the fault is a
+  **32-byte kernel write that started 0x50 bytes into a 96-byte kalloc object
+  and ran 16 bytes past its end** — i.e. the fixed-width `early_kwrite32bytes`
+  primitive (the only 32-byte writer) wrote past the target allocation, and
+  XNU's zone bound check caught it and panicked instead of corrupting silently.
+  Two things follow:
+  1. The run was NOT readonly. `wolf_test_mode == 1` returns -2 (kexploit
+     `#877`) strictly before the socket corruption, with a logged
+     "[TEST] READONLY: ... skipping corruption" line, and it performs no
+     `kwritebuf` at all. A 32-byte write means the staged/full ladder ran.
+  2. The capacity guard added for exactly this overflow (A3.8 in
+     `kexploit/sandbox.m`, `bufCapacity = ext.path_len` before the 35-byte
+     `kwritebuf(path_buf, new_ext_data, totalLen)`) trusts a struct field as if
+     it were the allocation size, and the write primitive makes even a short
+     write dangerous: `kwrite_zone_element` RMWs in 32-byte blocks, shifting
+     the block backwards to "stay within the zone" — an assumption about the
+     object boundary that does not hold when the target is not at the object's
+     tail. `path_len`, `data_ptr` and the enclosing object size are all
+     reverse-engineered per iOS; 18.4.1 is not a version this path was
+     validated on.
+  Answer to SG.7 question 3: the same class of run panics on the SE bed where
+  the race does land, so this is the write path itself, not only "26.0.1
+  offsets are unproven".
+  Next, in order:
+  1. Pin the exact write. The app logs `[SSV] Path buf: 0x...` and
+     `[SSV] Wrote root path + class name (N bytes)` before it; compare the
+     logged address with `0xffffffe0d0254a50` to see which chunk (offset 0 or
+     the shifted tail) landed there, and whether the panic happened in
+     `patch_sandbox_ext` or in the staged socket corruption. Log pull:
+     `afcclient --documents com.kaffeindecaf.w0lfterm.J8T95UQMW2 cat
+     Documents/FilzaTweak.log` — requires the app to have been launched once
+     since the reboot, otherwise house_arrest answers `Permission denied (10)`.
+  2. Fix the write path, not the guard: bound every extension write by the
+     ORIGINAL string length read from the kernel (`strlen(originalPath) + 1`)
+     and refuse the write when the new content is longer; never treat
+     `path_len` as a capacity; treat a < 32-byte write as "read 32 bytes
+     ending at target+len, RMW, write back" ONLY after proving target+len is
+     the allocation end (or add a kalloc-size probe for the object header).
+  3. Until then: readonly mode only on both the SE and the daily driver.
+     One panic rotated the SE's log set; a second on the daily driver would
+     rotate the SG.7 evidence too.
+
 ## 0.11 — Terminal with full kernel R/W (research, 2026-09-10)
 
 > Question to answer: can the escaped Filza process run a real terminal
