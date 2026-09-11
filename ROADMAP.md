@@ -366,6 +366,42 @@
   4. Keep `readonly` the only mode offered on unproven device/iOS pairs; all
      three panics so far (SG.7, SG.8, SG.9) came from a write-capable ladder.
 
+- [ ] `SG.10` 🔴 — **DEVICE EVIDENCE 2026-09-11 (evening): the guards work, and
+  the earlier hang has a named cause.** Three separate results from the SE
+  (iPhone12,8 / 18.4.1 / A13):
+
+  1. The 18:14 hang ended in a **watchdog panic**, not memory corruption.
+     `panic-full-2026-09-11-182740.0002.ips`:
+     `userspace watchdog timeout: no successful checkins from SpringBoard
+     (2 induced crashes) in 180 seconds` / `Panicked task ... pid 59: watchdogd`.
+     Reading: the app's CPU/socket pressure crashed SpringBoard twice, SpringBoard
+     stopped checking in, watchdogd panicked the kernel. That is why the side
+     button did nothing (it was a panic path, and the phone only came back on a
+     forced restart). So SG.8/SG.9's zone-bound panic and SG.10's watchdog panic
+     are two DIFFERENT failures: one corrupts memory, the other exhausts resources.
+  2. The 19:10 **staged** run ended cleanly on the new budget. App log:
+     `[race] stopping the read race (stop requested or 120s budget reached)` ->
+     `[scan] stop requested (or 120s budget) at offset 0x1cc4000 - aborting the walk`
+     -> `[-] scan stopped on request (cancel or 120s budget)` ->
+     `[boot] cancelled - the scan stopped where it was; nothing was left half-done`.
+     No panic, no hang, no resource kill; the walk aborted at the offset it had
+     reached instead of visiting the rest (the exact reviewer finding fixed in
+     0.11). It also never hit ENFILE this time (spray stopped at 26,624 sockets).
+  3. New resource axis: `W0lfTerm.diskwrites_resource-2026-09-11-191238.ips`
+     (bug_type 145) — `1073.75 MB of file backed memory dirtied over 1083 seconds
+     (991.58 KB per second average), exceeding limit of 12.43 KB per second over
+     86400 seconds`, action taken: none. i.e. one run used the entire 1 GB/day
+     write budget. Contributors: the exploit's own memory pressure (compressor /
+     swap of the large sprays and mappings) and the per-line log fsync added for
+     panic forensics.
+     Fix shipped: the fsync is rate limited to one per 200 ms (a panic loses at
+     most 200 ms of lines). Remaining lever: reduce memory pressure — release the
+     search mapping and drop the socket spray as soon as the scan ends, and keep
+     the 120 s budget as the hard stop.
+     Note for any future resource work: three resource axes are now known to kill
+     this app on device — CPU (90 s/180 s), wakeups (45k/300 s) and disk writes
+     (1 GB/day) — and `idevicecrashreport -e <dir>` returns all three reports.
+
 ## 0.11 — Terminal with full kernel R/W (research, 2026-09-10)
 
 > Question to answer: can the escaped Filza process run a real terminal

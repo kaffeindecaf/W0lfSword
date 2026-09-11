@@ -136,14 +136,24 @@ static void TweakLog(const char *format, ...) {
             char ts[32];
             strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &t);
             fprintf(df, "[%s] %s\n", ts, buf);
-            // Get the line to disk before returning: a kernel panic gives the
-            // page cache no chance to flush, which cost us the whole tail of
-            // the 2026-09-11 SE panic run (boot banner present, exploit lines
-            // gone). Only when a host app is mirroring the log, so the tweak's
-            // high-volume burst logging does not pay for it.
+            // Get the tail to disk before returning - a kernel panic gives the
+            // page cache no chance to flush, which cost us the whole tail of the
+            // 2026-09-11 SE panic run. But RATE LIMIT it: fsyncing every single
+            // line during a burst made the app dirty ~1.07 GB of file-backed
+            // memory in 18 minutes on the SE (iOS diskwrites resource report,
+            // limit 1 GB/day). At most one fsync per 200 ms keeps the forensic
+            // value (a panic loses at most 200 ms of lines) without the I/O.
             if (tweak_log_hook_installed()) {
-                fflush(df);
-                fsync(fileno(df));
+                static struct timespec lastFsync;
+                struct timespec now_mono;
+                clock_gettime(CLOCK_MONOTONIC, &now_mono);
+                long long delta_ms = (long long)(now_mono.tv_sec - lastFsync.tv_sec) * 1000LL
+                                   + (long long)(now_mono.tv_nsec - lastFsync.tv_nsec) / 1000000LL;
+                if (lastFsync.tv_sec == 0 || delta_ms >= 200) {
+                    lastFsync = now_mono;
+                    fflush(df);
+                    fsync(fileno(df));
+                }
             }
             fclose(df);
         }
