@@ -278,6 +278,60 @@
   feature? Security boundary note required either way (a terminal with
   kernel R/W is the most powerful surface in the app).
 
+> First-pass findings (offline, 2026-09-11 — no device attached, so
+> everything below is desk research + code reading, nothing is
+> device-verified yet). Related older items, now cross-linked:
+> `G3.1` (NewTerm/system()+posix_spawn probe) and `G3.2` (dropbear
+> SSH server) — same question, asked before the escape existed.
+
+> **1. There is no usable shell environment on stock iOS to spawn.**
+> Apple's jailed root flist is thin: `/bin` ships essentially
+> `sh`/`df`/`ps` and the rest of coreutils (bash, ls, cat, grep, tar,
+> chmod…) is *jailbreak-provided* (Apple Wiki /bin); `/usr/bin` on a
+> jailed device is `powerlog`, `simulatecrash`, a few more. So even a
+> perfectly working `posix_spawn("/bin/sh")` yields a shell with almost
+> no commands. Consequence: **TRM.2 (bundled static shell) is the
+> primary route, not the fallback** — a static busybox-style
+> multi-call binary in the app bundle is what makes a terminal useful.
+
+> **2. The gate is the sandbox profile, not code signing.** Platform
+> binaries are Apple-signed, so AMFI is not the wall. `process-exec`
+> and device access (`/dev/ptmx` for the pty) are *profile rules*,
+> while our escape rewrites hash-slot **extension paths** + the class
+> to `com.apple.app-sandbox.read-write`. Extensions grant file access
+> — they do not grant exec or device access. Expect
+> `posix_spawn("/bin/sh")` and `posix_openpt()` to fail post-escape
+> with EPERM/EACCES until the sandbox itself is relaxed. (This is why
+> the jailbreak world needs `exechook.c` + `__SANDBOX_EXTENSIONS` on
+> the spawned child *on top of* an already-patched system sandbox —
+> see roothide/Bootstrap-basebin; NewTerm just borrows a relaxed
+> sandbox.) We are the ones who have to relax it.
+
+> **3. Three real routes, in order of cost.** (A) **In-process shell**
+> (`TRM.3`): commands implemented in the dylib over POSIX + kread/
+> kwrite. No exec, no pty, no sandbox dependency — works the moment
+> the escape is live, but cannot run Apple's binaries. (B) **Sandbox
+> credential relaxation**: with krw, clear/neutralise the process
+> sandbox label (or copy a permissive label from an already-escaped
+> daemon) so exec + `posix_openpt` pass; this is the jailbreak-
+> equivalent unsandboxed state, highest power, and irreversible for
+> that process — the whole app becomes unsandboxed, not just the
+> terminal. (C) **Remote spawn through a privileged proxy**: use the
+> existing `kexploit/RemoteCall.m` (TaskRop) machinery to make a
+> daemon that legitimately owns exec rights spawn the shell, and pass
+> `__SANDBOX_EXTENSIONS` so the child inherits file access. Most
+> moving parts; also the only route that gives a *detached* shell
+> (relevant to `G3.2`).
+
+> **4. What on-device verification must answer** (attach the 26.0.1
+> daily driver first): exact jailed exec surface
+> (`ls -l /bin /usr/bin /usr/libexec`), the errno from
+> `posix_spawn("/bin/sh")` after a completed escape, and whether
+> `posix_openpt`/`grantpt`/`unlockpt` succeed — those three datapoints
+> decide A vs B vs C. Until then `TRM.1` stays open and the honest
+> recommendation is to build A (cheap, no unknowns) and probe B/C
+> behind `w0lf_test_mode`.
+
 ---
 
 ## LEGEND
@@ -1061,7 +1115,8 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 ## G3 — Terminal / Shell
 
 - [ ] `G3.1` 🟡 — Test with NewTerm / MobileTerminal  
-  _Prompt:_ "If kernel R/W is achieved from a terminal emulator, can we call system() or posix_spawn() with full filesystem access? The sandbox escape should make /bin/sh accessible. Test: run 'ls /System/Library' after exploit."
+  _Prompt:_ "If kernel R/W is achieved from a terminal emulator, can we call system() or posix_spawn() with full filesystem access? The sandbox escape should make /bin/sh accessible. Test: run 'ls /System/Library' after exploit."  
+  _See §0.11 (TRM.1-TRM.6) — desk research says the escape alone does NOT unlock exec (extensions grant file access, not process-exec), and jailed iOS has almost no coreutils to spawn. The three candidate routes are laid out there._
 
 - [ ] `G3.2` 🟡 — Embedded SSH server in the tweak  
   _Prompt:_ "Bundle dropbear SSH server. After sandbox escape, spawn it on port 2222. Connect from any machine. This gives remote root shell via Filza acting as a trojan."
