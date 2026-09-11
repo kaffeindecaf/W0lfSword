@@ -157,6 +157,25 @@
 - [x] `MG.4` — docs: research/attack_chains.md Chain F status, README
   commands row, DEBUG_TRACKING [MG] layer, referenceforAI/RESEARCH.md
   (6 new repos + verdict).
+- [x] `MG.5` — FilzaJailedDS comparison (2026-09-10, "why does MG work
+  there and not in our app"): the repo has ZERO MobileGestalt code
+  (`grep -rn MobileGestalt` → no hits, no MG strings in its tweak).
+  Its MG capability is purely emergent — the same sandbox escape we use
+  (ext paths → "/", class com.apple.app-sandbox.read-write, 16 hash
+  slots filled) plus a launchd-ucred uid=0 elevate, which together let
+  Filza's own file browser and plist editor open and edit
+  systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist
+  directly. So there is nothing MG-specific to port. Our app ships the
+  same escape (hardened: pointer-range validation) but its MG support
+  is a host-driven command channel (Documents/mg-cmd-*.json), not an
+  in-app plist UI — expecting to "find" the plist in the app is a
+  category error. Practical routes: `./W0lfSword mobilegestalt status |
+  dump` over USB/AFC while the app is open (works whether or not the
+  escape is live), or browse the path above in Filza once the escape
+  stage has completed. If status reports "gestalt cache NOT FOUND"
+  (DEBUG_TRACKING line 147) the module never located the container —
+  check the escape stage and the container name (26.x cache vs 18.x).
+  Base versions match (both Filza 4.0), so the IPA base is not a factor.
 
 ## 0.9 — SpringBoard live tweaks round (2026-09-02, TaskRop RemoteCall driver)
 
@@ -218,6 +237,46 @@
   shipped dylib), audit PASSED. On-device verification still required: one
   launch on the 26.0.1 daily driver should log stage 1/2 pass → stage 2/2
   pass → escape.
+
+## 0.11 — Terminal with full kernel R/W (research, 2026-09-10)
+
+> Question to answer: can the escaped Filza process run a real terminal
+> (shell + pty) with the kernel R/W already proven on the 26.0.1 daily
+> driver? The pieces that exist: kernel r/w (kexploit), sandbox escape
+> (ext paths → "/", class rewritten), root creds (set_root_credentials
+> uid=0 gid=0), and SSV writes (overwrite_system_file). Missing is the
+> process/exec side — whether iOS lets this process spawn a shell, and
+> which shell route survives code signing + the container layout.
+
+- [ ] `TRM.1` ⚪ — Research exec surface: does `posix_spawn("/bin/sh")`
+  work from the escaped app process on 26.0.1? Determine which
+  executables are actually present and exec-capable on iOS 26
+  (`/bin/sh`, `/usr/bin/*`), whether AMFI/code-signing blocks spawning
+  a platform binary from a sideloaded app, and what entitlements (if
+  any) the caller needs. Document the exact failure mode when it fails.
+- [ ] `TRM.2` ⚪ — Fallback: bundled static shell. Build a static
+  arm64 shell (bash/zsh/dash or busybox-style multi-call) and exec it
+  from inside the app bundle (the app's own signature covers it).
+  Test whether dyld/kernel accepts exec of a bundled binary under the
+  sideload signature; if not, note the signing requirement precisely.
+- [ ] `TRM.3` ⚪ — Fallback: in-process shell (no exec at all). Link a
+  minimal C shell into the tweak dylib and implement builtins directly
+  (ls/cat/cd/echo/rm/mv + kread/kwrite/dd helpers exposed as commands).
+  This route has no code-signing or exec dependency and still gets full
+  kernel R/W; decide if it is enough for the intended debugging use.
+- [ ] `TRM.4` ⚪ — PTY + UI: posix_openpt/grantpt/unlockpt + a
+  terminal view (UITextView-backed, or a WKWebView running xterm.js)
+  wired to the pty master over a background queue; keyboard/ANSI
+  handling; how the pty behaves inside the app sandbox after escape.
+- [ ] `TRM.5` ⚪ — Privilege model: confirm the shell inherits uid=0 +
+  the patched sandbox extensions after fork/exec (they should, since
+  creds/extension sets are process attributes), and decide whether the
+  terminal gets SSV write helpers (overwrite_system_file) or
+  read/write only outside the sealed volume by default.
+- [ ] `TRM.6` ⚪ — Decide scope: is this a debug console for the
+  developer (HUD-adjacent, gated behind w0lf_test_mode) or a user
+  feature? Security boundary note required either way (a terminal with
+  kernel R/W is the most powerful surface in the app).
 
 ---
 
