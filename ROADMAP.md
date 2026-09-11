@@ -422,6 +422,67 @@
   icmp6 filter pointer the kernel dereferences on the next packet; (3) clamp the
   writer so a 32-byte block that is not provably inside the target object is
   refused. Until this lands: readonly is the only mode for any device.
+  Step 2 of the fix shipped (engine `kexploit/kexploit_opa334.m`): the staged
+  write probe no longer targets `inp_depend6.inp6_icmp6filt`. It probes
+  `inp_depend6.inp6_chksum` (`filt+8`, `off_inpcb_inp_depend6_inp6_chksum`) in two
+  places: first as a plain page write verified by the OOB read-back, before any
+  pointer is written into a live inpcb, then as an end-to-end round trip through
+  the krw primitive (`early_kwrite64` / `early_kread64` on the chksum qword the
+  alias addresses). `so_usecount` was rejected as the probe field: this tree
+  already treats it as a refcount (`offsets.m` names it, and the chain's own
+  `krw_sockets_leak_forever` bumps it by `0x0000100100001001`), and a refcount is
+  not a free-to-write scalar - its value decides whether the socket goes away.
+  `inp6_chksum` is data by this tree's own evidence: the stage-1/2 fingerprint
+  (device-confirmed, SG.9) requires the live qword at `filt+8` to be
+  `0x0000ffffffffffff` (in6p_cksum -1 + in6p_hops 0xffff), which is not a kernel
+  VA at all (`VM_MIN_KERNEL_ADDRESS` = 0xFFFFFFDC00000000), there is no
+  `send()`/`recv()` anywhere in `kexploit/`, `terminal/` or `utils/` to consume
+  the number, and the full chain already writes that field. The promotion verdict
+  is now that round trip plus a value check -
+  the alias must read back the stock chksum/hops qword `0x0000ffffffffffff` - and
+  not `getsockopt(controlSocket, ICMP6_FILTER) != -1`: that 32-byte read went
+  through the freshly written pointer, which is what made a wrong value fatal
+  instead of detectable, and "!= -1" accepted a stale pointer too.
+  `GETSOCKOPT_READ_LEN` / `getsockoptReadData` are gone with it. The step-1
+  save/restore funnel is unchanged and now covers the new exits (probe never
+  landed, alias write unconfirmed, krw fds not live, chksum expectation mismatch,
+  round-trip failure); the probe also restores its own marker through the
+  primitive and reads it back. The icmp6filt write itself stays: it IS the krw
+  primitive (see the comment above `find_and_corrupt_socket_probe`), so the probe
+  is what had to move off a pointer field. NOT device-verified; step 3 (clamp the
+  writer) is still open and the fixed 32-byte block width is the residual risk
+  this step does not remove.
+
+  Step 3 of the fix shipped (same day, engine `kexploit/krw_zone_write.c` +
+  `kexploit/krw_zone_write.h`, called by `kwrite_zone_element`): the 32-byte block
+  writer now decides before it writes anything. With an object declared the whole
+  requested range must fit it (`dst + len <= base + size`) - that is the check
+  that catches THIS panic, whose block was `0x50..0x70` of a `0x60` object; a
+  shifted tail block with NO object declared is refused instead of written; and a
+  refusal emits no block at all, so it can never leave a half-applied write in a
+  live kernel object. The declaration: `kwrite_zone_element_declared(dst, src,
+  len, base, size)` (by value - nothing global is left behind for a later,
+  unrelated write) or `kwrite_zone_element_set_object` / `_clear_object` for
+  callers that prefer the process-wide window. The one caller that needs the
+  shift path is `VM.m`'s `struct vm_map_entry` write (`sizeof` = 0x50, pinned by
+  a `_Static_assert` on the tree's own struct - the iOS SDK ships no
+  `struct vm_map_entry`, the size comes from the engine toolchain's record
+  layout, `[sizeof=80, align=8]`, and `0x50 % 0x20 = 0x10`); it
+  now declares its object, so the RemoteCall shmem mapping still patches its
+  entry instead of being refused. Verification that actually ran:
+  `bash scripts/run_krw_zone_write_host_test.sh` compiles this writer - the same
+  file the engine builds - against a fake kernel window and records every block
+  emitted: 41 checks, 0 failures, including the SE write replayed (32 bytes at
+  +0x50 of a 0x60 object) and refused with zero blocks emitted, a stale
+  declaration that cannot authorise a foreign write, a 4753-combination sweep
+  where not one block left the object, and the refusal log line. `make libengine`
+  and the W0lfTerm ipa build both pass. NOT device-verified. Remaining risks this
+  step does not remove: an exact multiple of 0x20 with no object declared is
+  still emitted unproven (refusing those would stop every existing caller, so the
+  guard sits where the task put it), and the sibling writers `kwritebuf` /
+  `early_kwrite64` (8-byte calls that still emit a whole 32-byte block at the
+  address they are given) are outside this guard entirely - if the next device
+  panic names a kalloc object again, that is the first place to look.
 
 - [ ] `BUG.2` — **memory pressure drives two of the three resource kills.**
   Fixed in `0.13`: pe_v2's cancel path returned before its cleanup and leaked the
@@ -456,11 +517,29 @@
   600 s should be measured against all three resource axes before it is called
   done.
 
-- [ ] `BUG.4` — **no visible CANCEL in the app.** `cancel` / `abort` / `stop` work
+- [x] `BUG.4` — **no visible CANCEL in the app.** `cancel` / `abort` / `stop` work
   from the terminal, and the engine honours the flag at all three loop levels
   now, but there is no button. Add one that appears while a run is in flight
   (the run-state dot in the input bar is the natural place to hang it) so a
   spinning run can be stopped without typing into a busy UI.
+  Fixed (W0lfTerm 0.14, app side - this repo has no UI, so nothing changed here):
+  the run-state dot in the input bar is a 36 pt `UIControl`
+  (`TerminalViewController.m`, `dotTapped:`), added next to the 8 pt core so the
+  colour/pulse behaviour is untouched (grey idle, pulsing accent running, green
+  escaped, red failed, pulse gated on Reduce Motion). It calls
+  `term_bridge_cancel()` (`term_bridge.m`), which checks the app's own
+  `g_exploitRunning` and then either sets the engine stop flag
+  (`kexploit_request_stop()`, an atomic store -> safe from any thread, no
+  main-queue dependency) plus the log line `[w0lf] cancel requested - the scan
+  will stop at its next check`, or logs `[w0lf] nothing is running` and does
+  nothing. Click sound (`TermClick`) + a LIGHT `UIImpactFeedbackGenerator`
+  (`termHapticLight`, the key bar keeps medium). The engine checks
+  `kexploit_stop_requested()` at the top of the spray, `pe_v1`, `pe_v2` and the
+  read race, so "next check" is literal. The `cancel` command goes through the
+  same bridge function, so the button and the terminal cannot disagree. Host
+  evidence: `make libengine` -> `OK: .theos/libengine/libw0lfengine.a`, W0lfTerm
+  `bash scripts/build_ipa.sh sideload 0.17` -> `OK: dist/...ipa`; the app builds
+  with `-Werror`. NOT device-verified.
 
 - [x] `BUG.5` — **"readonly = zero writes" is too strong a claim.** It is zero
   KERNEL writes (`wolf_test_mode == 1` returns before the corruption), but the
@@ -480,7 +559,7 @@
   The one verbatim device-log tail under `SG.9` keeps the old string (it is
   pasted output) and now carries a footnote pointing at this item.
 
-- [ ] `BUG.6` — **a stale host pairing blocks every log pull.** After the
+- [x] `BUG.6` — **a stale host pairing blocks every log pull.** After the
   watchdog panic the host got `Invalid HostID (-21)` on lockdown (the host record
   dated Sep 2 no longer matched), which silently kills `idevicesyslog`,
   `idevicecrashreport` and the afc log pull. Recovery: unlock the phone and tap
@@ -488,6 +567,17 @@
   (`sudo rm /var/lib/lockdown/<UDID>.plist`) and replug to re-prompt. Worth a
   line in `references/dead-device-usb-triage.md` and in the app README, since
   the first thing anyone does after a crash is try to pull logs.
+  Documented, both places: the W0lfTerm README section "Pulling logs over USB"
+  (commit 1318f7c) and a matching section "First move after any crash: restore
+  the pairing, then pull" in `references/dead-device-usb-triage.md`. Both carry
+  the two errors as one table (`Mux error (-8)` = wedged mux / locked device,
+  `Invalid HostID (-21)` = lost pairing, the two are not the same problem), the
+  recovery order (unlock the phone -> tap Trust on the "Trust This Computer?"
+  prompt -> `sudo rm /var/lib/lockdown/<UDID>.plist` + replug when no prompt
+  appears -> `sudo systemctl kill -s KILL usbmuxd` + `start` when the mux is
+  wedged) and the two pull commands (`afcclient --container <bundle-id> get
+  Documents/FilzaTweak.log`, `idevicecrashreport -e <dir>`). Documentation only -
+  no device run, no engine change.
 
 ## 0.11 — Terminal with full kernel R/W (research, 2026-09-10)
 
