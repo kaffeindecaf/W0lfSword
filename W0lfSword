@@ -1044,46 +1044,75 @@ exploit_method_valid() {
 # Letters follow the K5 chain matrix (ROADMAP K5): A DarkSword, B userspace/
 # ImageIO, D bootchain, E PUAF. Order per K5.9: DarkSword offsets → A; else
 # 16.x → E; else A11- → D; else userspace bug → B; else nothing.
+#
+# AUD.6: this is ordering ONLY. Every iOS range, SoC pattern, name, status and
+# note printed here comes from exploit_matrix(), so the selector and the compat
+# table can no longer drift apart (the "17.0–26.0.1" literals used to live in
+# both, and a range edit in one of them silently changed only that surface).
+# A version literal now belongs in the matrix, nowhere else.
 # Prints: "<id>|<name>|<status>|<why>"
 select_best_chain() {
-    local ver="$1" model="$2"
+    local ver="$1" model="${2:-}"
     [ -n "$ver" ] || { echo "|unknown||no iOS version"; return; }
-    local major minor
-    major="${ver%%.*}"; minor="${ver#*.}"; minor="${minor%%.*}"
-    [ -n "$major" ] || { echo "|unknown||unparseable version $ver"; return; }
-    local method; method=$(select_exploit "$model")
-
-    # K5 A  -  DarkSword kernel R/W (→ C5.3 chain B): A12+ on 17.0–26.0.1
-    if { [ "$method" = pe_v1 ] || [ "$method" = pe_v2 ]; } \
-       && [ "$major" -ge 17 ] \
-       && { [ "$major" -lt 26 ] || { [ "$major" -eq 26 ] && [ "$minor" -le 0 ]; }; }; then
-        echo "A|DarkSword kernel R/W|implemented|17.0–26.0.1, $method (stages: chains b)"
-        return
-    fi
-    # K5 E  -  kfd PUAF fallback: 16.x
-    if [ "$major" -eq 16 ]; then
-        echo "E|kfd PUAF fallback|port pending|16.x  -  K5.3"
-        return
-    fi
-    # K5 D  -  bootchain: A9–A11 checkm8, A12/A13 usbliter8 tethered
-    case "$model" in
-        iPhone8,*|iPhone9,*|iPhone10,*)   # A9–A11
-            echo "D|checkm8 bootchain|usbliter8-fun2|A9–A11, 15.6–27.0b"
-            return
-            ;;
-        iPhone1[1-2],*)    # A12/A13  -  usbliter8 when the kernel gate is closed
-            if [ "$major" -ge 26 ]; then
-                echo "D|usbliter8 tethered|implemented|A12/A13, any iOS (needs RP2350 board)"
-                return
-            fi
-            ;;
+    case "$ver" in
+        [0-9]*) ;;
+        *) echo "|unknown||unparseable iOS version '$ver'"; return;;
     esac
-    # K5 B  -  userspace escape (→ C5.3 chain A): bad_query/MCM on 26.1+
-    if [ "$major" -ge 26 ]; then
-        echo "B|userspace escape (bad_query/MCM)|implemented|26.1+ no-kernel route (stages: chains a)"
+    local method; method=$(select_exploit "$model")
+    local out
+
+    # K5 A  -  DarkSword kernel R/W (→ C5.3 chain B): one matrix row per engine
+    if [ "$method" = pe_v1 ] && out=$(chain_candidate A darksword "$ver" "$model" "$method"); then
+        echo "$out"; return
+    fi
+    if [ "$method" = pe_v2 ] && out=$(chain_candidate A darksword-v2 "$ver" "$model" "$method"); then
+        echo "$out"; return
+    fi
+    # K5 E  -  kfd PUAF fallback: 16.x (row kfd, port still pending)
+    if out=$(chain_candidate E kfd "$ver" "$model"); then echo "$out"; return; fi
+    # K5 D  -  bootchain: checkm8 (A9–A11) outranks usbliter8 (A12/A13)
+    if out=$(chain_candidate D checkm8 "$ver" "$model"); then echo "$out"; return; fi
+    if out=$(chain_candidate D usbliter8 "$ver" "$model"); then echo "$out"; return; fi
+    # K5 B  -  userspace escape (→ C5.3 chain A): bad_query/MCM, the 26.x route
+    if out=$(chain_candidate B bad_query "$ver" "$model"); then echo "$out"; return; fi
+
+    # Nothing applies. Explain why, most specific reason first: a blocked row
+    # that matches this device anyway (closed kernel gate, MTE), then the
+    # nearest non-blocked row for this SoC (same major preferred) whose range
+    # does not cover this version, then "no row at all for this pair".
+    local lo hi soc id name status note
+    local vmajor="${ver%%.*}"
+    local blocked_note="" near="" near_range="" same_name="" same_range=""
+    while IFS='|' read -r lo hi soc id name status note; do
+        [ -n "$id" ] || continue
+        if [ "$soc" != "*" ] && ! soc_match "$model" "$soc"; then continue; fi
+        if [ "$status" = blocked ]; then
+            if [ -z "$blocked_note" ] && ios_in_range "$ver" "$lo" "$hi"; then
+                blocked_note="${note:-kernel R/W blocked on this device}"
+            fi
+            continue
+        fi
+        # non-blocked rows are only interesting as a range hint when the range
+        # does NOT cover this version (otherwise the row applied above)
+        if [ "$soc" = "*" ] || ios_in_range "$ver" "$lo" "$hi"; then continue; fi
+        if [ -z "$near" ]; then near="$name"; near_range="$lo–$hi"; fi
+        if [ -z "$same_name" ] && [ "${lo%%.*}" = "$vmajor" ]; then
+            same_name="$name"; same_range="$lo–$hi"
+        fi
+    done < <(exploit_matrix)
+    if [ -n "$blocked_note" ]; then
+        echo "|no chain||$blocked_note"
         return
     fi
-    echo "|no chain||DarkSword needs A12+ ≤26.0.1; kfd port (K5.3) would cover 16.x + A10/A11"
+    if [ -n "$same_name" ]; then
+        echo "|no chain||$same_name covers $same_range only  -  not iOS $ver"
+        return
+    fi
+    if [ -n "$near" ]; then
+        echo "|no chain||$near covers $near_range only  -  not iOS $ver"
+        return
+    fi
+    echo "|no chain||no exploit matrix row covers $model on iOS $ver"
 }
 
 # ── Exploit compatibility matrix (A6.x / K5.9) ─────────────────
@@ -1092,6 +1121,11 @@ select_best_chain() {
 #   min/max: iOS range the row applies to
 #   soc:     model pattern (A12+, A18, A19, A9-A11, A10+, A12-A13, M5, *)
 #   status:  implemented | pending | research | blocked
+# Single source of truth for BOTH consumers (AUD.6): exploit_compat_check()
+# renders these rows as the compat table, and select_best_chain() picks its
+# chain by looking rows up (matrix_row + chain_candidate) instead of keeping
+# its own copy of the ranges. Edit a range here, never in the selector;
+# scripts/cli_consistency.py fails the audit on a dangling row reference.
 exploit_matrix() {
     cat <<'EOF'
 17.0|26.0.1|A12+|darksword|DarkSword kernel R/W (pe_v1)|implemented|
@@ -1107,9 +1141,67 @@ exploit_matrix() {
 EOF
 }
 
+# AUD.6  -  look up one matrix row by id. Prints the full row so callers can
+# slice the fields they need (they read it with `IFS='|' read -r`); returns 1
+# and prints nothing when the id is not in the matrix.
+matrix_row() {
+    local want="$1" lo hi soc id name status note
+    while IFS='|' read -r lo hi soc id name status note; do
+        if [ "$id" = "$want" ]; then
+            printf '%s|%s|%s|%s|%s|%s|%s\n' "$lo" "$hi" "$soc" "$id" "$name" "$status" "$note"
+            return 0
+        fi
+    done < <(exploit_matrix)
+    return 1
+}
+
 # version comparisons on top of version_sort_first (returns the smaller)
 ver_ge() { [ "$(version_sort_first "$1" "$2")" = "$2" ]; }  # $1 >= $2
 ver_le() { [ "$(version_sort_first "$1" "$2")" = "$1" ]; }  # $1 <= $2
+
+# AUD.6  -  is an iOS version inside a matrix row's range? "*" = open on that
+# side. String-compare based (version_sort_first), so a junk version can never
+# make bash print "integer expression expected" mid-selector (it used to).
+ios_in_range() {
+    local ios="$1" lo="$2" hi="$3"
+    if [ "$lo" != "*" ] && ! ver_ge "$ios" "$lo"; then return 1; fi
+    if [ "$hi" != "*" ] && ! ver_le "$ios" "$hi"; then return 1; fi
+    return 0
+}
+
+# AUD.6  -  one chain candidate, driven entirely by a matrix row: the iOS
+# range, the SoC pattern and the printed name/status/note all come from
+# exploit_matrix(), so the selector keeps no copy of them.
+#   $1 chain letter (A/B/D/E)  -  only selects the why-text shape
+#   $2 matrix row id           -  the row that decides applicability
+#   $3 iOS version, $4 device model
+#   $5 required exploit method (optional: when given it replaces the SoC
+#      match  -  that is how the pe_v1/pe_v2 split picks its DarkSword row,
+#      and how A19/M5 (mte) is kept off the kernel path)
+# Prints "<letter>|<name>|<status>|<why>"; prints nothing when it doesn't apply.
+chain_candidate() {
+    local letter="$1" want="$2" ios="$3" model="$4" req="${5:-}"
+    local row lo hi soc id name status note
+    row=$(matrix_row "$want") || return 1
+    IFS='|' read -r lo hi soc id name status note <<<"$row"
+    ios_in_range "$ios" "$lo" "$hi" || return 1
+    if [ -n "$req" ]; then
+        [ "$(select_exploit "$model")" = "$req" ] || return 1
+    else
+        soc_match "$model" "$soc" || return 1
+    fi
+    local rng="$lo–$hi"
+    if [ "$lo" = "*" ] && [ "$hi" = "*" ]; then rng="any iOS"; fi
+    local why
+    case "$letter" in
+        A) why="$rng, $req (stages: chains b)";;
+        E) why="$rng  -  ${note:-port not done (K5.3)}";;
+        D) why="$soc, $rng${note:+ ($note)}";;
+        B) why="$rng no-kernel route (stages: chains a)";;
+        *) why="$rng ${note:-$status}";;
+    esac
+    printf '%s|%s|%s|%s\n' "$letter" "$name" "$status" "$why"
+}
 
 soc_match() {
     local model="$1" pat="$2"
@@ -2628,12 +2720,21 @@ EOF
             local best; best=$(select_best_chain "$IOS_VER" "$DEV_MODEL")
             local bid bname bstatus bwhy
             IFS='|' read -r bid bname bstatus bwhy <<<"$best"
+            # status color follows the matrix row's status (AUD.6: the selector
+            # prints research/pending/blocked statuses now, not always a green
+            # "implemented"  -  the old code tinted every verdict green and
+            # stuffed the row's note into the status field)
+            local bcol="$C_GRN"
+            case "$bstatus" in
+                pending|research) bcol="$C_AMB";;
+                blocked|failed)   bcol="$C_RED";;
+            esac
             if [ -z "$bid" ]; then
                 echo -e "  ${C_RED}no chain available for this device${NC}"
                 [ -n "$bwhy" ] && echo -e "  ${C_DIM}${bwhy}${NC}"
             else
                 echo -e "  device: ${C_EYE}${DEV_MODEL:-<none>}${NC} · iOS ${C_EYE}${IOS_VER:-<none>}${NC}"
-                echo -e "  best chain (K5 matrix): ${C_FROST}${bid}  -  ${bname}${NC} [${C_GRN}${bstatus}${NC}]"
+                echo -e "  best chain (K5 matrix): ${C_FROST}${bid}  -  ${bname}${NC} [${bcol}${bstatus}${NC}]"
                 echo -e "  ${C_DIM}${bwhy}${NC}"
             fi
             ;;

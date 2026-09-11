@@ -6,6 +6,13 @@ W0lfSword script, and consumed by several places: main()'s dispatch case, the
 interactive menu (rows + shortcuts line), `commands` and explain's fallback
 list. This check verifies the registry and those consumers still agree.
 
+AUD.6 added a second pair of surfaces to the same check: the K5.9 chain
+selector (select_best_chain) no longer keeps its own copy of the exploit
+ranges  -  it looks rows up in exploit_matrix(), which is also what the compat
+table renders. So the matrix rows must be well formed (a row with a missing
+field silently shifts every value the shell reads from it) and every row id
+the selector references must exist.
+
 Usage:
     python3 scripts/cli_consistency.py [path/to/W0lfSword]
 
@@ -28,6 +35,14 @@ GROUPS = {"exploit", "device", "diagnostics", "research", "safety",
 TAGS = {"-", "", "root", "crash", "live", "beta"}
 FUNC_DEF = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{", re.M)
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+# AUD.6: exploit_matrix() rows (min|max|soc|id|name|status|note, note may be
+# empty) and the two ways select_best_chain() references them.
+MATRIX_FUNC = re.compile(r"^exploit_matrix\(\)\s*\{")
+MATRIX_FIELDS = 7
+MATRIX_STATUSES = {"implemented", "pending", "research", "blocked"}
+ROW_REF = re.compile(r"\bmatrix_row\s+([A-Za-z0-9_.-]+)")
+CAND_REF = re.compile(r"\bchain_candidate\s+[A-Za-z]\s+([A-Za-z0-9_.-]+)")
 
 
 def strip_heredocs(lines):
@@ -110,6 +125,43 @@ def case_block_for(lines, func, header="case \"$cmd\" in"):
     if start is None:
         return []
     return case_block(lines, header, start_at=start)
+
+
+def parse_matrix(lines):
+    """Rows of the exploit_matrix() heredoc as (lineno, fields, raw).
+
+    The shell reads each row with `IFS='|' read -r lo hi soc id name status
+    note`, so a row with a missing or extra field does not fail  -  it silently
+    shifts every value after the gap. Parse it here to catch that.
+    """
+    rows, errors, inside = [], [], False
+    start = None
+    for idx, raw in enumerate(lines):
+        if MATRIX_FUNC.match(raw):
+            start = idx
+            break
+    if start is None:
+        return rows, ["could not find exploit_matrix()"]
+    for idx in range(start, len(lines)):
+        raw = lines[idx].rstrip("\n")
+        if not inside:
+            if "<<" in raw and "EOF" in raw.split("<<", 1)[1]:
+                inside = True
+            continue
+        if raw.strip() == "EOF":
+            break
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        fields = raw.split("|")
+        if len(fields) != MATRIX_FIELDS:
+            errors.append(f"line {idx + 1}: exploit matrix row has "
+                          f"{len(fields)} fields, expected {MATRIX_FIELDS} "
+                          f"(min|max|soc|id|name|status|note): {raw.strip()}")
+            continue
+        rows.append((idx + 1, fields, raw))
+    if not rows and not errors:
+        errors.append("exploit_matrix() has no rows")
+    return rows, errors
 
 
 def main():
@@ -297,6 +349,47 @@ def main():
             findings.append(f"MAP lists § {extra[0]} ({extra[1]}) but there is "
                             f"no such section banner")
 
+    # ---- chain selector <-> exploit matrix (AUD.6) ----------------------
+    # select_best_chain() picks its chain by looking rows up in the matrix
+    # (matrix_row for a single row, chain_candidate for an applicability test),
+    # so the ranges live in exactly one place. What can still silently rot is a
+    # reference to a row id that no longer exists (the selector then answers
+    # "no chain" for every device) or a malformed row (the shell's `read` just
+    # shifts the fields). Both are checked here.
+    matrix_rows, matrix_errors = parse_matrix(lines)
+    findings.extend(matrix_errors)
+    matrix_ids = {}
+    for lineno, fields, _raw in matrix_rows:
+        lo, hi, soc, row_id, name, status, _note = fields
+        if not row_id:
+            findings.append(f"line {lineno}: exploit matrix row without an id")
+        elif row_id in matrix_ids:
+            findings.append(f"line {lineno}: duplicate exploit matrix id "
+                            f"'{row_id}' (also line {matrix_ids[row_id]})")
+        matrix_ids[row_id] = lineno
+        if status not in MATRIX_STATUSES:
+            findings.append(f"{row_id}: unknown matrix status '{status}' "
+                            f"(known: {', '.join(sorted(MATRIX_STATUSES))})")
+        if not lo or not hi or not soc:
+            findings.append(f"{row_id}: matrix row needs min|max|soc "
+                            f"(got '{lo}|{hi}|{soc}')")
+    refs = {}
+    for lineno, code, in_heredoc in strip_heredocs(lines):
+        if in_heredoc:
+            continue
+        code = code.split("#", 1)[0]
+        for pattern in (ROW_REF, CAND_REF):
+            for match in pattern.finditer(code):
+                refs.setdefault(match.group(1), lineno)
+    for row_id, lineno in sorted(refs.items()):
+        if row_id not in matrix_ids:
+            findings.append(f"line {lineno}: chain selector references matrix "
+                            f"row '{row_id}' which exploit_matrix() does not "
+                            f"define")
+    if not refs:
+        findings.append("select_best_chain() references no exploit_matrix() "
+                        "row (AUD.6: the selector must read the matrix)")
+
     # ---- report ---------------------------------------------------------
     print(f"  registry rows:        {len(rows)}")
     print(f"  keys (name+slot+...): {key_count}")
@@ -304,6 +397,7 @@ def main():
     print(f"  explain docs:         {len(explain_names)}")
     print(f"  handlers + functions: {len(functions)}")
     print(f"  sections (map):       {len(banners)}")
+    print(f"  exploit matrix rows:  {len(matrix_rows)} (selector refs: {len(refs)})")
     if script_version:
         print(f"  version (script):     {script_version}")
     for finding in findings:

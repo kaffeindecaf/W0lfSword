@@ -35,6 +35,9 @@ if python3 -m py_compile research/*.py scripts/*.py 2>/dev/null; then ok "py_com
 section "Offset table tests (D2.1)"
 if python3 scripts/test_offsets.py >/dev/null 2>&1; then ok "test_offsets.py"; else bad "test_offsets.py"; fi
 
+section "Chain selector golden grid (AUD.6)"
+if bash scripts/test_chain_select.sh >/dev/null 2>&1; then ok "test_chain_select.sh"; else bad "test_chain_select.sh"; fi
+
 section "Audit"
 if [ "$(./W0lfSword audit 2>&1 | grep -c 'AUDIT PASSED')" -gt 0 ]; then ok "audit"; else bad "audit"; fi
 
