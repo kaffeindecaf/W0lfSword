@@ -44,3 +44,18 @@ int tweak_log_ring_snapshot(char *out, size_t outsz) {
     pthread_mutex_unlock(&g_ring_mutex);
     return count;
 }
+
+// Live sink for a host app that IS the terminal (W0lfTerm): the app installs a
+// hook and every TweakLog line (engine progress, probe output, shell output)
+// is mirrored into its text view. Kept out of the header's static TweakLog so
+// the pointer lives in exactly one translation unit.
+static tweak_log_hook_fn g_log_hook = NULL;
+
+void tweak_log_set_hook(tweak_log_hook_fn fn) {
+    g_log_hook = fn;
+}
+
+void tweak_log_hook_emit(const char *line) {
+    tweak_log_hook_fn fn = g_log_hook;
+    if (fn && line) fn(line);
+}

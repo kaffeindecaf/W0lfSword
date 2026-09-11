@@ -34,6 +34,15 @@ void tweak_log_ring_append(const char *line);
 // NUL-terminated) into out; returns the number of lines copied.
 int tweak_log_ring_snapshot(char *out, size_t outsz);
 
+// Optional sink for a host app that IS the terminal (W0lfTerm): every
+// TweakLog line reaches the hook, which must not block (dispatch to the main
+// queue itself). Called before the mutex trylock, like the ring, so a
+// contended log line still reaches the UI. Pass NULL to detach.
+typedef void (*tweak_log_hook_fn)(const char *line);
+void tweak_log_set_hook(tweak_log_hook_fn fn);
+// Called by the per-TU TweakLog below; defined in tweak_log.m.
+void tweak_log_hook_emit(const char *line);
+
 // TweakLog writes every line to up to four sinks so the tweak is debuggable
 // on BOTH a jailbroken phone (read /tmp/FilzaTweak.log over SSH) and a clean
 // non-jailbroken sideload (no SSH, no /var access):
@@ -57,6 +66,8 @@ static void TweakLog(const char *format, ...) {
     // Always land in the ring (before the mutex trylock so a contended log
     // still reaches the on-screen HUD).
     tweak_log_ring_append(buf);
+    // And in the hook sink, if a host app (W0lfTerm) is displaying the log.
+    tweak_log_hook_emit(buf);
 
     fprintf(stderr, "[tweak] %s\n", buf);
     fflush(stderr);
