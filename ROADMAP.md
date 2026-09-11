@@ -402,6 +402,66 @@
      this app on device — CPU (90 s/180 s), wakeups (45k/300 s) and disk writes
      (1 GB/day) — and `idevicecrashreport -e <dir>` returns all three reports.
 
+## 0.12 — Open bug list (from the 2026-09-11 device day)
+
+> Everything found broken on device, in one place, with the evidence. Fix order
+> is the list order. Resource metrics and the failure modes are in `SG.10`.
+
+- [ ] `BUG.1` 🔴 — **the staged write probe panics the device.** A 32-byte write
+  from `early_kwrite32bytes` (via `kwrite_zone_element`'s backward-shifted RMW)
+  lands past the end of a kalloc.96 object → `zalloc.c:1322` zone bound check →
+  panic. Twice confirmed (SG.8, SG.9), both times with `Panicked task: W0lfTerm`.
+  Fix: (1) restore the saved values unconditionally on every path, not only after
+  a successful read-back; (2) probe a field with no concurrent reader
+  (`so_usecount` / `inp_depend6_chksum`) or a scratch object we own, never the
+  icmp6 filter pointer the kernel dereferences on the next packet; (3) clamp the
+  writer so a 32-byte block that is not provably inside the target object is
+  refused. Until this lands: readonly is the only mode for any device.
+
+- [ ] `BUG.2` — **memory pressure drives two of the three resource kills.**
+  Fixed in `0.13`: pe_v2's cancel path returned before its cleanup and leaked the
+  search mapping + memory object + socket spray; the pe_v2 release log read the
+  socket count after clearing the array (always 0); the app now releases the
+  spray between retry attempts instead of holding ~22k sockets through the 12 s
+  settle. REMAINING (needs a technique decision, not a patch): the scan writes
+  `randomMarker` into EVERY page of every search mapping (~30 MB mapped and
+  dirtied per pass), and the initial spray holds ~22.5k sockets; those two are
+  what the compressor swaps out, which is where the 1.07 GB/18 min disk-write
+  report comes from. Options: allocate/scan/free the mappings one at a time
+  instead of all up front, and/or limit the marker writes to the pages the walk
+  actually reads. Measure with `W0lfTerm.diskwrites_resource-*.ips` before/after.
+
+- [ ] `BUG.3` — **the 120 s budget is shorter than a full walk on this device.**
+  The 19:10 run aborted at offset `0x1cc4000` of the mapping after exactly 120 s,
+  i.e. roughly a quarter of the walk, so a full walk needs on the order of 8.5
+  minutes. Consequence: a budget-run will almost always report
+  "cancelled" instead of reaching the target. Decide: raise the budget (and
+  accept the resource axes), make it a persisted setting (e.g. 120 / 300 / 600 s),
+  or speed up the walk (fewer retries per offset, bigger stride) so a full pass
+  fits inside 120 s.
+
+- [ ] `BUG.4` — **no visible CANCEL in the app.** `cancel` / `abort` / `stop` work
+  from the terminal, and the engine honours the flag at all three loop levels
+  now, but there is no button. Add one that appears while a run is in flight
+  (the run-state dot in the input bar is the natural place to hang it) so a
+  spinning run can be stopped without typing into a busy UI.
+
+- [ ] `BUG.5` — **"readonly = zero writes" is too strong a claim.** It is zero
+  KERNEL writes (`wolf_test_mode == 1` returns before the corruption), but the
+  scan still dirties ~1 GB of file-backed memory and pegs a core; the wording in
+  the app's settings row, the boot banner and this roadmap should say "no kernel
+  writes" and keep the resource caveat next to it. Users read "zero writes" as
+  "safe to leave running".
+
+- [ ] `BUG.6` — **a stale host pairing blocks every log pull.** After the
+  watchdog panic the host got `Invalid HostID (-21)` on lockdown (the host record
+  dated Sep 2 no longer matched), which silently kills `idevicesyslog`,
+  `idevicecrashreport` and the afc log pull. Recovery: unlock the phone and tap
+  Trust on the "Trust This Computer?" prompt, or remove the host record
+  (`sudo rm /var/lib/lockdown/<UDID>.plist`) and replug to re-prompt. Worth a
+  line in `references/dead-device-usb-triage.md` and in the app README, since
+  the first thing anyone does after a crash is try to pull logs.
+
 ## 0.11 — Terminal with full kernel R/W (research, 2026-09-10)
 
 > Question to answer: can the escaped Filza process run a real terminal
