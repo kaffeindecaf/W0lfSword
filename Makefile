@@ -19,7 +19,9 @@ ADDITIONAL_CFLAGS += -DW0LF_FORCE_EXPLOIT_JB=1
 endif
 
 # Main-device safety ladder: make W0LF_TEST_MODE=1 builds the test IPA whose
-# DEFAULT mode is READONLY (offsets validation, zero kernel writes). The mode
+# DEFAULT mode is READONLY (offsets validation, no kernel writes - BUG.5: that is
+# kernel writes only, the scan still pegs a core and dirties file-backed memory).
+# The mode
 # can be switched at runtime via the app's Documents/w0lf_test_mode file
 # (1=readonly, 2=writetest, 3=full).
 ifeq ($(W0LF_TEST_MODE),1)

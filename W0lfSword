@@ -3120,7 +3120,8 @@ experimental_body() {
         testipa)
             section "Test IPA  -  main-device safety ladder"
             echo -e "  ${C_DIM}Builds FilzaArctic-Test.ipa (W0LF_TEST_MODE=1). On device the tweak${NC}"
-            echo -e "  ${C_DIM}defaults to READONLY validation (zero kernel writes). Switch modes via${NC}"
+            echo -e "  ${C_DIM}defaults to READONLY validation (no kernel writes - the scan still pegs a${NC}"
+            echo -e "  ${C_DIM}core and dirties ~1 GB of file-backed memory, BUG.5). Switch modes via${NC}"
             echo -e "  ${C_DIM}Documents/w0lf_test_mode: (absent)=staged auto 1=readonly 2=writetest 3=full immediate.${NC}"
             echo ""
             local tipa="$PROJECT_DIR/packages/FilzaArctic-Test.ipa"
@@ -6070,7 +6071,8 @@ EOF
     fi
     if $TEST_MODE; then
         echo -e "  ${C_AMB}--test: safety ladder compiled in. Default mode on device: READONLY${NC}"
-        echo -e "  ${C_DIM}  (zero kernel writes - validates offsets only). Switch modes on the${NC}"
+        echo -e "  ${C_DIM}  (no kernel writes - validates offsets only, but the scan still pegs a${NC}"
+        echo -e "  ${C_DIM}  core and dirties ~1 GB of file-backed memory, BUG.5). Switch modes on the${NC}"
         echo -e "  ${C_DIM}  device via Documents/w0lf_test_mode: (absent)=readonly 1=readonly 2=writetest 3=full${NC}"
     fi
     local dylib; dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")

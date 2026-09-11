@@ -223,7 +223,7 @@
   mode returns -6 (nothing touched, no retries) instead of the generic -1
   retry path.
 - [x] `SG.3` — stage 1 (deep readonly check): the existing mid-scan PCB
-  layout validation (filt/gencnt verified with zero kernel writes) becomes a
+  layout validation (filt/gencnt verified with no kernel writes) becomes a
   PASS log in staged mode and falls through to the single restorable socket
   corruption (mode 1 still stops there).
 - [x] `SG.4` — stage 2 (light write probe): post-corruption krw chain +
@@ -333,6 +333,11 @@
       18:05:00 [-] physical_oob_read retry #50 still failing (race not winning)
       (18:06:01 panic, 18:06:29 next boot, banner correctly reports "mode: staged")
 
+  (The `zero writes so far` in that pasted tail is the pre-BUG.5 engine wording,
+  kept verbatim here because it is device output. It meant no KERNEL writes - the
+  same run pegs a core and dirties ~1 GB of file-backed memory, which is what
+  BUG.5 is about. The engine logs `no kernel writes so far` from 0.13 on.)
+
   Panic: `panic-full-2026-09-11-180601.0002.ips`, identical signature to SG.8 -
   `zone bound checks: buffer 0xffffffe0d1f26550 of length 32 overflows object
   0xffffffe0d1f26500 of size 96 in zone [data.kalloc.96] @zalloc.c:1322`,
@@ -431,7 +436,7 @@
   instead of all up front, and/or limit the marker writes to the pages the walk
   actually reads. Measure with `W0lfTerm.diskwrites_resource-*.ips` before/after.
 
-- [ ] `BUG.3` — **the 120 s budget is shorter than a full walk on this device.**
+- [x] `BUG.3` — **the 120 s budget is shorter than a full walk on this device.**
   The 19:10 run aborted at offset `0x1cc4000` of the mapping after exactly 120 s,
   i.e. roughly a quarter of the walk, so a full walk needs on the order of 8.5
   minutes. Consequence: a budget-run will almost always report
@@ -439,6 +444,17 @@
   accept the resource axes), make it a persisted setting (e.g. 120 / 300 / 600 s),
   or speed up the walk (fewer retries per offset, bigger stride) so a full pass
   fits inside 120 s.
+  Fix shipped (0.13): `kexploit_set_scan_budget(int)` / `kexploit_scan_budget()`
+  (`kexploit/kexploit_opa334.m`), clamped to 30..1800 s, read by all three scan
+  loops (pe_v1, pe_v2, the read race) and by the `-7` message through one relaxed
+  atomic; the default is still `EXPLOIT_SCAN_BUDGET_SEC` = 120 s, so an untouched
+  run behaves exactly as before. W0lfTerm persists the choice (default 120 s;
+  `SET > Terminal > Scan budget` = 120s / 300s / 600s), pushes it into the engine
+  at load, and the boot banner prints the active budget. NOT yet verified on
+  device: the 600 s option is what a full A13 walk needs, and longer runs sit
+  deeper in the CPU/wakeup/disk-write budgets (0.10, BUG.2), so a device run with
+  600 s should be measured against all three resource axes before it is called
+  done.
 
 - [ ] `BUG.4` — **no visible CANCEL in the app.** `cancel` / `abort` / `stop` work
   from the terminal, and the engine honours the flag at all three loop levels
@@ -446,12 +462,23 @@
   (the run-state dot in the input bar is the natural place to hang it) so a
   spinning run can be stopped without typing into a busy UI.
 
-- [ ] `BUG.5` — **"readonly = zero writes" is too strong a claim.** It is zero
+- [x] `BUG.5` — **"readonly = zero writes" is too strong a claim.** It is zero
   KERNEL writes (`wolf_test_mode == 1` returns before the corruption), but the
   scan still dirties ~1 GB of file-backed memory and pegs a core; the wording in
   the app's settings row, the boot banner and this roadmap should say "no kernel
   writes" and keep the resource caveat next to it. Users read "zero writes" as
   "safe to leave running".
+  Fixed (0.13, W0lfTerm `BUG.2`). Every hit of the claim in both repos now says
+  "no kernel writes" and carries the resource caveat: the W0lfTerm mode row
+  subtitle (`exploitModeRowDesc:`, caveat on the same row, 4 measured lines), the
+  boot banner line, the SET red line (which still warns that staged / writetest /
+  full write kernel memory and can panic the phone - warning not weakened), the
+  app README, `term_settings.h/.m` comments; host side: `Makefile`, `README.md`
+  (safety-ladder table + FilzaArctic-Test.ipa notes), the CLI's `testipa` /
+  `--test` banners, the `TweakExploit.m` comment and its status-5 log string,
+  the engine's `[STAGED] stage 1/2` line and the `DEBUG_TRACKING.md` row for it.
+  The one verbatim device-log tail under `SG.9` keeps the old string (it is
+  pasted output) and now carries a footnote pointing at this item.
 
 - [ ] `BUG.6` — **a stale host pairing blocks every log pull.** After the
   watchdog panic the host got `Invalid HostID (-21)` on lockdown (the host record
