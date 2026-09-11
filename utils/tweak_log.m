@@ -59,3 +59,13 @@ void tweak_log_hook_emit(const char *line) {
     tweak_log_hook_fn fn = g_log_hook;
     if (fn && line) fn(line);
 }
+
+// True when a host app is mirroring the log (W0lfTerm). The file sink uses
+// this to fsync every line: on 2026-09-11 a kernel panic on the SE left the
+// on-disk log with the boot banner but NONE of the exploit lines, because the
+// appends were still in the page cache when the kernel died. fsync costs a
+// little per line, so it is only paid when a UI is watching the same lines
+// (the case where post-panic forensics matter).
+int tweak_log_hook_installed(void) {
+    return g_log_hook != NULL;
+}

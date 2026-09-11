@@ -42,6 +42,9 @@ typedef void (*tweak_log_hook_fn)(const char *line);
 void tweak_log_set_hook(tweak_log_hook_fn fn);
 // Called by the per-TU TweakLog below; defined in tweak_log.m.
 void tweak_log_hook_emit(const char *line);
+// True when a host app installed a hook, so the file sink can fsync each line
+// and survive a kernel panic (see the 2026-09-11 SE panic: the tail was lost).
+int tweak_log_hook_installed(void);
 
 // TweakLog writes every line to up to four sinks so the tweak is debuggable
 // on BOTH a jailbroken phone (read /tmp/FilzaTweak.log over SSH) and a clean
@@ -133,6 +136,15 @@ static void TweakLog(const char *format, ...) {
             char ts[32];
             strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &t);
             fprintf(df, "[%s] %s\n", ts, buf);
+            // Get the line to disk before returning: a kernel panic gives the
+            // page cache no chance to flush, which cost us the whole tail of
+            // the 2026-09-11 SE panic run (boot banner present, exploit lines
+            // gone). Only when a host app is mirroring the log, so the tweak's
+            // high-volume burst logging does not pay for it.
+            if (tweak_log_hook_installed()) {
+                fflush(df);
+                fsync(fileno(df));
+            }
             fclose(df);
         }
     }
