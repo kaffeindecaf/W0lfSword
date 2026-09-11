@@ -238,6 +238,33 @@
   launch on the 26.0.1 daily driver should log stage 1/2 pass → stage 2/2
   pass → escape.
 
+- [ ] `SG.7` 🔴 — **ON-DEVICE FINDING 2026-09-11: the staged path panicked the
+  26.0.1 daily driver.** W0lfTerm 0.2 (the standalone terminal .ipa, which
+  links the same engine and let the engine's default `wolf_test_mode = 0`
+  staged ladder run automatically at launch) was launched on the iPhone14,7 /
+  iOS 26.0.1 main device. The phone went dark and stopped enumerating on USB
+  (no 05ac:* device, lockdown dead, usbmuxd exited with it); a forced restart
+  (vol up, vol down, hold side) brought it straight back, so it was a panic +
+  reboot, not a brick. Nothing is written to disk by either build (kernel R/W
+  and the extension patch are in-memory), which is why a reset recovers it.
+  Open questions, in order:
+  1. Which stage died? Read the device's panic log (Settings → Privacy &
+     Security → Analytics & Improvements → Analytics Data, newest
+     `panic-full-*`), or pull it over USB with `idevicecrashreport -e <dir>`
+     once the phone enumerates. The panic string names the subsystem and says
+     whether the write probe (stage 2) or the escape/cred patch was at fault.
+  2. Did stage 1 (readonly) report pass first, and stage 2/2 fail, or did the
+     process never reach a verdict? The tweak/HUD log has the [STAGED] lines
+     for the same run only if Filza was the host — W0lfTerm's log is in its own
+     container (Documents/FilzaTweak.log, pullable with
+     `afcclient --documents com.kaffeindecaf.w0lfterm cat Documents/FilzaTweak.log`).
+  3. Does the same run panic on the SE bed (iPhone14,6/SE3, A15) where the race
+     is known to land? That separates "staged ladder is broken" from "26.0.1
+     offsets/primitive are unproven (K5.6)".
+  Until 1-3 are answered: **do not run the staged/writetest/full modes on the
+  daily driver.** W0lfTerm 0.4 defaults to no auto-run and readonly mode, and
+  prints an explicit warning before any mode that writes kernel memory.
+
 ## 0.11 — Terminal with full kernel R/W (research, 2026-09-10)
 
 > Question to answer: can the escaped Filza process run a real terminal
