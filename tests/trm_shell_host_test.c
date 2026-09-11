@@ -25,6 +25,7 @@
 #include "terminal/trm_common.h"
 #include "terminal/trm_shell.h"
 #include "terminal/trm_probe.h"
+#include "utils/tweak_log.h"   // tweak_log_hook_fn (stubbed below)
 
 // --- output capture -------------------------------------------------------
 static char g_last[256][1024];
@@ -74,6 +75,8 @@ static int run_fmt(const char *fmt, const char *arg, const char *label) {
 pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 void tweak_log_ring_append(const char *line) { (void)line; }
 int tweak_log_ring_snapshot(char *out, size_t outsz) { (void)out; (void)outsz; return 0; }
+void tweak_log_set_hook(tweak_log_hook_fn fn) { (void)fn; }
+void tweak_log_hook_emit(const char *line) { (void)line; }
 
 int wolf_test_mode = 3;
 bool exploit_is_done(void) { return true; }
@@ -294,7 +297,51 @@ int main(void) {
     run("help nosuchcmd", "help unknown");
     check(saw("no such command"), "help reports an unknown command");
 
-    printf("\n[6] selftest path (the device smoke test, stubbed deps)\n");
+    printf("\n[6] packages (in-process command packs)\n");
+    check(trm_shell_package_count() == 3, "three packages registered");
+    check(trm_shell_package_index("sysinfo") == 0 && trm_shell_package_index("net") == 1 &&
+          trm_shell_package_index("hex") == 2, "package index lookup");
+    check(trm_shell_package_index("nope") == -1, "unknown package -> -1");
+    check(trm_shell_package_name(0) && trm_shell_package_desc(0), "package name + description");
+    run("pkg", "pkg list");
+    check(saw("packages") && saw("sysinfo"), "pkg lists the packages");
+    run("fetch", "fetch before install (gated)");
+    check(saw("part of the 'sysinfo' package"), "package command refuses until installed");
+    check(trm_shell_package_enabled(0) == 0, "sysinfo starts disabled");
+    run("pkg install sysinfo", "pkg install");
+    check(saw("installed") && trm_shell_package_enabled(0) == 1, "install enables the package");
+    run("fetch", "fetch after install");
+    check(saw("w0lfterm") && saw("route A shell"), "fetch renders the system card");
+    run("loadavg", "loadavg");
+    check(!saw("command not found"), "loadavg available");
+    run("cpu", "cpu");
+    check(saw("model"), "cpu reports the model");
+    run("pkg install net", "pkg install net");
+    run("net", "net");
+    check(saw("iface") && saw("family"), "net lists interfaces");
+    run("pkg install hex", "pkg install hex");
+    char binfile[PATH_MAX];
+    snprintf(binfile, sizeof(binfile), "%s/bin.dat", tmpdir);
+    FILE *bf = fopen(binfile, "wb");
+    if (bf) {
+        const char *payload = "TRM-HOST-STRING\x01\x02\x03\xff\xfeTRM-SECOND";
+        fwrite(payload, 1, strlen(payload), bf);
+        fclose(bf);
+    }
+    run_fmt("strings %s", binfile, "strings on a binary");
+    check(saw("TRM-HOST-STRING") && saw("TRM-SECOND"), "strings finds both runs");
+    run_fmt("hexdump %s 0 32", binfile, "hexdump on a binary");
+    check(saw("offset 0, 32 bytes") || saw("offset 0, 30 bytes"), "hexdump reports offset + length");
+    run("pkg install nosuchpkg", "pkg install unknown");
+    check(saw("no package named"), "unknown package reported");
+    run("pkg remove sysinfo", "pkg remove");
+    check(trm_shell_package_enabled(0) == 0, "remove disables the package");
+    run("fetch", "fetch after remove");
+    check(saw("part of the 'sysinfo' package"), "gating is re-applied after remove");
+    run("pkg remove net", "cleanup: remove net");
+    run("pkg remove hex", "cleanup: remove hex");
+
+    printf("\n[7] selftest path (the device smoke test, stubbed deps)\n");
     trm_shell_selftest();
     check(1, "trm_shell_selftest() ran without crashing");
 

@@ -41,6 +41,23 @@ void trm_shell_selftest(void);
 // Number of registered commands (host test asserts the table is intact).
 int trm_shell_command_count(void);
 
+// --- packages -------------------------------------------------------------
+// Command packs that are not part of the core shell. The host app's Settings
+// screen (W0lfTerm) toggles them; the `pkg` command does the same from inside
+// the Filza HUD terminal, which has no settings UI. State is in-memory: the
+// app persists it (NSUserDefaults) and pushes it back at launch.
+//
+// Why packs at all: everything here runs IN-PROCESS (no exec, no pty - route A
+// of ROADMAP 0.11), so a "package" is a group of builtin commands, not a
+// downloaded binary. Real .deb/tarball installs need exec (route B/C).
+int trm_shell_package_count(void);
+const char *trm_shell_package_name(int i);
+const char *trm_shell_package_desc(int i);
+int trm_shell_package_enabled(int i);
+void trm_shell_set_package_enabled(int i, int on);
+// Returns the package index for a name, or -1.
+int trm_shell_package_index(const char *name);
+
 #ifdef __cplusplus
 }
 #endif

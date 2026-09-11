@@ -41,6 +41,12 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <ifaddrs.h>
+#include <netdb.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 #ifdef __APPLE__
 #include <sys/sysctl.h>
 #endif
@@ -176,8 +182,58 @@ struct trm_cmd {
     const char *usage;
     const char *help;
     int needs_unsafe;
+    int pkg;            // TRM_PKG_NONE for core commands
     int (*fn)(int argc, char **argv);
 };
+
+// --- packages: in-process command packs ----------------------------------
+// A "package" here is a group of builtin commands, not a downloaded binary:
+// this shell has no exec (route A, ROADMAP 0.11), so nothing from a tarball
+// could run anyway. The `pkg` command and the app's Settings screen toggle the
+// same table; state lives in memory and the app persists it.
+enum { TRM_PKG_NONE = -1, TRM_PKG_SYSINFO = 0, TRM_PKG_NET, TRM_PKG_HEX, TRM_PKG_COUNT };
+
+static const char *kPkgNames[TRM_PKG_COUNT] = { "sysinfo", "net", "hex" };
+static const char *kPkgDescs[TRM_PKG_COUNT] = {
+    "fetch, mem, cpu, loadavg - a fastfetch-style system card",
+    "net, myip, dns - interfaces, addresses, resolver",
+    "hexdump, strings - inspect any file byte by byte",
+};
+static int g_pkgEnabled[TRM_PKG_COUNT] = { 0, 0, 0 };
+
+int trm_shell_package_count(void) { return TRM_PKG_COUNT; }
+
+const char *trm_shell_package_name(int i) {
+    return (i >= 0 && i < TRM_PKG_COUNT) ? kPkgNames[i] : NULL;
+}
+
+const char *trm_shell_package_desc(int i) {
+    return (i >= 0 && i < TRM_PKG_COUNT) ? kPkgDescs[i] : NULL;
+}
+
+int trm_shell_package_enabled(int i) {
+    return (i >= 0 && i < TRM_PKG_COUNT) ? g_pkgEnabled[i] : 0;
+}
+
+void trm_shell_set_package_enabled(int i, int on) {
+    if (i >= 0 && i < TRM_PKG_COUNT) g_pkgEnabled[i] = on ? 1 : 0;
+}
+
+int trm_shell_package_index(const char *name) {
+    if (!name) return -1;
+    for (int i = 0; i < TRM_PKG_COUNT; i++) {
+        if (!strcmp(kPkgNames[i], name)) return i;
+    }
+    return -1;
+}
+
+static int g_pkgInstalledCount(void) {
+    int n = 0;
+    for (int i = 0; i < TRM_PKG_COUNT; i++) {
+        if (g_pkgEnabled[i]) n++;
+    }
+    return n;
+}
 
 static int cmd_help(int argc, char **argv);
 
@@ -817,48 +873,392 @@ static int cmd_unsafe(int argc, char **argv) {
     return 0;
 }
 
+// --- commands: package packs (sysinfo / net / hex) ------------------------
+// Everything here is in-process: sysctl/uname/statvfs/getifaddrs plus the
+// shell's own file readers. No exec, so no downloaded binary could be run
+// anyway (ROADMAP 0.11 route A).
+
+static int sh_sysctl_u64(const char *name, uint64_t *out) {
+#ifdef __APPLE__
+    uint64_t v = 0;
+    size_t len = sizeof(v);
+    if (sysctlbyname(name, &v, &len, NULL, 0) != 0) return -1;
+    *out = v;
+    return 0;
+#else
+    (void)name;
+    (void)out;
+    errno = ENOTSUP;
+    return -1;   // host test: Darwin-only sysctls are simply unavailable
+#endif
+}
+
+static int sh_sysctl_str(const char *name, char *out, size_t n) {
+#ifdef __APPLE__
+    size_t len = n;
+    if (sysctlbyname(name, out, &len, NULL, 0) != 0) return -1;
+    out[n - 1] = '\0';
+    return 0;
+#else
+    (void)name;
+    (void)out;
+    (void)n;
+    return -1;
+#endif
+}
+
+static void sh_uptime_str(char *out, size_t n) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        snprintf(out, n, "?");
+        return;
+    }
+    long long s = (long long)ts.tv_sec;
+    snprintf(out, n, "%lldd %02lld:%02lld:%02lld", s / 86400, (s % 86400) / 3600, (s % 3600) / 60, s % 60);
+}
+
+// fastfetch-style card: a 4-line ASCII mark next to live system facts.
+static int cmd_fetch(int argc, char **argv) {
+    (void)argc; (void)argv;
+    static const char *logo[4] = {
+        "  __      __  ___  _    ___ ",
+        "  \\ \\    / / / _ \\| |  | __|",
+        "   \\ \\/\\/ / | (_) | |__| _| ",
+        "    \\_/\\_/   \\___/|____|_|  ",
+    };
+    static const char *colors[3] = { "\033[38;5;117m", "\033[38;5;152m", "\033[38;5;110m" };
+    char machine[128] = "unknown", release[128] = "", iosver[32] = "", build[32] = "";
+    struct utsname un;
+    if (uname(&un) == 0) {
+        snprintf(machine, sizeof(machine), "%s", un.machine);
+        snprintf(release, sizeof(release), "%s", un.release);
+    }
+    if (sh_sysctl_str("kern.osproductversion", iosver, sizeof(iosver)) != 0) snprintf(iosver, sizeof(iosver), "?");
+    if (sh_sysctl_str("kern.osversion", build, sizeof(build)) != 0) snprintf(build, sizeof(build), "?");
+
+    uint64_t ncpu = 0, memtotal = 0, pagesize = 0, pagefree = 0;
+    sh_sysctl_u64("hw.ncpu", &ncpu);
+    sh_sysctl_u64("hw.memsize", &memtotal);
+    sh_sysctl_u64("hw.pagesize", &pagesize);
+    sh_sysctl_u64("vm.page_free_count", &pagefree);
+
+    char up[48];
+    sh_uptime_str(up, sizeof(up));
+    double load[3] = { 0, 0, 0 };
+    getloadavg(load, 3);
+
+    unsigned long long diskFree = 0, diskTotal = 0;
+    struct statvfs vfs;
+    if (statvfs("/", &vfs) == 0) {
+        unsigned long long bs = vfs.f_frsize ? vfs.f_frsize : vfs.f_bsize;
+        diskFree = (unsigned long long)vfs.f_bavail * bs / (1024ULL * 1024ULL);
+        diskTotal = (unsigned long long)vfs.f_blocks * bs / (1024ULL * 1024ULL);
+    }
+
+    char rows[12][160];
+    int nr = 0;
+    snprintf(rows[nr++], 160, "w0lfterm  route A shell (%d cmds)", trm_shell_command_count());
+    snprintf(rows[nr++], 160, "host      %s", machine);
+    snprintf(rows[nr++], 160, "ios       %s (%s)", iosver, build);
+    snprintf(rows[nr++], 160, "kernel    %s", release);
+    snprintf(rows[nr++], 160, "uptime    %s", up);
+    if (ncpu) snprintf(rows[nr++], 160, "cpu       %llu cores, page %llu KB",
+                       (unsigned long long)ncpu, (unsigned long long)(pagesize / 1024));
+    if (memtotal) {
+        unsigned long long freeMB = (pagesize && pagefree) ? (pagefree * pagesize) / (1024ULL * 1024ULL) : 0;
+        snprintf(rows[nr++], 160, "memory    %llu MB (free %llu MB)",
+                 (unsigned long long)(memtotal / (1024ULL * 1024ULL)), freeMB);
+    }
+    if (diskTotal) snprintf(rows[nr++], 160, "disk      %llu MB free of %llu MB", diskFree, diskTotal);
+    snprintf(rows[nr++], 160, "load      %.2f %.2f %.2f", load[0], load[1], load[2]);
+    snprintf(rows[nr++], 160, "escape    %s", exploit_is_done() ? "live (sandbox escaped)" : "not live");
+    snprintf(rows[nr++], 160, "kernel rw %s", (exploit_is_done() && is_kaddr_valid(proc_self())) ? "readable" : "unavailable");
+
+    int i;
+    for (i = 0; i < nr; i++) {
+        const char *art = (i < 4) ? logo[i] : "                              ";
+        if (i < 4) {
+            sh_out("%s%s%s  %s", colors[i % 3], art, "\033[0m", rows[i]);
+        } else {
+            sh_out("%s  %s\033[0m", art, rows[i]);
+        }
+    }
+    return 0;
+}
+
+static int cmd_mem(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint64_t memtotal = 0, pagesize = 0, pagefree = 0, pagecount = 0;
+    if (sh_sysctl_u64("hw.memsize", &memtotal) != 0) {
+        sh_err("mem: hw.memsize unavailable (host build, or a restricted profile)");
+        return 1;
+    }
+    sh_sysctl_u64("hw.pagesize", &pagesize);
+    sh_sysctl_u64("vm.page_free_count", &pagefree);
+    sh_sysctl_u64("vm.page_count", &pagecount);
+    unsigned long long totalMB = (unsigned long long)(memtotal / (1024ULL * 1024ULL));
+    unsigned long long freeMB = (pagesize && pagefree) ? (pagefree * pagesize) / (1024ULL * 1024ULL) : 0;
+    unsigned long long pagesMB = (pagesize && pagecount) ? (pagecount * pagesize) / (1024ULL * 1024ULL) : 0;
+    sh_out("physical   %llu MB", totalMB);
+    if (pagesMB) sh_out("managed    %llu MB (%llu MB free, %d%% used)", pagesMB, freeMB,
+                        (int)(pagesMB ? (100 - (freeMB * 100 / pagesMB)) : 0));
+    if (pagesize) sh_out("page size  %llu bytes", (unsigned long long)pagesize);
+    return 0;
+}
+
+static int cmd_cpu(int argc, char **argv) {
+    (void)argc; (void)argv;
+    char machine[128] = "unknown";
+    struct utsname un;
+    if (uname(&un) == 0) snprintf(machine, sizeof(machine), "%s", un.machine);
+    uint64_t ncpu = 0, cputype = 0, cpusubtype = 0, physcpu = 0;
+    sh_sysctl_u64("hw.ncpu", &ncpu);
+    sh_sysctl_u64("hw.cputype", &cputype);
+    sh_sysctl_u64("hw.cpusubtype", &cpusubtype);
+    sh_sysctl_u64("hw.physicalcpu", &physcpu);
+    sh_out("model      %s", machine);
+    if (ncpu) sh_out("logical    %llu", (unsigned long long)ncpu);
+    if (physcpu) sh_out("physical   %llu", (unsigned long long)physcpu);
+    if (cputype) sh_out("cputype    %llu subtype %llu", (unsigned long long)cputype, (unsigned long long)cpusubtype);
+    return 0;
+}
+
+static int cmd_loadavg(int argc, char **argv) {
+    (void)argc; (void)argv;
+    double load[3] = { 0, 0, 0 };
+    if (getloadavg(load, 3) != 3) {
+        sh_err("loadavg: unavailable errno=%d (%s)", errno, strerror(errno));
+        return 1;
+    }
+    sh_out("load  %.2f %.2f %.2f  (1m 5m 15m)", load[0], load[1], load[2]);
+    return 0;
+}
+
+static int cmd_net(int argc, char **argv) {
+    (void)argc; (void)argv;
+    struct ifaddrs *ifa = NULL;
+    if (getifaddrs(&ifa) != 0) {
+        sh_err("net: getifaddrs failed errno=%d (%s)", errno, strerror(errno));
+        return 1;
+    }
+    sh_out("iface      family  address");
+    int n = 0;
+    char host[NI_MAXHOST];
+    for (struct ifaddrs *p = ifa; p; p = p->ifa_next) {
+        if (!p->ifa_addr) continue;
+        int fam = p->ifa_addr->sa_family;
+        if (fam != AF_INET && fam != AF_INET6) continue;
+        host[0] = '\0';
+        if (getnameinfo(p->ifa_addr, (socklen_t)(fam == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)),
+                        host, sizeof(host), NULL, 0, NI_NUMERICHOST) != 0) continue;
+        sh_out("%-10s %-7s %s", p->ifa_name, fam == AF_INET ? "inet" : "inet6", host);
+        n++;
+    }
+    freeifaddrs(ifa);
+    if (!n) sh_out("(no IPv4/IPv6 interface addresses - the sandbox may hide them)");
+    return 0;
+}
+
+static int cmd_myip(int argc, char **argv) {
+    (void)argc; (void)argv;
+    struct ifaddrs *ifa = NULL;
+    if (getifaddrs(&ifa) != 0) {
+        sh_err("myip: getifaddrs failed errno=%d (%s)", errno, strerror(errno));
+        return 1;
+    }
+    char found[NI_MAXHOST] = "";
+    for (struct ifaddrs *p = ifa; p; p = p->ifa_next) {
+        if (!p->ifa_addr || p->ifa_addr->sa_family != AF_INET) continue;
+        if (p->ifa_flags & IFF_LOOPBACK) continue;
+        if (getnameinfo(p->ifa_addr, sizeof(struct sockaddr_in), found, sizeof(found), NULL, 0, NI_NUMERICHOST) == 0) break;
+        found[0] = '\0';
+    }
+    freeifaddrs(ifa);
+    if (!found[0]) {
+        sh_err("myip: no non-loopback IPv4 address visible");
+        return 1;
+    }
+    sh_out("%s", found);
+    return 0;
+}
+
+static int cmd_dns(int argc, char **argv) {
+    (void)argc; (void)argv;
+    FILE *f = fopen("/etc/resolv.conf", "r");
+    if (!f) {
+        sh_out("dns        resolv.conf not readable errno=%d (%s)", errno, strerror(errno));
+        sh_out("           iOS resolves through mDNSResponder; enumerating its servers needs");
+        sh_out("           a query or exec (route B/C) - `net` shows the interface addresses.");
+        return 0;
+    }
+    char line[256];
+    int n = 0;
+    while (fgets(line, sizeof(line), f) && n < 20) {
+        size_t l = strlen(line);
+        while (l > 0 && (line[l - 1] == '\n' || line[l - 1] == '\r')) line[--l] = '\0';
+        if (line[0]) {
+            sh_out("%s", line);
+            n++;
+        }
+    }
+    fclose(f);
+    if (!n) sh_out("dns        resolv.conf is empty");
+    return 0;
+}
+
+static int cmd_hexdump(int argc, char **argv) {
+    if (argc < 2) { sh_err("hexdump: usage: hexdump <file> [offset] [len<=4096]"); return 1; }
+    char rbuf[PATH_MAX];
+    const char *path = sh_resolve(argv[1], rbuf, sizeof(rbuf));
+    uint64_t off = 0, len = 256;
+    if (argc > 2 && sh_parse_u64(argv[2], &off) != 0) { sh_err("hexdump: bad offset '%s'", argv[2]); return 1; }
+    if (argc > 3) {
+        if (sh_parse_u64(argv[3], &len) != 0 || len == 0) { sh_err("hexdump: bad length '%s'", argv[3]); return 1; }
+        if (len > TRM_READ_MAX) len = TRM_READ_MAX;
+    }
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) { sh_err("hexdump %s: errno=%d (%s)", path, errno, strerror(errno)); return 1; }
+    if (off && lseek(fd, (off_t)off, SEEK_SET) == (off_t)-1) {
+        sh_err("hexdump %s: seek to %llu failed errno=%d (%s)", path, (unsigned long long)off, errno, strerror(errno));
+        close(fd);
+        return 1;
+    }
+    uint8_t buf[TRM_READ_MAX];
+    ssize_t n = read(fd, buf, (size_t)len);
+    close(fd);
+    if (n < 0) { sh_err("hexdump %s: read failed errno=%d (%s)", path, errno, strerror(errno)); return 1; }
+    if (n == 0) { sh_out("(end of file at offset %llu)", (unsigned long long)off); return 0; }
+    sh_out("%s  offset %llu, %zd bytes", path, (unsigned long long)off, n);
+    sh_hexdump(off, buf, (size_t)n);
+    return 0;
+}
+
+static int cmd_strings(int argc, char **argv) {
+    if (argc < 2) { sh_err("strings: usage: strings <file> [minlen=4]"); return 1; }
+    char rbuf[PATH_MAX];
+    const char *path = sh_resolve(argv[1], rbuf, sizeof(rbuf));
+    int minlen = 4;
+    if (argc > 2) {
+        minlen = atoi(argv[2]);
+        if (minlen < 2) minlen = 2;
+        if (minlen > 64) minlen = 64;
+    }
+    FILE *f = fopen(path, "rb");
+    if (!f) { sh_err("strings %s: errno=%d (%s)", path, errno, strerror(errno)); return 1; }
+    // Stream the file in chunks; runs longer than the buffer are split, which
+    // is fine for a debug tool (documented in the command help).
+    char run[512];
+    int rl = 0;
+    int shown = 0;
+    int c;
+    while ((c = fgetc(f)) != EOF) {
+        int printable = (c >= 0x20 && c < 0x7f);
+        if (printable) {
+            if (rl < (int)sizeof(run) - 1) run[rl++] = (char)c;
+            continue;
+        }
+        if (rl >= minlen) {
+            run[rl] = '\0';
+            sh_out("%s", run);
+            if (++shown >= 300) {
+                sh_out("... truncated at 300 strings");
+                break;
+            }
+        }
+        rl = 0;
+    }
+    if (shown < 300 && rl >= minlen) {
+        run[rl] = '\0';
+        sh_out("%s", run);
+        shown++;
+    }
+    fclose(f);
+    if (!shown) sh_out("(no printable runs >= %d chars)", minlen);
+    return 0;
+}
+
+static int cmd_pkg(int argc, char **argv) {
+    if (argc == 1) {
+        sh_out("packages - in-process command packs (this shell cannot exec, so a");
+        sh_out("package adds builtins instead of downloading a binary):");
+        for (int i = 0; i < TRM_PKG_COUNT; i++) {
+            sh_out("  %-9s %-12s %s", kPkgNames[i], g_pkgEnabled[i] ? "[installed]" : "[available]", kPkgDescs[i]);
+        }
+        sh_out("  pkg install <name> | pkg remove <name>");
+        return 0;
+    }
+    int action_install = !strcmp(argv[1], "install");
+    int action_remove = !strcmp(argv[1], "remove");
+    if ((!action_install && !action_remove) || argc < 3) {
+        sh_err("pkg: usage: pkg | pkg install <name> | pkg remove <name>");
+        return 1;
+    }
+    int idx = trm_shell_package_index(argv[2]);
+    if (idx < 0) {
+        sh_err("pkg: no package named '%s'", argv[2]);
+        return 1;
+    }
+    trm_shell_set_package_enabled(idx, action_install);
+    sh_out("%s %s", action_install ? "installed" : "removed", kPkgNames[idx]);
+    if (action_install) sh_out("  new commands: %s", kPkgDescs[idx]);
+    return 0;
+}
+
 // --- command table --------------------------------------------------------
 
 static const trm_cmd kCmds[] = {
-    { "help",      "help [cmd]",              "list commands or explain one",              0, cmd_help },
-    { "echo",      "echo <text>",             "print argument text",                       0, cmd_echo },
-    { "pwd",       "pwd",                     "print working directory",                   0, cmd_pwd },
-    { "cd",        "cd [path]",               "change directory (~ = app container)",      0, cmd_cd },
-    { "ls",        "ls [-l] [-a] [path]",     "list a directory",                          0, cmd_ls },
-    { "cat",       "cat <file>...",           "print text files",                          0, cmd_cat },
-    { "head",      "head [-n N] <file>",      "first N lines of a file",                   0, cmd_head },
-    { "stat",      "stat <path>",             "file metadata + access bits",                0, cmd_stat },
-    { "mkdir",     "mkdir <dir>",             "create a directory",                        0, cmd_mkdir },
-    { "rmdir",     "rmdir <dir>",             "remove an empty directory",                 0, cmd_rmdir },
-    { "rm",        "rm [-r] <path>",          "remove files (-r needs unsafe)",            0, cmd_rm },
-    { "mv",        "mv <src> <dst>",          "rename/move",                               0, cmd_mv },
-    { "cp",        "cp <src> <dst>",          "copy a file",                               0, cmd_cp },
-    { "touch",     "touch <file>",            "create/update a file",                      0, cmd_touch },
-    { "chmod",     "chmod <octal> <path>",    "change mode (needs unsafe)",                1, cmd_chmod },
-    { "id",        "id",                      "posix + kernel-side credentials",           0, cmd_id },
-    { "uname",     "uname",                   "system identity (utsname)",                 0, cmd_uname },
-    { "date",      "date",                    "current date/time",                         0, cmd_date },
-    { "uptime",    "uptime",                  "monotonic uptime",                          0, cmd_uptime },
-    { "df",        "df [path]",               "filesystem space",                          0, cmd_df },
-    { "env",       "env",                     "environment variables",                     0, cmd_env },
-    { "sleep",     "sleep <sec>",             "sleep (capped at 30s)",                     0, cmd_sleep },
-    { "ps",        "ps",                      "process list via sysctl",                   0, cmd_ps },
-    { "proc",      "proc <name>",             "kernel-side proc lookup + label addrs",     0, cmd_proc },
-    { "krw",       "krw",                     "kernel R/W status + sanity read",           0, cmd_krw },
-    { "kread",     "kread <addr> [len]",      "hexdump kernel memory",                     0, cmd_kread },
-    { "kwrite8",   "kwrite8 <addr> <val>",    "8-bit kernel write (needs unsafe)",         1, cmd_kwrite },
-    { "kwrite16",  "kwrite16 <addr> <val>",   "16-bit kernel write (needs unsafe)",        1, cmd_kwrite },
-    { "kwrite32",  "kwrite32 <addr> <val>",   "32-bit kernel write (needs unsafe)",        1, cmd_kwrite },
-    { "kwrite64",  "kwrite64 <addr> <val>",   "64-bit kernel write (needs unsafe)",        1, cmd_kwrite },
-    { "sbxinfo",   "sbxinfo",                 "sandbox label/object addrs (route B target)",0, cmd_sbxinfo },
-    { "sbxtest",   "sbxtest",                 "sandbox_check matrix (profile verdicts)",   0, cmd_sbxtest },
-    { "probe",     "probe [phase]",           "run the full TRM.1/2/4/5 device probe",     0, cmd_probe },
-    { "verdict",   "verdict",                 "last probe verdict line",                   0, cmd_verdict },
-    { "execsurf",  "execsurf [dir]",          "exec surface inventory",                    0, cmd_execsurf },
-    { "spawn",     "spawn <path> [args]",     "posix_spawn a platform binary",             0, cmd_spawn },
-    { "ptytest",   "ptytest",                 "posix_openpt + round-trip test",            0, cmd_ptytest },
-    { "ssvw",      "ssvw <local> <dest>",     "SSV write over a system file (needs unsafe)",1, cmd_ssvw },
-    { "unsafe",    "unsafe <0|1>",            "enable/disable gated commands",             0, cmd_unsafe },
+    { "help",      "help [cmd]",              "list commands or explain one",                0, TRM_PKG_NONE, cmd_help },
+    { "echo",      "echo <text>",             "print argument text",                         0, TRM_PKG_NONE, cmd_echo },
+    { "pwd",       "pwd",                     "print working directory",                     0, TRM_PKG_NONE, cmd_pwd },
+    { "cd",        "cd [path]",               "change directory (~ = app container)",         0, TRM_PKG_NONE, cmd_cd },
+    { "ls",        "ls [-l] [-a] [path]",     "list a directory",                            0, TRM_PKG_NONE, cmd_ls },
+    { "cat",       "cat <file>...",           "print text files",                            0, TRM_PKG_NONE, cmd_cat },
+    { "head",      "head [-n N] <file>",      "first N lines of a file",                     0, TRM_PKG_NONE, cmd_head },
+    { "stat",      "stat <path>",             "file metadata + access bits",                  0, TRM_PKG_NONE, cmd_stat },
+    { "mkdir",     "mkdir <dir>",             "create a directory",                          0, TRM_PKG_NONE, cmd_mkdir },
+    { "rmdir",     "rmdir <dir>",             "remove an empty directory",                   0, TRM_PKG_NONE, cmd_rmdir },
+    { "rm",        "rm [-r] <path>",          "remove files (-r needs unsafe)",              0, TRM_PKG_NONE, cmd_rm },
+    { "mv",        "mv <src> <dst>",          "rename/move",                                 0, TRM_PKG_NONE, cmd_mv },
+    { "cp",        "cp <src> <dst>",          "copy a file",                                 0, TRM_PKG_NONE, cmd_cp },
+    { "touch",     "touch <file>",            "create/update a file",                        0, TRM_PKG_NONE, cmd_touch },
+    { "chmod",     "chmod <octal> <path>",    "change mode (needs unsafe)",                  1, TRM_PKG_NONE, cmd_chmod },
+    { "id",        "id",                      "posix + kernel-side credentials",             0, TRM_PKG_NONE, cmd_id },
+    { "uname",     "uname",                   "system identity (utsname)",                   0, TRM_PKG_NONE, cmd_uname },
+    { "date",      "date",                    "current date/time",                           0, TRM_PKG_NONE, cmd_date },
+    { "uptime",    "uptime",                  "monotonic uptime",                            0, TRM_PKG_NONE, cmd_uptime },
+    { "df",        "df [path]",               "filesystem space",                            0, TRM_PKG_NONE, cmd_df },
+    { "env",       "env",                     "environment variables",                       0, TRM_PKG_NONE, cmd_env },
+    { "sleep",     "sleep <sec>",             "sleep (capped at 30s)",                       0, TRM_PKG_NONE, cmd_sleep },
+    { "ps",        "ps",                      "process list via sysctl",                     0, TRM_PKG_NONE, cmd_ps },
+    { "proc",      "proc <name>",             "kernel-side proc lookup + label addrs",       0, TRM_PKG_NONE, cmd_proc },
+    { "krw",       "krw",                     "kernel R/W status + sanity read",             0, TRM_PKG_NONE, cmd_krw },
+    { "kread",     "kread <addr> [len]",      "hexdump kernel memory",                       0, TRM_PKG_NONE, cmd_kread },
+    { "kwrite8",   "kwrite8 <addr> <val>",    "8-bit kernel write (needs unsafe)",           1, TRM_PKG_NONE, cmd_kwrite },
+    { "kwrite16",  "kwrite16 <addr> <val>",   "16-bit kernel write (needs unsafe)",          1, TRM_PKG_NONE, cmd_kwrite },
+    { "kwrite32",  "kwrite32 <addr> <val>",   "32-bit kernel write (needs unsafe)",          1, TRM_PKG_NONE, cmd_kwrite },
+    { "kwrite64",  "kwrite64 <addr> <val>",   "64-bit kernel write (needs unsafe)",          1, TRM_PKG_NONE, cmd_kwrite },
+    { "sbxinfo",   "sbxinfo",                 "sandbox label/object addrs (route B target)", 0, TRM_PKG_NONE, cmd_sbxinfo },
+    { "sbxtest",   "sbxtest",                 "sandbox_check matrix (profile verdicts)",     0, TRM_PKG_NONE, cmd_sbxtest },
+    { "probe",     "probe [phase]",           "run the full TRM.1/2/4/5 device probe",       0, TRM_PKG_NONE, cmd_probe },
+    { "verdict",   "verdict",                 "last probe verdict line",                     0, TRM_PKG_NONE, cmd_verdict },
+    { "execsurf",  "execsurf [dir]",          "exec surface inventory",                      0, TRM_PKG_NONE, cmd_execsurf },
+    { "spawn",     "spawn <path> [args]",     "posix_spawn a platform binary",               0, TRM_PKG_NONE, cmd_spawn },
+    { "ptytest",   "ptytest",                 "posix_openpt + round-trip test",              0, TRM_PKG_NONE, cmd_ptytest },
+    { "ssvw",      "ssvw <local> <dest>",     "SSV write over a system file (needs unsafe)", 1, TRM_PKG_NONE, cmd_ssvw },
+    { "pkg",       "pkg [install|remove <n>]", "list/install/remove command packs",          0, TRM_PKG_NONE, cmd_pkg },
+    { "unsafe",    "unsafe <0|1>",            "enable/disable gated commands",               0, TRM_PKG_NONE, cmd_unsafe },
+    // package: sysinfo (fastfetch-style system card)
+    { "fetch",     "fetch",                   "system info card (w0lf logo + live facts)",    0, TRM_PKG_SYSINFO, cmd_fetch },
+    { "mem",       "mem",                     "memory totals + free pages",                   0, TRM_PKG_SYSINFO, cmd_mem },
+    { "cpu",       "cpu",                     "cpu model/cores/cputype",                      0, TRM_PKG_SYSINFO, cmd_cpu },
+    { "loadavg",   "loadavg",                 "1/5/15 minute load average",                   0, TRM_PKG_SYSINFO, cmd_loadavg },
+    // package: net
+    { "net",       "net",                     "interfaces + addresses (getifaddrs)",          0, TRM_PKG_NET, cmd_net },
+    { "myip",      "myip",                    "first non-loopback IPv4 address",              0, TRM_PKG_NET, cmd_myip },
+    { "dns",       "dns",                     "resolver configuration",                       0, TRM_PKG_NET, cmd_dns },
+    // package: hex
+    { "hexdump",   "hexdump <file> [off] [n]", "hex + ascii of any file",                     0, TRM_PKG_HEX, cmd_hexdump },
+    { "strings",   "strings <file> [minlen]", "printable runs in a file",                     0, TRM_PKG_HEX, cmd_strings },
 };
 
 static const int kCmdCount = (int)(sizeof(kCmds) / sizeof(kCmds[0]));
@@ -880,13 +1280,19 @@ static int cmd_help(int argc, char **argv) {
         if (c->needs_unsafe) sh_out("  (gated: run `unsafe 1` first)");
         return 0;
     }
-    sh_out("route A in-process shell — no exec, no pty, full kernel R/W via the escape");
+    sh_out("route A in-process shell - no exec, no pty, full kernel R/W via the escape");
     {
         char cwd[PATH_MAX];
-        sh_out("unsafe=%d  cwd=%s", g_unsafe, getcwd(cwd, sizeof(cwd)) ? cwd : "?");
+        sh_out("unsafe=%d  cwd=%s  packages=%d/%d installed", g_unsafe,
+               getcwd(cwd, sizeof(cwd)) ? cwd : "?", g_pkgInstalledCount(), TRM_PKG_COUNT);
     }
     for (int i = 0; i < kCmdCount; i++) {
-        sh_out("  %-28s %s%s", kCmds[i].usage, kCmds[i].help, kCmds[i].needs_unsafe ? " [unsafe]" : "");
+        const trm_cmd *c = &kCmds[i];
+        char tag[40] = "";
+        if (c->pkg != TRM_PKG_NONE) {
+            snprintf(tag, sizeof(tag), " [%s%s]", kPkgNames[c->pkg], g_pkgEnabled[c->pkg] ? ":on" : " - pkg install");
+        }
+        sh_out("  %-28s %s%s%s", c->usage, c->help, c->needs_unsafe ? " [unsafe]" : "", tag);
     }
     return 0;
 }
@@ -907,7 +1313,12 @@ int trm_shell_exec_line(const char *line) {
         return 1;
     }
     if (c->needs_unsafe && !g_unsafe) {
-        sh_err("%s is gated — run `unsafe 1` first", c->name);
+        sh_err("%s is gated - run `unsafe 1` first", c->name);
+        return 2;
+    }
+    if (c->pkg != TRM_PKG_NONE && !g_pkgEnabled[c->pkg]) {
+        sh_err("%s is part of the '%s' package - install it: `pkg install %s` (or Settings > Packages)",
+               c->name, kPkgNames[c->pkg], kPkgNames[c->pkg]);
         return 2;
     }
     char *cargv[TRM_MAX_ARGS];
@@ -949,6 +1360,25 @@ void trm_shell_selftest(void) {
         "verdict",
         "nosuchcommand",
         "kread 0x0 16",
+        // packages: gated commands refuse until installed, then work in-process
+        "pkg",
+        "fetch",
+        "pkg install sysinfo",
+        "fetch",
+        "loadavg",
+        "cpu",
+        "mem",
+        "pkg install net",
+        "net",
+        "myip",
+        "dns",
+        "pkg install hex",
+        "strings /etc/hosts",
+        "hexdump /etc/hosts 0 64",
+        "pkg remove sysinfo",
+        "pkg remove net",
+        "pkg remove hex",
+        "pkg",
         "unsafe 0",
     };
     int total = (int)(sizeof(lines) / sizeof(lines[0]));
@@ -962,5 +1392,5 @@ void trm_shell_selftest(void) {
     }
     // cwd was changed by the script; go back to the container.
     if (chdir(trm_ctx_home()) != 0) { /* best effort */ }
-    TweakLog("[TRM][SELFTEST] done: ok=%d err=%d (err is expected for the deliberate failures: nosuchcommand, kread 0x0)", ok, err);
+    TweakLog("[TRM][SELFTEST] done: ok=%d err=%d (rc=1/2 is expected for the deliberate failures: nosuchcommand, kread 0x0, and the gated `fetch` before its package is installed)", ok, err);
 }

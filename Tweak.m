@@ -222,10 +222,15 @@ static UIButton *g_hudArrow = nil;     // collapsed-state arrow button
 static UITextView *g_hudLogView = nil;
 static UILabel *g_hudStatusLabel = nil;
 static UIProgressView *g_hudProgressView = nil;
-// Route A terminal input row (ROADMAP 0.11): a text field + RUN, sitting under
-// the log view. The log view IS the terminal output — the in-process shell
-// writes through TweakLog, which lands in the ring this panel polls.
+// Route A terminal input row (ROADMAP 0.11): a prompt + text field + RUN/TRM
+// buttons in ONE row at the bottom of the panel. The row is laid out in
+// hudLayout() on every tick (like the log view) - pushing the buttons at a
+// fixed y once made them overlap the log text, and a fixed field width clipped
+// against the buttons after rotation.
 static UITextField *g_hudInput = nil;
+static UILabel *g_hudPrompt = nil;
+static UIButton *g_hudRunBtn = nil;
+static UIButton *g_hudTrmBtn = nil;
 static CGFloat g_hudKeyboardOffset = 0;   // keyboard height while editing
 static char g_hudDevInfo[64] = {0};    // "iPhone14,7 iOS 26.0.1" set in TweakInit
 // MRC build: an autoreleased NSString cache dangles after the pool drains
@@ -304,12 +309,28 @@ static void hudLayout(void) {
 
     if (g_hudExpanded) {
         const CGFloat headerH = 34;
-        const CGFloat inputH = 30;
-        CGFloat totalH = MIN(winH * 0.5 + headerH + inputH, menuTop);
-        if (totalH < headerH + inputH) totalH = headerH + inputH;
+        const CGFloat rowH = 34;          // terminal input row (prompt+field+RUN+TRM)
+        CGFloat totalH = MIN(winH * 0.5 + headerH + rowH, menuTop);
+        if (totalH < headerH + rowH) totalH = headerH + rowH;
         g_hudContainer.frame = CGRectMake(0, menuTop - totalH, winW, totalH);
-        g_hudLogView.frame = CGRectMake(0, headerH, winW, totalH - headerH - inputH);
-        if (g_hudInput) g_hudInput.frame = CGRectMake(4, totalH - inputH, winW - 92, inputH - 4);
+        g_hudLogView.frame = CGRectMake(0, headerH, winW, totalH - headerH - rowH);
+
+        // Input row: buttons pinned to the right edge, the field taking exactly
+        // the space that is left (no fixed widths -> nothing clips, at any
+        // window width).
+        const CGFloat rowY = totalH - rowH;
+        const CGFloat btnW = 46, btnH = rowH - 8, gap = 4, pad = 6;
+        if (g_hudTrmBtn) g_hudTrmBtn.frame = CGRectMake(winW - pad - btnW, rowY + 4, btnW, btnH);
+        if (g_hudRunBtn) g_hudRunBtn.frame = CGRectMake(winW - pad - btnW - gap - btnW, rowY + 4, btnW, btnH);
+        if (g_hudPrompt) {
+            CGFloat pw = [g_hudPrompt.text sizeWithAttributes:@{ NSFontAttributeName: g_hudPrompt.font }].width + 2;
+            g_hudPrompt.frame = CGRectMake(8, rowY, pw, rowH);
+            if (g_hudInput) {
+                CGFloat x = 8 + pw + 4;
+                CGFloat w = (g_hudRunBtn ? g_hudRunBtn.frame.origin.x : winW - pad) - gap - x;
+                g_hudInput.frame = CGRectMake(x, rowY + 4, MAX(50.0, w), btnH);
+            }
+        }
         g_hudLogView.hidden = NO;
         g_hudContainer.hidden = NO;
         g_hudArrow.hidden = YES;
@@ -430,6 +451,12 @@ static void hudRefresh(void) {
     if (g_hudArrow) {
         [g_hudArrow setTitleColor:col forState:UIControlStateNormal];
         g_hudArrow.tintColor = col;
+    }
+    // The prompt reflects the shell's gating state (hudLayout measures this
+    // label, so it has to be set before the layout pass).
+    if (g_hudPrompt) {
+        NSString *want = trm_shell_unsafe() ? @"w0lf(unsafe)>" : @"w0lf>";
+        if (![g_hudPrompt.text isEqualToString:want]) g_hudPrompt.text = want;
     }
     hudLayout();
     if (g_hudLogView) {
@@ -608,41 +635,52 @@ static void hudInstall(void) {
     logView.hidden = YES;
 
     // Terminal input row (route A in-process shell + one-tap TRM probe).
-    // ASCII placeholder on purpose (non-ASCII literals land in __cfstring as
-    // UTF-16, which makes dylib greps confusing).
-    UITextField *input = [[UITextField alloc] initWithFrame:CGRectMake(4, 34, w - 92, 26)];
-    input.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.95];
-    input.textColor = [UIColor colorWithWhite:0.9 alpha:1];
+    // Frames are all set in hudLayout() - see the comment on the statics.
+    UILabel *prompt = [[UILabel alloc] initWithFrame:CGRectZero];
+    prompt.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightBold];
+    prompt.textColor = [UIColor colorWithRed:0.45 green:0.83 blue:1.0 alpha:1];
+    prompt.text = @"w0lf>";
+    prompt.userInteractionEnabled = NO;
+    [container addSubview:prompt];
+
+    UITextField *input = [[UITextField alloc] initWithFrame:CGRectZero];
+    input.backgroundColor = [UIColor colorWithWhite:0.14 alpha:0.95];
+    input.textColor = [UIColor colorWithWhite:0.93 alpha:1];
     input.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightRegular];
-    input.placeholder = @"w0lf> command (help)";
+    input.placeholder = @"command (help)";
+    input.layer.cornerRadius = 5;
     input.autocorrectionType = UITextAutocorrectionTypeNo;
     input.autocapitalizationType = UITextAutocapitalizationTypeNone;
     input.spellCheckingType = UITextSpellCheckingTypeNo;
+    input.smartQuotesType = UITextSmartQuotesTypeNo;
     input.returnKeyType = UIReturnKeyGo;
-    input.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    input.layer.zPosition = 10001;
+    input.leftView = [[[UIView alloc] initWithFrame:CGRectMake(0, 0, 6, 1)] autorelease];
+    input.leftViewMode = UITextFieldViewModeAlways;
     [input addAction:[UIAction actionWithHandler:^(UIAction *a) {
         hudTerminalRun(g_hudInput.text);
         g_hudInput.text = @"";
     }] forControlEvents:UIControlEventEditingDidEndOnExit];
+    [container addSubview:input];
 
     UIButton *runBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    runBtn.frame = CGRectMake(w - 88, 34, 40, 26);
-    runBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     [runBtn setTitle:@"RUN" forState:UIControlStateNormal];
-    runBtn.titleLabel.font = [UIFont monospacedSystemFontOfSize:9.0 weight:UIFontWeightBold];
+    runBtn.titleLabel.font = [UIFont monospacedSystemFontOfSize:10.0 weight:UIFontWeightBold];
+    runBtn.backgroundColor = [UIColor colorWithWhite:0.16 alpha:0.95];
+    runBtn.layer.cornerRadius = 5;
     [runBtn addAction:[UIAction actionWithHandler:^(UIAction *a) {
         hudTerminalRun(g_hudInput.text);
         g_hudInput.text = @"";
     }] forControlEvents:UIControlEventTouchUpInside];
+    [container addSubview:runBtn];
 
     UIButton *trmBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    trmBtn.frame = CGRectMake(w - 46, 34, 42, 26);
-    trmBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     [trmBtn setTitle:@"TRM" forState:UIControlStateNormal];
-    trmBtn.titleLabel.font = [UIFont monospacedSystemFontOfSize:9.0 weight:UIFontWeightBold];
+    trmBtn.titleLabel.font = [UIFont monospacedSystemFontOfSize:10.0 weight:UIFontWeightBold];
+    trmBtn.backgroundColor = [UIColor colorWithWhite:0.16 alpha:0.95];
+    trmBtn.layer.cornerRadius = 5;
     [trmBtn addAction:[UIAction actionWithHandler:^(UIAction *a) { hudTerminalProbe(); }]
         forControlEvents:UIControlEventTouchUpInside];
+    [container addSubview:trmBtn];
 
     [container addSubview:status];
     [container addSubview:close];
@@ -650,9 +688,6 @@ static void hudInstall(void) {
     [container addSubview:rerunBtn];
     [container addSubview:progress];
     [container addSubview:logView];
-    [container addSubview:input];
-    [container addSubview:runBtn];
-    [container addSubview:trmBtn];
     [win addSubview:container];
     [win addSubview:arrow];
 
@@ -662,6 +697,9 @@ static void hudInstall(void) {
     g_hudStatusLabel = status;
     g_hudProgressView = progress;
     g_hudInput = input;
+    g_hudPrompt = prompt;
+    g_hudRunBtn = runBtn;
+    g_hudTrmBtn = trmBtn;
     g_hudExpanded = NO;
 
     // Lift the panel while the keyboard is up, or the input row (which sits on
