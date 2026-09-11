@@ -1297,6 +1297,181 @@ static int cmd_help(int argc, char **argv) {
     return 0;
 }
 
+// --- completion (TRM.1) ---------------------------------------------------
+// Completion only offers filesystem candidates where the argument really is a
+// path, so `help redir_` stays silent instead of listing files.
+static int sh_cmd_takes_path(const char *cmd) {
+    static const char *kPathCmds[] = {
+        "cd", "ls", "cat", "head", "stat", "mkdir", "rmdir", "rm", "mv", "cp",
+        "touch", "chmod", "hexdump", "strings", "df", "spawn", "execsurf", NULL
+    };
+    for (int i = 0; kPathCmds[i]; i++) {
+        if (!strcmp(cmd, kPathCmds[i])) return 1;
+    }
+    return 0;
+}
+
+#define SH_COMP_MAX 64
+typedef struct {
+    int count;
+    int isCmd;
+    int truncated;
+    char names[SH_COMP_MAX][64];
+    char lcp[1024];
+    char dirpart[1024];
+    char list[1024];
+} sh_comp;
+
+static void sh_comp_add(sh_comp *c, const char *name) {
+    if (c->count >= SH_COMP_MAX) {
+        c->truncated = 1;
+        return;
+    }
+    snprintf(c->names[c->count], 64, "%s", name);
+    if (c->count == 0) {
+        snprintf(c->lcp, sizeof(c->lcp), "%s", name);
+    } else {
+        size_t k = 0;
+        while (c->lcp[k] && name[k] == c->lcp[k]) k++;
+        c->lcp[k] = '\0';
+    }
+    c->count++;
+}
+
+static int sh_comp_cmp(const void *a, const void *b) {
+    return strcmp((const char *)a, (const char *)b);
+}
+
+// Collects the candidates for the token at the end of `line` (the first token =
+// command names, later tokens = paths for the path-taking commands).
+static void sh_collect(const char *line, sh_comp *c) {
+    memset(c, 0, sizeof(*c));
+    c->lcp[0] = '\0';
+    size_t len = strlen(line);
+    size_t start = len;
+    while (start > 0 && line[start - 1] != ' ' && line[start - 1] != '\t') start--;
+    const char *tok = line + start;
+    size_t toklen = len - start;
+
+    int isFirst = 1;
+    for (size_t i = 0; i < start; i++) {
+        if (line[i] != ' ' && line[i] != '\t') { isFirst = 0; break; }
+    }
+    c->isCmd = isFirst;
+
+    if (isFirst) {
+        if (toklen == 0) return;
+        for (int i = 0; i < kCmdCount; i++) {
+            if (!strncmp(kCmds[i].name, tok, toklen)) sh_comp_add(c, kCmds[i].name);
+        }
+    } else {
+        char cmd[64];
+        size_t ci = 0;
+        while (ci < start && line[ci] != ' ' && line[ci] != '\t' && ci < sizeof(cmd) - 1) {
+            cmd[ci] = line[ci];
+            ci++;
+        }
+        cmd[ci] = '\0';
+        if (!sh_cmd_takes_path(cmd)) return;
+
+        char base[256] = {0};
+        const char *slash = strrchr(tok, '/');
+        if (slash) {
+            size_t dl = (size_t)(slash - tok) + 1;
+            if (dl >= sizeof(c->dirpart)) return;
+            memcpy(c->dirpart, tok, dl);
+            c->dirpart[dl] = '\0';
+            snprintf(base, sizeof(base), "%s", slash + 1);
+        } else {
+            snprintf(base, sizeof(base), "%s", tok);
+        }
+        size_t baselen = strlen(base);
+        const char *searchDir = c->dirpart[0] ? c->dirpart : ".";
+        char rbuf[1024];
+        const char *rdir = sh_resolve(searchDir, rbuf, sizeof(rbuf));
+        DIR *d = opendir(rdir);
+        if (!d) {
+            c->dirpart[0] = '\0';
+            return;
+        }
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (strncmp(e->d_name, base, baselen)) continue;
+            if (base[0] != '.' && e->d_name[0] == '.') continue;   // dotfiles on request only
+            sh_comp_add(c, e->d_name);
+        }
+        closedir(d);
+    }
+
+    if (c->count > 1) {
+        qsort(c->names, (size_t)c->count, 64, sh_comp_cmp);
+        snprintf(c->lcp, sizeof(c->lcp), "%s", c->names[0]);
+        for (int i = 1; i < c->count; i++) {
+            size_t k = 0;
+            while (c->lcp[k] && c->names[i][k] == c->lcp[k]) k++;
+            c->lcp[k] = '\0';
+        }
+    }
+    for (int i = 0; i < c->count; i++) {
+        size_t used = strlen(c->list);
+        size_t need = strlen(c->names[i]) + (used ? 2 : 1);
+        if (used + need >= sizeof(c->list)) {
+            c->truncated = 1;
+            break;
+        }
+        if (used) strcat(c->list, " ");
+        strcat(c->list, c->names[i]);
+    }
+    if (c->truncated) {
+        size_t used = strlen(c->list);
+        if (used + 5 < sizeof(c->list)) strcat(c->list, " ...");
+    }
+}
+
+int trm_shell_complete(const char *line, char *out, size_t outsz, int *count) {
+    if (count) *count = 0;
+    if (!line || !out || outsz == 0) return 0;
+    out[0] = '\0';
+    sh_comp c;
+    sh_collect(line, &c);
+    if (count) *count = c.count;
+    if (c.count == 0) return 0;
+
+    size_t len = strlen(line);
+    size_t start = len;
+    while (start > 0 && line[start - 1] != ' ' && line[start - 1] != '\t') start--;
+
+    char repl[2048];
+    if (c.count == 1) {
+        if (c.isCmd) {
+            snprintf(repl, sizeof(repl), "%s ", c.lcp);          // ready for the next word
+        } else {
+            char full[2048];
+            snprintf(full, sizeof(full), "%s%s", c.dirpart, c.lcp);
+            struct stat st;
+            int isdir = (stat(full, &st) == 0 && S_ISDIR(st.st_mode));
+            snprintf(repl, sizeof(repl), "%s%s%s", c.dirpart, c.lcp, isdir ? "/" : " ");
+        }
+    } else {
+        if (!strcmp(c.lcp, line + start)) return 0;              // ambiguous, nothing new to add
+        snprintf(repl, sizeof(repl), "%s%s", c.dirpart, c.lcp);
+    }
+
+    size_t head = start;
+    if (head > outsz - 1) head = outsz - 1;
+    memcpy(out, line, head);
+    snprintf(out + head, outsz - head, "%s", repl);
+    return 1;
+}
+
+void trm_shell_complete_list(const char *line, char *out, size_t outsz) {
+    if (!out || outsz == 0) return;
+    out[0] = '\0';
+    sh_comp c;
+    sh_collect(line, &c);
+    snprintf(out, outsz, "%s", c.list);
+}
+
 int trm_shell_exec_line(const char *line) {
     if (!line) return -1;
     while (*line == ' ' || *line == '\t') line++;

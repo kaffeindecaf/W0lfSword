@@ -407,6 +407,46 @@ int main(void) {
         check(saw("after"), "normal commands are unaffected");
     }
 
+    printf("\n[9] completion (TRM.1)\n");
+    {
+        char out[2048];
+        char list[1024];
+        int n = -1;
+        int changed = trm_shell_complete("hel", out, sizeof(out), &n);
+        check(changed == 1 && n == 1 && !strcmp(out, "help "), "a command name completes and gains a space");
+        changed = trm_shell_complete("unsa", out, sizeof(out), &n);
+        check(changed == 1 && n == 1 && !strcmp(out, "unsafe "), "gated command names complete too");
+        changed = trm_shell_complete("kwrite", out, sizeof(out), &n);
+        check(n == 4, "kwrite8/16/32/64 are all candidates");
+        check(changed == 0, "an ambiguous token with no common prefix is left alone");
+        trm_shell_complete_list("kwrite", list, sizeof(list));
+        check(strstr(list, "kwrite16") && strstr(list, "kwrite64"), "the candidate list names them");
+        changed = trm_shell_complete("zzz", out, sizeof(out), &n);
+        check(changed == 0 && n == 0, "no candidate stays silent");
+
+        FILE *cf = fopen("completion_alpha.txt", "w");
+        if (cf) { fputs("a\n", cf); fclose(cf); }
+        cf = fopen("completion_beta.txt", "w");
+        if (cf) { fputs("b\n", cf); fclose(cf); }
+        mkdir("completion_dir", 0700);
+
+        changed = trm_shell_complete("cat completion_beta", out, sizeof(out), &n);
+        check(changed == 1 && n == 1 && !strcmp(out, "cat completion_beta.txt "),
+              "path completion appends the rest of the name");
+        changed = trm_shell_complete("ls completion_", out, sizeof(out), &n);
+        check(n == 3, "three entries share the prefix");
+        check(changed == 0, "an already-complete common prefix reports no change");
+        changed = trm_shell_complete("cat completion_d", out, sizeof(out), &n);
+        check(changed == 1 && !strcmp(out, "cat completion_dir/"),
+              "a directory candidate gets a trailing slash");
+        changed = trm_shell_complete("help completion_b", out, sizeof(out), &n);
+        check(changed == 0 && n == 0, "a non-path command gets no path candidates");
+        changed = trm_shell_complete("cat nope_zz", out, sizeof(out), &n);
+        check(changed == 0, "an unmatched path stays silent");
+        changed = trm_shell_complete("", out, sizeof(out), &n);
+        check(changed == 0 && n == 0, "an empty line completes to nothing");
+    }
+
     char cmd[PATH_MAX + 32];
     snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
     if (system(cmd) != 0) printf("  (cleanup of %s failed)\n", tmpdir);

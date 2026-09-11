@@ -25,6 +25,16 @@ extern "C" {
 // errors, 2 when a command needs `unsafe 1` first, -1 on an internal failure.
 int trm_shell_exec_line(const char *line);
 
+// --- completion (TRM.1) ---------------------------------------------------
+// Completes the token at the end of `line`: command names for the first token,
+// paths for the arguments of the path-taking commands (`ls`, `cat`, ...).
+// Writes the resulting line into `out` and the candidate count into `count`
+// (only `count` > 1 needs the candidate list printed). Returns 1 when the line
+// changed; a 0 with `count` > 1 means "ambiguous, nothing new to add".
+int trm_shell_complete(const char *line, char *out, size_t outsz, int *count);
+// Space-separated candidates for the same token ("" when there are none).
+void trm_shell_complete_list(const char *line, char *out, size_t outsz);
+
 // "w0lf> " / "w0lf(unsafe)> " — for a future prompt label in the UI.
 const char *trm_shell_prompt(void);
 
