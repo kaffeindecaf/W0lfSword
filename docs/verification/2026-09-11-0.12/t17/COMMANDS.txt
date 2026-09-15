@@ -1,0 +1,4 @@
+krw_zone_write	/home/kaffein/Desktop/W0lfSword	TMPDIR=/home/kaffein/Desktop/W0lfSword/docs/verification/2026-09-11-0.12/t17/suite_logs	bash scripts/run_krw_zone_write_host_test.sh
+kwrite_counter	/home/kaffein/Desktop/W0lfSword	TMPDIR=/home/kaffein/Desktop/W0lfSword/docs/verification/2026-09-11-0.12/t17/suite_logs	bash scripts/run_kwrite_counter_host_test.sh
+host_verification	/home/kaffein/Desktop/W0lfSword	TMPDIR=/home/kaffein/Desktop/W0lfSword/docs/verification/2026-09-11-0.12/t17/suite_logs_plain	bash scripts/check_host_verification.sh
+host_verification_builds	/home/kaffein/Desktop/W0lfSword	TMPDIR=/home/kaffein/Desktop/W0lfSword/docs/verification/2026-09-11-0.12/t17/suite_logs	W0LF_TERM=/home/kaffein/Desktop/W0lfTerm bash scripts/check_host_verification.sh --with-builds

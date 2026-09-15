@@ -1,0 +1,36 @@
+docs/verification/2026-09-11-0.12/t14_verify - manifest (sha256, bytes, path)
+generated 2026-09-11T23:58:47+0200 on Linux-7.0.13+parrot7-amd64-x86_64-with-glibc2.41
+scope: independent re-run of the T14 host suites (no device, no exploit)
+
+5a4214afe0b49de71291b76ef4ecc9cfa60731f3c4fce5ba29160fd81dcb9cbc       3528  e10_binary_symbols_and_strings.log
+c2084cdfe1f782ebf5b328ffb353bfcab2d94dc3ed9b6472a45ffe232f6de275    2510338  e10b_app_disassembly.txt
+5a4509918891eae146d58bccbf7b591458590478d3c957a2bbd7f1fe125c20f3       1717  e10c_app_call_edges.log
+6c784f80e5069a521592ff77e13d354ffb15877a1784e023ce6160ca77069517       1731  e11_host_suite_with_builds.log
+927307f099b405d542b2b2e81694ade38002f002343281d97fbd3e9c707ed3da       1145  e12_regression_host_half.log
+1386b0b6e393b4923dc3ad9cd69547b8e9471e78f2c904688b5a09cc3b0ea5be       7492  e1_krw_zone_write.log
+1dc9c1d4b0e35b86e23667ff627e4b57bb7f6ec8385e622fc78c585dd6424e63       2629  e2_kwrite_counter.log
+62f760e7402071fcb823a7ec5191904e098ac6b520907ef13135ba6fa729cf4b       4830  e3_probe_restore_e2e.log
+97e2173af1a31a7e57ebcfb20289a524b99f1b74723faee2507578c38840a935        852  e3b_probe_restore_selftest.log
+1df3ce4c11439d92bf412a4f411140e20fcb0bc260dd3370cc670413460a171f       7170  e4_bug2_release_paths.log
+03bc081c48798f73959714628936f48d818d8c7e04c6a8af1a09c250b1a7f612       4768  e4b_bug2_selftest.log
+4dc5246d0662e7df01b483d7cb9e859244210c7f31cba283198d4c658547790d       2161  e5_scan_budget_cancel.log
+e24a0f3e9a1e9bc7b7be800439e50ab11d7190fa77c7c6858eafa28e5b98a040      46714  e5b_scan_budget_cancel_selftest.log
+91bd530e7bf386a527b9d56e01bae5812821c5a281315bd6ffd4c3ac3c29d549       1666  e6_pressure_budget.log
+98be7a751526bbd282f158c2d0522a78acedb4f8f8797d2f7f78217b534fe9ad      17515  e6b_pressure_budget_selftest.log
+d59cd9fd7d8be99c390a569e1c7430af0b37a8023433fc4beaf5806b530653ab       2873  e7_tweak_log_throttle.log
+feb41a586ba75bf75fde70845fe282823645c04464996dd773de27a4e1621ede      15415  e8_trm_shell_host_test.log
+4d8afa713bb5b381861feb6b08887679ad0ed935a3234c765557e3680622807e       2308  e9_app_ipa_build_rebuild_engine.log
+b1959cd10d331f08734532a77786654b808a0c50e77510aa3d014c5d917f43ff       1302  extract_edges.py
+fcb1b187fcbf2eed5c1278a09669a87ed769b977779a23d82872f8dfc706c975       1061  run_regression_host_half.py
+8f7442e5bd742a287b6327d37583d3bbb4f661a940ee0b4605d28b997b2e1da0       1952  write_manifest.py
+
+build artifacts this run produced (hashed on disk):
+  263ae60d49fd0c1557ac8d26f365b6d9d4c8475387ab45451306da31167f9661 engine archive  /home/kaffein/Desktop/W0lfSword/.theos/libengine/libw0lfengine.a
+  2922ebb3c8138e6dcbd2efb95101afdceb26e409b83f8129d28bdb351eaf14c8 app binary  /home/kaffein/Desktop/W0lfTerm/dist/Payload/W0lfTerm.app/W0lfTerm
+  92554bb4cbf24e041ade454caa5b1323d17b24b4315f56cf4799b7bf691a0c31 app ipa  /home/kaffein/Desktop/W0lfTerm/dist/W0lfTerm-0.20-sideload.ipa
+
+tool versions:
+  cc                     cc (Debian 14.2.0-19) 14.2.0
+  python3                Python 3.13.5
+  llvm-nm-19             llvm-nm, compatible with GNU nm
+  clang                  Debian clang version 19.1.7 (3+b1)

@@ -1,0 +1,84 @@
+BUG.1 (ROADMAP 0.12) - the three sub-steps, where they live, and what proved
+them in this pass. Every file:line below is a grep of the shipped source; every
+result is the output of a command whose full log is in this directory.
+
+------------------------------------------------------------------------------
+STEP 1 - the staged write probe restores on EVERY exit path
+------------------------------------------------------------------------------
+  kexploit/kexploit_opa334.m:1740  if (probe_exit_action_for(rc) == PROBE_ACTION_RESTORE) {
+  kexploit/kexploit_opa334.m:1741  restore_corrupted_socket();
+  kexploit/kexploit_opa334.m:1786  bool restored = restore_corrupted_socket();
+  kexploit/probe_restore_policy.c: 1 hand-off return(s), 1 fail-safe RESTORE return(s)
+  -> the wrapper classifies the probe's return and restores unless it is the
+     promotion; a return code the policy has never seen takes the RESTORE path.
+  artifacts + results in this run:
+    s1_krw_zone_write_host_test      KRW_ZONE_WRITE_HOST_TEST PASS
+    s1_probe_restore_e2e             PROBE_RESTORE_E2E_HOST_TEST PASS
+    s1_probe_restore_e2e_selftest    selftest: all mutations caught
+    s1_bug2_release_paths            56 check(s) passed, 0 failed
+
+------------------------------------------------------------------------------
+STEP 2 - the probe writes a field with no concurrent reader (never the filter
+         pointer the kernel dereferences on the next packet)
+------------------------------------------------------------------------------
+  kexploit/kexploit_opa334.m:1408  if (*(uint64_t *)((uintptr_t)readBuffer + candBase + f + 8) == 0x0000ffffffffffffULL) {
+  shipped references to the probed field (grep of the engine sources):
+    kexploit/kexploit_opa334.m:1355  return krw_zone_window_for_field_end((uint64_t)off_inpcb_inp_depend6_inp6_chksum +
+    kexploit/kexploit_opa334.m:1544  // (offsets.m off_inpcb_inp_depend6_inp6_chksum, "(lldb) p/x
+    kexploit/kexploit_opa334.m:1580  const uint64_t chksumFieldOff = filtOffset + 8;   // == off_inpcb_inp_depend6_inp6_chksum
+    kexploit/kexploit_opa334.m:2601  kwrite_zone_element_qword(inpcbPcb + off_inpcb_inp_depend6_inp6_chksum, 0,
+    kexploit/kexploit_opa334.m:2607  (int)chksumVerdict, inpcbPcb, off_inpcb_inp_depend6_inp6_chksum);
+  send/sendto/recv/recvfrom/sendmsg/recvmsg in the shipped engine sources:
+    call sites: 0  (comment mentions: 4, all of them the comment that says no such call exists)
+    kexploit/kexploit_opa334.m:1555  //   - nothing consumes the number either: there is no send(), sendto(),
+    kexploit/kexploit_opa334.m:1555  //   - nothing consumes the number either: there is no send(), sendto(),
+    kexploit/kexploit_opa334.m:1556  //     recv() or recvfrom() anywhere in kexploit/, terminal/ or utils/,
+    kexploit/kexploit_opa334.m:1556  //     recv() or recvfrom() anywhere in kexploit/, terminal/ or utils/,
+  kexploit/probe_restore_policy.c is field-agnostic; the field choice is pinned by
+  scripts/check_pressure_budget.py over the archive's sources:
+    BUG.1 probe field + BUG.2 pressure-source check (host only)
+    ok   BUG.1 probe field: nothing in the shipped code consumes the probed qword
+    ok   BUG.1 probe field: the probe body does not touch the icmp6 filter pointer
+    8 check(s) passed, 0 failed
+    PRESSURE_BUDGET LINT PASS
+  selftest (temp copies mutated 9 ways, incl. the probe preserving the filter
+  pointer and a send() added to the shipped sources):
+    selftest: all mutations caught
+    PRESSURE_BUDGET LINT PASS
+
+------------------------------------------------------------------------------
+STEP 3 - the 32-byte writer is clamped: no block can cross a kalloc.96 bound
+------------------------------------------------------------------------------
+  kexploit/krw_zone_write.c:108  if (writeDst < objBase || writeDst + KRW_ZONE_BLOCK_LEN > objBase + objSize) {
+  kexploit/krw_zone_write.c:195  if (writeDst < objBase || writeDst + KRW_ZONE_BLOCK_LEN > objBase + objSize) {
+  kexploit/krw_zone_write.c:85  if (!haveObj) {   (default deny: nothing is written undeclared)
+  kexploit/krw_zone_write.c:233  if (!haveObj) {   (default deny: nothing is written undeclared)
+  kexploit/krw.m:221  krw_zone_verdict kwrite_zone_element_qword(uint64_t dst, uint64_t value,
+  the shipped archive (make libengine) defines/uses the clamped writer:
+    0000000000000000 T _probe_exit_action_for
+    0000000000000034 T _probe_restore_fd_source
+    00000000000000cc T _krw_zone_block_align_down
+    00000000000000e4 T _krw_zone_window_for_field_end
+    000000000000074c T _krw_zone_write_qword
+    0000000000000a14 T _kwrite_zone_element_qword
+    U _krw_zone_window_for_field_end
+    U _krw_zone_write_qword
+    U _kwrite_zone_element_qword
+    U _probe_exit_action_for
+    U _probe_restore_fd_source
+  archive hash (the value scripts/check_host_verification.sh pins):
+    263ae60d49fd0c1557ac8d26f365b6d9d4c8475387ab45451306da31167f9661  .theos/libengine/libw0lfengine.a
+
+RESULTS
+  cases: 172 pass, 0 fail (both harnesses, every case listed in BUG1-CASES.txt)
+  s1_krw_zone_write_host_test    KRW_ZONE_WRITE_HOST_TEST PASS
+  s1_probe_restore_e2e           PROBE_RESTORE_E2E_HOST_TEST PASS
+  suite_host_verification        host verification: 16 ok, 0 drift
+  suite_regression_bug1_section  BUG.1 section (regression.sh lines 41-101): 5 ok, 0 bad
+  s3b_independent_clamp_sweep    INDEPENDENT_CLAMP_SWEEP PASS
+  suite_audit                    ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  AUDIT PASSED
+  s3_engine_lib_build            OK: .theos/libengine/libw0lfengine.a (804K, 52 objects)
+
+NOT covered here (plainly): no device ran, so BUG.1 stays NOT device-verified.
+The 2026-09-11 SE run that would confirm the restore on hardware is the next
+device day, and readonly stays the only mode offered on unproven pairs.

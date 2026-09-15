@@ -403,16 +403,78 @@
      most 200 ms of lines). Remaining lever: reduce memory pressure — release the
      search mapping and drop the socket spray as soon as the scan ends, and keep
      the 120 s budget as the hard stop.
-     Note for any future resource work: three resource axes are now known to kill
-     this app on device — CPU (90 s/180 s), wakeups (45k/300 s) and disk writes
-     (1 GB/day) — and `idevicecrashreport -e <dir>` returns all three reports.
+
+    T12 closing pass (task 12/12, host only, no device command): that rate limit
+    is now a compiled, counted gate instead of a comment. The decision left the
+    ObjC-only block of `utils/tweak_log.h` for `utils/tweak_log_policy.c`, which
+    the engine archive AND the tweak build both compile - so the file the host
+    test drives is the file the device ships - and the sink holds ONE
+    process-wide gate (`TweakLog()` is a static function in a header, so a gate
+    per translation unit would have multiplied the rate limit by the number of
+    files that log). Counter report: `bash
+    scripts/run_tweak_log_throttle_host_test.sh` -> `checks=30 failures=0` /
+    `TWEAK_LOG_THROTTLE_HOST_TEST PASS` (exit 0). It drives a simulated clock:
+    510 ms of lines -> 3 fsyncs at 10, 100, 450 and 5000 line/s alike (the bound
+    is the WINDOW, not the line rate); 10,000 lines 1 ms apart -> 50 fsyncs
+    against 10,000 for the pre-fix one-fsync-per-line policy (200x fewer); a
+    600 s run -> 3000 grants, inside the advertised 3001 (600 s / 200 ms + the
+    first line); a backwards clock step grants nothing; the first line always
+    flushes; and the pre-fix policy is asserted to VIOLATE the bound, so the
+    check is not vacuous. Structural half: `python3
+    scripts/check_scan_budget_cancel_writes.py` -> `25 check(s) passed, 0 failed`
+    with four new BUG.6 checks (the sink's fsync sits inside the gate's own
+    condition, one gate and not one per TU, the policy is in both build lists
+    and in the host test, and no OTHER ungated fsync exists in the code the app
+    compiles - the archive's sources plus their local headers plus the app's own
+    sources, ~100 files), `--selftest` -> `selftest: all mutations caught`
+    (21/21; the five new mutations are: the gate dropped from the sink, the gate
+    moved into the per-TU header, the policy dropped out of the archive, the
+    window set to 0 ms, an ungated fsync added to the app).
+    NOT device-verified, and the arithmetic limit stated plainly: the gate bounds
+    the fsync CALLS (<= 1 per 200 ms per process); how many bytes one fsync
+    flushes is the file's own dirty pages, so the byte half of this report stays
+    a device measurement - `idevicecrashreport -e <dir>` diskwrites / CPU /
+    wakeup reports for a run with the throttle in place, against the 1073.75 MB
+    in 1083 s measured below. The other pressure source this item names (the
+    scan dirtying every page of every search mapping, ~30 MB per pass) is
+    untouched and is tracked under 0.12 `BUG.2`.
+    Note for any future resource work: three resource axes are now known to kill
+    this app on device — CPU (90 s/180 s), wakeups (45k/300 s) and disk writes
+    (1 GB/day) — and `idevicecrashreport -e <dir>` returns all three reports.
+    T18 + landing pass (2026-09-15, host only, no device command): the CPU axis
+    has its half now. `free_thread`'s first wait already yielded; the other two
+    (`goSync` and the inner `raceSync` spin) were bare `;` hot spins, which is the
+    shape this item's own text names, and the userspace watchdog kill is what
+    starving SpringBoard looks like from the kernel side. Both now end in
+    `pthread_yield_np();` - a yield, not a sleep, so the thread stays runnable and
+    the race window's latency is unchanged; what goes away is the wasted cycle on
+    a core the main thread needs. Evidence: `THEOS=$HOME/theos make libengine` ->
+    `OK: .theos/libengine/libw0lfengine.a` (804K), the host suite green,
+    `docs/WORKLOG.md` "T18 + landing pass". NOT device-verified: the CPU (90/180 s)
+    and wakeup (45k/300 s) reports for a run with the yields in place are the
+    device half, exactly like the fsync throttle's byte half under BUG.6.
+    The same pass re-took the six pinned hashes the edit invalidated (the pinned
+    suite reported `15 ok, 6 drift`; two of the six were real defects - a
+    selftest mutation that had stopped applying since the edit, and a harness
+    whose redirected stdout was fully buffered so a `df` child interleaved into
+    its own result lines run to run). Both are fixed, not excused: the mutation
+    drops the stop-flag half of the first wait (selftest `all mutations caught`,
+    19/19) and `tests/trm_shell_host_test.c` line-buffers stdout (canon hash
+    identical over three runs). The other four had one cause - the artifact
+    hashes of an engine whose code size changed - and are re-pinned with that
+    reason written down in `scripts/check_host_verification.sh`, in
+    `t17/verify_bug_claims.py` and in the WORKLOG table. Re-captured:
+    `WITH_BUILDS=1 bash docs/verification/2026-09-11-0.12/t17/capture.sh` (4/4
+    rc=0), suite `16 ok, 0 drift` plain and `21 ok, 0 drift` with builds,
+    `claim check: 64 ok, 0 bad`. The HISTORICAL counts (41/65/95) were not
+    touched - they reproduce from `replay_revisions.sh`.
 
 ## 0.12 — Open bug list (from the 2026-09-11 device day)
 
 > Everything found broken on device, in one place, with the evidence. Fix order
 > is the list order. Resource metrics and the failure modes are in `SG.10`.
 
-- [ ] `BUG.1` 🔴 — **the staged write probe panics the device.** A 32-byte write
+- [x] `BUG.1` 🔴 — **the staged write probe panics the device.** A 32-byte write
   from `early_kwrite32bytes` (via `kwrite_zone_element`'s backward-shifted RMW)
   lands past the end of a kalloc.96 object → `zalloc.c:1322` zone bound check →
   panic. Twice confirmed (SG.8, SG.9), both times with `Panicked task: W0lfTerm`.
@@ -422,6 +484,13 @@
   icmp6 filter pointer the kernel dereferences on the next packet; (3) clamp the
   writer so a 32-byte block that is not provably inside the target object is
   refused. Until this lands: readonly is the only mode for any device.
+  All three steps are in (steps 2 and 3 below, then step 3b which closes the two
+  gaps they left: an undeclared exact-0x20 write - the SE write itself - was still
+  emitted, and the probe's/restore's put-back bypassed the clamp entirely).
+  Host-verified only; the device run that would confirm it on the SE is the next
+  device day, and readonly stays the only mode offered on unproven device/iOS
+  pairs until then.
+
   Step 2 of the fix shipped (engine `kexploit/kexploit_opa334.m`): the staged
   write probe no longer targets `inp_depend6.inp6_icmp6filt`. It probes
   `inp_depend6.inp6_chksum` (`filt+8`, `off_inpcb_inp_depend6_inp6_chksum`) in two
@@ -472,9 +541,20 @@
   entry instead of being refused. Verification that actually ran:
   `bash scripts/run_krw_zone_write_host_test.sh` compiles this writer - the same
   file the engine builds - against a fake kernel window and records every block
-  emitted: 41 checks, 0 failures, including the SE write replayed (32 bytes at
-  +0x50 of a 0x60 object) and refused with zero blocks emitted, a stale
-  declaration that cannot authorise a foreign write, a 4753-combination sweep
+  emitted. The count that belongs to THIS tree is `checks=116 failures=0` /
+  `KRW_ZONE_WRITE_HOST_TEST PASS`, exit 0, captured at
+  `docs/verification/2026-09-11-0.12/t17/krw_zone_write.log` (sha256
+  `1386b0b6...`; the harness grew with steps 1 and 3b). The `41 checks, 0
+  failures` below is HISTORICAL: it is the count of the clamp-only revision of
+  the harness as COMMITTED at `HEAD`, not of the working tree, and it is
+  reproduced by replaying that revision
+  (`t17/revisions/krw_head/build_and_run.log` and the second capture
+  `t17/head_replay/build_and_run.log`, both with their sparse source trees
+  in-repo). Reading 41 as the current count was the stale-prose error T17
+  corrected; the re-run of this pass prints 116, and the 116 include the SE
+  write replayed
+  (32 bytes at +0x50 of a 0x60 object) and refused with zero blocks emitted, a
+  stale declaration that cannot authorise a foreign write, a 4753-combination sweep
   where not one block left the object, and the refusal log line. `make libengine`
   and the W0lfTerm ipa build both pass. NOT device-verified. Remaining risks this
   step does not remove: an exact multiple of 0x20 with no object declared is
@@ -484,7 +564,360 @@
   address they are given) are outside this guard entirely - if the next device
   panic names a kalloc object again, that is the first place to look.
 
-- [ ] `BUG.2` — **memory pressure drives two of the three resource kills.**
+  Step 1 completed (same day, engine `kexploit/kexploit_opa334.m` plus the new
+  `kexploit/probe_restore_policy.c` / `.h`): "every exit funnels through the
+  restore helper" was necessary but not sufficient - the helper could not always
+  WRITE. It re-opened its fds from the spray tracking array, and pe_v1's release
+  funnel (the BUG.2 audit above, same day) empties that array via
+  `sockets_release()` before the caller's own restore runs, so the staged -5 exit
+  (kernel-base scan exhausted) hit `controlSocketIdx out of range (0 sockets)` ->
+  `[STAGED] probe restore FAILED after 0 tries: krw socket not live` and returned
+  with the corrupted inpcb still live and NOT ONE saved byte written back: BUG.1,
+  one exit later. Both halves of the contract are now a policy the host test
+  compiles and drives (probe_restore_policy.c is in the engine archive and in the
+  test binary):
+
+    * `probe_exit_action_for(rc)` hands the socket over ONLY for the promotion
+      (`KERN_SUCCESS`); every other return - including a code added later -
+      restores. The wrapper used to enumerate `rc != KERN_SUCCESS`; the default is
+      now the safe direction, so a future exit cannot silently walk away from a
+      corrupted object.
+    * `probe_restore_fd_source(...)` picks the fds the put-back writes through:
+      the spray tracking array when it still holds the pair, else the fds the
+      PROMOTION opened for THIS corruption (stamped with the save generation and
+      the socket index - `probe_fds_are_live_for()` requires both, so a pair left
+      over from an earlier save can never be used to write through a foreign
+      socket), else UNREACHABLE, which the helper logs loudly as a failure instead
+      of reporting a restore it did not perform.
+    * `open_probe_socket_fds()` opens into locals and commits the pair only when
+      both opens succeeded, and the promotion verdict uses the same stamp check
+      instead of "the globals are non-zero" - zeroing the globals first is what
+      made the -5 restore impossible (a pair that was still the right one, gone)
+      and a stale pair usable, at the same time.
+    * pe_v1 clears `g_test_mo` where it releases that memory object (the restore's
+      OOB verify reads through the same right), so the -5 put-back reports "put
+      back, unverified: no OOB mapping" after ONE write pair instead of five
+      dead-port read races that can never land.
+
+  Verification that actually ran (host, no device, no device command):
+  `bash scripts/run_krw_zone_write_host_test.sh` -> `checks=116 failures=0` /
+  `KRW_ZONE_WRITE_HOST_TEST PASS`. That is the T17 re-run of 2026-09-11: raw log
+  `docs/verification/2026-09-11-0.12/t17/krw_zone_write.log`, sha256
+  `1386b0b6e393b4923dc3ad9cd69547b8e9471e78f2c904688b5a09cc3b0ea5be`. The
+  intermediate `checks=65 failures=0` this prose used to quote is WITHDRAWN - no
+  captured log and no committed revision of the harness produces it; the
+  reproducible comparison is 41 (the clamp-only revision at `HEAD`, replayed in
+  `t17/head_replay/`) against 116 here, and the delta is this step's 24
+  restore-policy checks plus step 3b's 51. Those 24 are
+  the restore policy - the promotion is the only hand-off, an exit code the policy
+  has never seen still restores, the staged -5 sequence still reaches the pair
+  after the array is gone, a generation-stale pair is refused - plus the boundary
+  case "a block ending exactly at the object end is allowed, one byte more is
+  refused" and the documented BUG.7 residual "an undeclared exact multiple of 0x20
+  is still emitted" pinned as the SE overrun it was. `python3
+  scripts/check_bug2_release_paths.py` -> `56 check(s) passed, 0 failed`, exit 0
+  (`docs/verification/2026-09-11-0.12/t17/suite_logs/w0lf_host_verification/bug2_release_paths.log`;
+  the `43` this
+  block used to quote has no captured log and is WITHDRAWN. Nine of the checks
+  read `probe_restore_policy.c` too). `python3
+  scripts/check_bug2_release_paths.py --selftest` mutates TEMP COPIES thirteen ways
+  (six of them new, two on the policy file) and requires the lint to fail on each
+  -> `selftest: all mutations caught`, exit 0. `THEOS=$HOME/theos make libengine`
+  -> `OK: .theos/libengine/libw0lfengine.a (792K, 50 objects)` with a 0-byte
+  build log (zero warnings, zero errors; the archive defines
+  `_probe_exit_action_for` and `_probe_restore_fd_source`, and
+  `kexploit_opa334.o` references them). `clang -fsyntax-only
+  kexploit/kexploit_opa334.m` is clean (exit 0, no errors) under both `-DDEBUG`
+  and `-DNDEBUG` - and so are `krw.m`, `krw_zone_write.c`, the policy file,
+  `VM.m` and `sandbox.m` (same flags, no diagnostics). Both host commands are now
+  part of the standing suite: `scripts/regression.sh` gained a "BUG.1 host tests"
+  section (host-only, no device command) that runs the writer+restore host test
+  and the release-path lint and reports their check counts - verified through all
+  three of its paths (in-repo: 2 ok, 65 and 43 checks; scripts absent: 2 skip
+  notes; stubbed failing scripts: 2 bad, exit 1). NOT device-verified, and one residual this step does not remove:
+  the restore's own put-back still goes through `early_kwrite64`, which is NOT
+  routed through the `kwrite_zone_element` clamp - that is BUG.7 (0.13 section),
+  and the staged -5 exit is now one more exit that issues those two writes.
+
+  Step 3b (same day, later pass: the residual steps 3 and 1 left): the clamp now COVERS the
+  probe, and nothing in the tree writes without a declaration. Three changes:
+
+    * default deny in the writer (`kexploit/krw_zone_write.c`): a call with no
+      declared object - or with one that does not contain the target - is refused
+      (`KRW_ZONE_REFUSE_UNDECLARED`) and no block is emitted, whatever its length.
+      Step 3 only refused the SHIFTED tail block, and the SE write was an exact
+      multiple of 0x20 (one full block at +0x50 of a 0x60 object), so the check
+      that was supposed to catch it never saw it. Every block of the range is now
+      checked before the first byte goes out, and the emit loop re-checks each
+      block so a later edit to the loop cannot silently emit an out-of-object one;
+    * `krw_zone_write_qword()` / `kwrite_zone_element_qword()` - the qword write
+      the probe needs (what `early_kwrite64` does, with the bound check it never
+      had), clamped identically. It read-patches-writes the 0x20-ALIGNED block
+      containing the qword instead of 32 bytes starting at it, so the block cannot
+      straddle two aligned units - which is also why the SE address (+0x50 of a
+      0x60 object) is now a legal, in-object write (its block is +0x40..+0x60);
+    * the staged writing probe uses it for everything it touches: the promotion
+      round trip's marker write and its put-back, the restore's two put-back
+      writes (via `probe_kwrite_inpcb_qword`), and the escape path's other inpcb
+      write in `krw_sockets_leak_forever`. A refused put-back is reported as the
+      failure it is instead of writing through an address nothing verified. The
+      window those writes declare is DERIVED from the field offsets, not guessed:
+      the runtime `filt` offset + 8 (the qword the probe preserves), rounded up to
+      a whole block by `krw_zone_window_for_field_end()` - 0x160 for both layouts
+      this tree knows (0x148+8 -> 0x158, and 0x150+8 -> 0x160), and the filt and
+      chksum qwords share the aligned block 0x140..0x160 that window covers. It is
+      the inpcb's own field span, NOT the kalloc bucket size: reading that needs a
+      zone elem_size offset through `inpcbinfo.ipi_zone` (0.13 BUG.7), and
+      inventing one is the class of guess that panicked the SE. Address trust
+      therefore stays where it already was - the 0.13 canonical-pointer guard plus
+      the live-inpcb value check in the round trip; the clamp's job is only that
+      no block is ever emitted unproven.
+
+  The one other caller, `kexploit/sandbox.m`'s class-node write, now declares the
+  object it knows (`sizeof(struct extension_class_node)` == 0x20 == one block, the
+  same structural declaration `VM.m` makes for its `struct vm_map_entry`) and
+  skips the bucket if the writer refuses. The two `so_usecount` writes in
+  `krw_sockets_leak_forever` deliberately stay on `early_kwrite64`: their object is
+  a `struct socket`, and this tree has no field table for it that could state a
+  window honestly.
+
+  Verification that actually ran (host, no device, no device command):
+  `bash scripts/run_krw_zone_write_host_test.sh` -> `checks=116 failures=0` /
+  `KRW_ZONE_WRITE_HOST_TEST PASS`, exit 0 (T17 re-run: raw log
+  `docs/verification/2026-09-11-0.12/t17/krw_zone_write.log`; the clamp-only
+  revision at `HEAD` is the 41-check one - `t17/head_replay/` - so this step's 51
+  new ones sit on top of step 1's 24 restore-policy checks. The intermediate `65`
+  this prose used to quote is WITHDRAWN, uncaptured and unreproducible). The 51
+  are the default-deny shapes - the SE write itself among them, each asserting no
+  block, no RMW read and no changed kernel byte - the undeclared sweep (768
+  shapes, not one block), the qword clamp (the SE address allowed with its object
+  declared, and refused when the window is undeclared, foreign, or cuts the
+  aligned block) and the window arithmetic for both inpcb layouts). `python3
+  scripts/check_bug2_release_paths.py` -> `56 check(s) passed, 0 failed`, exit 0
+  (`docs/verification/2026-09-11-0.12/t17/suite_logs/w0lf_host_verification/bug2_release_paths.log`;
+  the `43 before`
+  this block used to quote is WITHDRAWN - uncaptured. The 13 new ones read
+  `krw_zone_write.c` and `sandbox.m` too and
+  assert the deny branch, the aligned qword RMW, that the probe and the restore
+  hold NO `early_kwrite64`/`early_kwrite32bytes` call at all, that both declare
+  their window from the field offsets, and that no bare undeclared
+  `kwrite_zone_element(` caller is left). `python3
+  scripts/check_bug2_release_paths.py --selftest` mutates TEMP COPIES nineteen
+  ways (six new: the restore back on `early_kwrite64`, the marker round trip back
+  on it, the writer's two deny branches removed, the qword RMW un-aligned,
+  sandbox.m back on the undeclared call) and requires the lint to fail on each
+  -> `selftest: all mutations caught`, exit 0. `THEOS=$HOME/theos make libengine`
+  -> `OK: .theos/libengine/libw0lfengine.a (796K, 50 objects)`, exit 0, 0-byte
+  build log (zero warnings, zero errors), and `llvm-nm` shows the archive defines
+  `_krw_zone_write_qword`, `_krw_zone_block_align_down`,
+  `_krw_zone_window_for_field_end`, `_kwrite_zone_element_qword` with
+  `kexploit_opa334.o` referencing them (U) - i.e. the engine really links the new
+  path, not just compiles it. `clang -fsyntax-only` (theos SDK, tweak flags) is
+  clean (exit 0, no diagnostics) for `krw.m`, `krw_zone_write.c`,
+  `kexploit_opa334.m`, `sandbox.m` and `VM.m` under both `-DDEBUG` and
+  `-DNDEBUG`. `python3 scripts/test_offsets.py` -> PASS (exit 0), `bash
+  scripts/test_chain_select.sh` -> `26 passed, 0 failed` (exit 0), `./W0lfSword
+  audit` -> `AUDIT PASSED` (exit 0: shellcheck clean, 178 defs/0 dead, 49 files
+  parse). The full `scripts/regression.sh` was NOT run: its "Live device smoke"
+  section ssh's to whatever `.w0lfsword/active_device` names, and this task runs
+  no device command; the two commands its BUG.1 section wraps were run directly
+  (above).
+  NOT device-verified, and the limits this step does not remove: the clamp
+  verifies a block against the window it is GIVEN, so a caller that declares a
+  window derived from an address it never verified still gets a self-consistent
+  answer (that is the address-trust half, held by the canonical-pointer guard and
+  the value check); the declared window is the field span, not the bucket; and
+  BUG.7's other half (a true kalloc size probe, and the `so_usecount` writes)
+  stays open in the 0.13 section. The SE's 2026-09-11 write class is closed on the
+  host: the exact call (a 0x20 block at +0x50 of a 0x60 object, undeclared) now
+  emits nothing.
+
+  T12 closing pass (task 12/12, host only, no device command): all three steps
+  re-run on the tree as it stands, plus the whole pinned suite.
+  `bash scripts/run_krw_zone_write_host_test.sh` -> `checks=116 failures=0` /
+  `KRW_ZONE_WRITE_HOST_TEST PASS` (exit 0) - the clamp, the qword clamp and the
+  restore policy in one run, including "staged -5 step 3: the restore is NOT
+  unreachable after the spray array was released",
+  "staged -5 step 3: it writes the saved values back through the promotion's fds"
+  and "a pair opened for an earlier save is refused (no write through a foreign
+  socket)". `python3 scripts/check_bug2_release_paths.py` -> `56 check(s) passed,
+  0 failed` (exit 0), `--selftest` -> `selftest: all mutations caught` (19/19,
+  exit 0). `bash scripts/check_host_verification.sh --with-builds` -> `17 ok,
+  0 drift` (exit 0) - every hash this item's prose quotes reproduced byte-for-byte
+  after the BUG.6 work changed the engine archive and the app binary; the two
+  pinned hashes that legitimately moved are re-pinned with the new values
+  (`engine_lib_archive` 263ae60d..., `app_binary` 2922ebb3...), not excused as
+  "expected to differ". `THEOS=$HOME/theos make libengine` ->
+  `OK: .theos/libengine/libw0lfengine.a (804K, 52 objects)` with a 0-byte build
+  log, and `./W0lfSword audit` -> `AUDIT PASSED` (shellcheck clean, 178 defs /
+  0 dead, 53 shell+python files parse). Still NOT device-verified: the SE run
+  that would confirm the restore on the device is the next device day, and
+  readonly stays the only mode offered on unproven device/iOS pairs.
+
+  BUG.1 option 2 (the field choice) now has its own artifact instead of a
+  sentence: `scripts/check_pressure_budget.py` asserts, over the archive's
+  sources plus their local headers plus the app's sources, that (a) the probe
+  body never writes the `inp6_icmp6filt` field - the pointer the kernel
+  dereferences on the next packet - and (b) the probe's preserved qword is the
+  one at `filtOffset + 8` (the chksum qword, i.e. the field with no concurrent
+  reader), and (c) nothing in the compiled sources calls `send` / `sendto` /
+  `recv` / `recvfrom` / `sendmsg` / `recvmsg` at all, so no kernel path in this
+  process consumes the number the probe writes. Evidence: `python3
+  scripts/check_pressure_budget.py` -> `ok BUG.1 probe field: nothing in the
+  shipped code consumes the probed qword`, `ok BUG.1 probe field: the probe body
+  does not touch the icmp6 filter pointer`, `7 check(s) passed, 0 failed`
+  (exit 0); `--selftest` mutates temp copies seven ways - the probe preserving
+  the filter pointer instead of the chksum qword, a `send()` added to the
+  compiled sources, and five pressure-side mutations - and reports `selftest:
+  all mutations caught` (7/7, exit 0). [T17 re-run: the `7 check(s)` / `7/7`
+  above are the counts of THAT pass - the checker has 8 checks now (the
+  disk-budget one added at T14), and the re-run prints `8 check(s) passed,
+  0 failed` with the same two `BUG.1 probe field` lines, raw log
+  `t17/suite_logs/w0lf_host_verification/pressure_budget.log`.]
+  "Probe a scratch object we own" stays
+  unnecessary: the shipped probe never touches a live pointer field it does not
+  save and restore, and the `or` in the item is satisfied by the inert-field
+  half the checker pins.
+
+  Step 3e (task 13/14, host only): the item's three steps now have an END-TO-END
+  host artifact that injects the overrun and then walks the whole probe sequence,
+  instead of driving the clamp and the policy one at a time. `tests/
+  probe_restore_e2e_host_test.c` + `scripts/run_probe_restore_e2e_host_test.sh`
+  compile the SAME two engine files and run, over a fake kernel window: (1) the
+  SE overrun (0x20 at +0x50 of a 0x60 kalloc.96 object) refused with zero blocks
+  emitted - with a detector check that requires the harness's own out-of-object
+  counter to fire on a raw block, so the refusal is measured and not an absence
+  of evidence - plus the asymmetry the fix rests on (the 32-byte shape there is
+  refused, the qword shape at the same address is allowed because its
+  0x20-aligned block is +0x40..+0x60); (2) the restore on the error exit (`-1`,
+  write-verify exhaustion) and on the cancel/budget exit (`-7`), for BOTH inpcb
+  layouts offsets.m ships, requiring the two saved qwords to be byte-identical
+  again (the chksum marker gone), exactly two put-back blocks and none outside
+  the declared window; (3) the cancel shape that was BUG.1 one exit later - after
+  pe_v1's release funnel emptied the spray tracking array, the restore still
+  reaches the pair through the promotion's fds, and with no usable pair it writes
+  NOTHING and reports a FAILED restore; (4) the promotion handed over (no
+  put-back at all); (5) the clamp covering the restore's own put-back (a
+  declaration that is too small, or one that cuts the qword's aligned block, is
+  refused with no byte written and the failure reported); (6) the field-derived
+  window asserted at 0x160 for both layouts. Evidence: `bash
+  scripts/run_probe_restore_e2e_host_test.sh` -> `checks=56 failures=0` /
+  `PROBE_RESTORE_E2E_HOST_TEST PASS` (exit 0), sha256 of the raw output
+  `62f760e7402071fcb823a7ec5191904e098ac6b520907ef13135ba6fa729cf4b`;
+  `python3 scripts/probe_restore_e2e_selftest.py --selftest` -> `selftest: all
+  mutations caught` (4/4, exit 0) after mutating TEMP COPIES four ways (the
+  clamp's block-end refusal removed, the writer's default deny removed, the
+  cancel exit handed off instead of restored, the promotion-fd fallback removed)
+  and requiring the harness to fail on each; `bash
+  scripts/check_host_verification.sh` -> `16 ok, 0 drift` (exit 0, the two new
+  entries added, all fourteen pre-existing pins unmoved); `./W0lfSword audit` ->
+  `AUDIT PASSED` (178 defs / 0 dead, 56 files parse). Both new commands are wired
+  into `scripts/regression.sh`'s BUG.1 host section (five host results now); the
+  section run alone through all three of its paths - in-repo `5 ok` including the
+  two new ones, scripts-absent skip notes, and the two new scripts stubbed to
+  `exit 1` reported `✗` - is logged in
+  `docs/verification/2026-09-11-0.12/t13/regression_bug1_section.{repo,absent,failing}.log`
+  (sha256 `7bf73e02...`, `95de928b...`, `f84000b8...`). Raw command lines, outputs
+  and hashes are in
+  `docs/WORKLOG.md` (T13) with the logs under
+  `docs/verification/2026-09-11-0.12/t13/`. Still NOT device-verified: the SE run
+  that would confirm the restore on the device is the next device day, and
+  readonly stays the only mode offered on unproven device/iOS pairs.
+
+  T15 closing pass (task 15/16, host only, no device command): all three steps
+  re-run on the tree as it stands, with the per-case output kept this time.
+  `bash docs/verification/2026-09-11-0.12/t15/capture.sh` -> 15/15 commands rc=0,
+  and counted off the captured logs themselves -
+  `s1_krw_zone_write_host_test: 116 ok, 0 FAIL (of 116)` plus
+  `s1_probe_restore_e2e: 56 ok, 0 FAIL (of 56)`, i.e. 172 host cases, 0
+  failures; every case line is in
+  `docs/verification/2026-09-11-0.12/t15/BUG1-CASES.txt`, and each sub-step is
+  mapped to the shipped file:line that implements it in `BUG1-EVIDENCE.txt`
+  (step 1 `kexploit_opa334.m:1740` + `probe_restore_policy.c` fail-safe default;
+  step 2 `kexploit_opa334.m:1580` chksum qword, pinned by
+  `scripts/check_pressure_budget.py`; step 3 `krw_zone_write.c`
+  `krw_zone_check_bounds` default-deny + `krw_zone_write_qword`). The SE write is
+  refused in both harnesses ("SE write (0x50 into a 0x60 object) is refused",
+  "injected overrun (0x20 at +0x50 of 0x60) is REFUSED"), and an INDEPENDENT
+  sweep written for this pass (its own monitor, not the project harness) over
+  15253 offset/length/object-size combinations around a kalloc.96 object reports
+  `allowed=2460 refused=12793 violations=0` / `INDEPENDENT_CLAMP_SWEEP PASS` - so
+  the pass is not a clamp that refuses everything. `THEOS=$HOME/theos make
+  libengine` -> `OK: .theos/libengine/libw0lfengine.a (804K, 52 objects)`, archive
+  sha256 `263ae60d...` (the value `scripts/check_host_verification.sh` pins; `16
+  ok, 0 drift`), and `llvm-nm` shows `_krw_zone_write_qword`,
+  `_krw_zone_window_for_field_end`, `_kwrite_zone_element_qword`,
+  `_probe_exit_action_for` DEFINED with `kexploit_opa334.o` referencing (U) the
+  clamped qword writer - the engine links the path, it does not merely compile
+  it. Re-running the capture reproduced all seven harness logs byte-identically
+  (recorded in `docs/verification/2026-09-11-0.12/t15/MANIFEST.txt`). Still NOT
+  device-verified: the SE run that would confirm the restore on hardware is the
+  next device day, and readonly stays the only mode offered on unproven
+  device/iOS pairs. Residuals this pass does not remove, unchanged from step 3b:
+  the clamp checks a block against the window it is GIVEN, so address trust stays
+  with the canonical-pointer guard + the live-inpcb value check, and the
+  `early_kwrite64` / `so_usecount` callers stay outside it (BUG.7, 0.13).
+
+  T15 re-run (same day, later pass, host only): the same capture was run again
+  and the two harnesses' logs came back BYTE-IDENTICAL to the run above
+  (`s1_krw_zone_write_host_test.log` sha256 `1386b0b6...` and
+  `s1_probe_restore_e2e.log` sha256 `62f760e7...`, each equal to the earlier
+  unsuffixed log of the same command - the pairs are listed in `MANIFEST.txt`),
+  so the 172/0 is reproducible and not one lucky run. `capture.sh` now prints
+  every case with its own PASS/FAIL line (172 lines, 0 FAIL, full stdout kept in
+  `t15/capture.out`) instead of counts plus FAIL lines only, and ends on an
+  explicit `BUG.1 HOST VERDICT: PASS` whose exit code is the script's own
+  (`capture rc=0`). The step-1/2/3 artifact results are unchanged from the run
+  above: 15/15 commands rc=0, `host verification: 16 ok, 0 drift`, the BUG.1
+  regression section `5 ok, 0 bad`, `INDEPENDENT_CLAMP_SWEEP PASS`
+  (15253 shapes, 2460 allowed, 12793 refused, 0 violations), archive
+  `263ae60d...` still the pinned value. Still NOT device-verified.
+
+  T17 re-run (task 17/18, host only, no device command): every host harness for
+  this item re-run against the working tree as it stands; raw output, the
+  changed-file list and a hash of both are in
+  `docs/verification/2026-09-11-0.12/t17/` (`capture.sh`, `replay_revisions.sh` and
+  `make_manifest.sh` reproduce it, `MANIFEST.txt` hashes every capture,
+  `changed_files.sha256` every changed source, `inputs.sha256` the sources the
+  harnesses compile, `CLAIMS-RECONCILED.md` is the claim-by-claim table,
+  `t17/revisions/krw_head/tree/` - and the same layout under `trm_routea`,
+  `trm_trm2`, `trm_trm1` - holds a SPARSE copy of each old harness revision,
+  only the paths that harness compiles, ~0.6 MB each instead of a 15 MB
+  whole-repo export, so the capture depends on nothing outside the repo, and
+  `t17/check_capture_paths.py` asserts that every path cited here exists). All
+  exit 0:
+  `bash scripts/run_krw_zone_write_host_test.sh` -> `checks=116 failures=0` /
+  `KRW_ZONE_WRITE_HOST_TEST PASS` (steps 1 + 3 + 3b in one run, sha256
+  `1386b0b6...`); `bash scripts/run_probe_restore_e2e_host_test.sh` ->
+  `checks=56 failures=0` / `PROBE_RESTORE_E2E_HOST_TEST PASS` (sha256
+  `62f760e7...` - the SE overrun refused, then the `-1` and `-7` exits restored
+  end to end); `python3 scripts/probe_restore_e2e_selftest.py --selftest` ->
+  `selftest: all mutations caught`; step 2 where it lives - `python3
+  scripts/check_pressure_budget.py` -> `8 check(s) passed, 0 failed`, whose two
+  `BUG.1 probe field` lines are "nothing in the shipped code consumes the probed
+  qword" and "the probe body does not touch the icmp6 filter pointer";
+  `python3 scripts/check_bug2_release_paths.py` -> `56 check(s) passed, 0 failed`,
+  `--selftest` -> `selftest: all mutations caught`;
+  `bash scripts/check_host_verification.sh --with-builds` -> `21 ok, 0 drift`
+  (exit 0 - engine archive `263ae60d...`, linked app binary `2922ebb3...`, and the
+  app-side symbol/strings entry, each re-pinned to this tree). Claims this pass
+  corrected in the item above: `41 checks, 0 failures` is labelled HISTORICAL and
+  cited to the replay of the committed `HEAD` revision
+  (`t17/revisions/krw_head/build_and_run.log`, `t17/head_replay/build_and_run.log`
+  - the committed harness really does print 41), while the current tree's number
+  `checks=116 failures=0` is the one captured for this tree; and every `65` and
+  `43` count this item used to quote is WITHDRAWN: no captured log and no
+  committed revision produces them.
+  Re-run after that table was written (same day, host only): the capture was
+  taken again and the three anchor hashes came back byte-identical, and
+  `t17/verify_bug_claims.py` re-asserts every capture-backed claim of this item
+  mechanically -> `claim check: 64 ok, 0 bad` (`t17/verify_bug_claims.log`); the
+  one claim it caught as mis-cited was an attribution, not a count - see
+  `t17/CLAIMS-RECONCILED.md` section 7.
+  Still NOT device-verified - readonly stays the only mode on unproven
+  device/iOS pairs.
+
+- [x] `BUG.2` — **memory pressure drives two of the three resource kills.**
   Fixed in `0.13`: pe_v2's cancel path returned before its cleanup and leaked the
   search mapping + memory object + socket spray; the pe_v2 release log read the
   socket count after clearing the array (always 0); the app now releases the
@@ -496,6 +929,231 @@
   report comes from. Options: allocate/scan/free the mappings one at a time
   instead of all up front, and/or limit the marker writes to the pages the walk
   actually reads. Measure with `W0lfTerm.diskwrites_resource-*.ips` before/after.
+
+  [Correction, T12: "~30 MB" does not match the source. `scripts/check_pressure_budget.py`
+  prints the real numbers per RAM class, and on the 3 GB SE2 class this report came
+  from the pass maps `(3GB / 8) / 4096` = 98304 pages = 384 MB as 12 x 32 MB
+  mappings - which is also what the engine's own comment on the allocate-failure
+  path says ("up to 12 x 32MB per cycle", `kexploit/kexploit_opa334.m:2047-2049`).
+  So the 1073.75 MB / 1083 s report should be read against 384 MB per cycle
+  (re-dirtied on each of up to 6 spray/race cycles), not against 30 MB, and a
+  "mark fewer pages" change has 384 MB per cycle as its headroom. The original
+  figure is left in place so the wrong number stays traceable.]
+
+  Release-path audit (task 8, same day, engine `kexploit/kexploit_opa334.m` only):
+  every function-level exit of `pe_v1` (8) and `pe_v2` (4) was listed and traced
+  BEFORE any code changed, plus the two loop-back paths (`continue` / `goto
+  retry_alloc`) and the inline releases inside the walks. Five leaks found, all
+  fixed (the fifth, pe_v2's `wiredAddrs` tracker object, in a second pass after
+  the first lint was itself audited - see the verification note below); the
+  allocation order, the mapping count, the spray size and the technique are
+  untouched, and "allocate one mapping at a time" stays a documented OPTION (not
+  implemented). Every release now prints one `[cleanup] ...` KPRINTF line, so a
+  device log shows each item going away.
+
+  The funnel (one call site per exit):
+  `pe_v1_release_cycle()` (sockets; per-mapping surface_munlock +
+  mach_vm_deallocate; the A18 wired mapping munlocked on every call, deallocated
+  only on a terminal exit because that mapping is allocated once and reused
+  across cycles), `release_memory_object()` (the port right, one bounded retry,
+  logged either way), `wired_pages_cleanup()` (pe_v2's tracked wired pages) and
+  `sockets_release()`.
+
+  What "released exactly once" rests on (structural, not a call-site habit):
+  the fileport arrays ARE the record (`sockets_release()` empties both, so a
+  second call is a no-op), a search mapping / a wired page is removed from its
+  tracking array BEFORE it is touched, `wired_pages_cleanup()` empties the array
+  it walks, and `surface_munlock()` is a no-op unless the address is still in
+  `gMlockDict` - so munlocking a mapping that was never walked cannot fail or
+  double-release. pe_v1 has exactly ONE release site per resource (zero direct
+  sockets_release / mach_vm_deallocate / surface_munlock calls left in its body;
+  the lint enforces that).
+
+  pe_v1 (returns int: -1 fail, -2 readonly stop, -3 writetest stop, -4 race
+  rejected, -7 cancel/budget, 0 success):
+
+  | exit | what it releases | state before the fix |
+  | --- | --- | --- |
+  | OOB calloc failed (src 1606) | the one buffer that allocated | leaked it |
+  | race latched broken, -4 (1628) | funnel, wired mapping included | leaked the A18 wired mapping + both buffers |
+  | 6 spray/race cycles exhausted, -1 (1637) | funnel, wired mapping included | same |
+  | search-mapping allocate failed (1660) | funnel: this cycle's already-allocated mappings, A18 wired mapping, buffers | leaked up to 12 x 32MB of mappings |
+  | spray produced 0 sockets -> continue (1696, funnel 1701) | funnel, wired mapping munlocked and KEPT for the next cycle | released the mappings, never munlocked them |
+  | mach_make_memory_entry_64 failed (1733) | funnel: ~22.5k sprayed fileports, every mapping, the walked mappings' surfaces, A18 wired mapping, buffers | leaked all of it (A3.5 had covered pe_v2 only) |
+  | memory-object release failed (1834) | port retried once + logged (1825); funnel for the rest | leaked the port AND the whole cycle |
+  | end of cycle, -2/-3/-7 (1845 -> 1850) | funnel, wired mapping deallocated (terminal exit) | mappings deallocated, their surfaces never munlocked |
+  | success, 0 (1860) | the same funnel + buffers | one leaked IOSurface per mapping walked, buffers leaked |
+  | each walked search mapping | its memory object, by `release_memory_object()` (1825) inside the walk | bare mach_port_deallocate whose failure aborted the attempt |
+  | each search mapping the walk read (mlock 1735) | surface_munlock() in the funnel (600) | `surface_mlock()` had no munlock anywhere in pe_v1: one leaked IOSurface per mapping per cycle |
+
+  pe_v2 (void; 0.13 had already removed the cancel path's early return):
+
+  | exit | what it releases | state before the fix |
+  | --- | --- | --- |
+  | OOB calloc failed (1873, exit 1878) | the one buffer that allocated | leaked it |
+  | all four sizes failed (1893, exit 1899) | the two buffers | leaked them |
+  | wired-page allocate failed (1915) | wired_pages_cleanup() (1945) + smaller size | already correct (A3.5) |
+  | search-mapping allocate failed (1972, exit 1977) | wired_pages_cleanup() + wiredAddrs tracker + buffers | buffers AND the tracker leaked |
+  | memory-entry make failed (1988, exit 1994) | mapping munlock (1989) + wired_pages_cleanup() (1990) + wiredAddrs tracker + buffers | buffers AND the tracker leaked |
+  | found a wired page (2031) | that page munlocked + deallocated inline (2051/2052) | the page was removed from `wiredAddrs` BEFORE the deallocate, so wired_pages_cleanup() never saw it: leaked mlock + IOSurface on the success path |
+  | socket limit reached (2081) | sockets_release() (2077) + fresh arrays | correct, now logged |
+  | cancel/budget -7, aborted (2012) | memory object (2097), sockets (2101), search mapping munlock + deallocate (2108/2109), then wired_pages_cleanup() (2118) + tracker + buffers | 0.13 stopped the early return, but the mapping's mlock was never released |
+  | success | the same chain | same missing munlock |
+  | allocFailed -> smaller size (1943 -> goto 1892) | wired_pages_cleanup() (1945) + wiredAddrs tracker | the tracker (up to 4MB of backing store for the 2GB attempt) was leaked, and re-leaked per retry |
+
+  The two pe_v2 exits marked "allocFailed"/"all four sizes failed" are the pattern
+  the fifth leak lived in: the array is created with `initWithCapacity:` (524288
+  entries at 2GB/4096 = ~4MB of backing store) BEFORE the first wired page is
+  attempted, so it is held even when the allocation that made it necessary fails -
+  i.e. the leak is largest exactly under the memory pressure this bug is about.
+
+  Release log lines, all KPRINTF so they land in the pullable device log:
+  `[cleanup] sockets_release: N sprayed socket fileports released`,
+  `[cleanup] wired_pages_cleanup: N wired page(s) munlocked + deallocated`,
+  `[cleanup] pe_v1: memory object 0x... released (kr=...)`,
+  `[cleanup] pe_v1: search mapping 0x... munlocked + deallocated (kr=...)`,
+  `[cleanup] pe_v1: wired mapping 0x... munlocked + deallocated (kr=...)` (or
+  `... munlocked (kept for the next cycle)`),
+  `[cleanup] pe_v2: search mapping 0x... munlocked + deallocated (kr=...)`,
+  `[cleanup] pe_v2: found wired page 0x... munlocked + deallocated (kr=...)`.
+
+  Round 3 (same day, after the reviewer refused the first pass): the three leaks
+  the audit FOUND are now FIXED, not documented. The task said "fix any path that
+  leaks", and all three are release paths (the fourth resource this item names -
+  the socket spray, the search mappings, the memory object, the wired pages - are
+  untouched by this round; nothing about the technique or the allocation ORDER
+  changed, and "allocate one mapping at a time" is still only a documented option):
+
+  | path | what was leaked | what is released now | evidence |
+  | --- | --- | --- | --- |
+  | `pe_init()` on attempt 2+ / HUD RERUN (src 618) | a SECOND free thread started on top of the live one, racing the same `FIXED\|OVERWRITE` window | `if (g_freeThreadLive) return;` - the live thread is reused; a new one is created only after the teardown joined the old one | lint check "pe_init: the free thread is created only when none is live"; `KPRINTF("[cleanup] pe_init: free thread already live — reusing it...")` |
+  | `initialize_physical_read_write()` on attempt 2+ (src 709) | the previous attempt's OOB mapping (2 pages) + its port right, orphaned by overwriting `pcObject`/`pcAddress` | `release_physical_mapping()` runs FIRST: `mach_port_deallocate(pcObject)` + `mach_vm_deallocate(pcAddress, pcSize)`, both globals cleared | lint check "initialize_physical_read_write: the previous OOB mapping is released first"; 2 `[cleanup] physical mapping ...` log lines |
+  | `kexploit_opa334()` early returns -2/-3/-4/-7/-1 (src 2428-2450) | the free thread kept spinning on `raceSync == 0` (hot spin, no yield -> CPU axis) + `readFd`/`writeFd` stayed open | `kexploit_attempt_teardown()` on every one of them: stop flag, `raceSync = 1`, `goSync = 0`, `pthread_join`, `close(readFd/writeFd)`, `g_freeThreadLive = false` | lint check "every exit after pe_init() runs the attempt teardown" (traces all 10 exits; the 2 pre-init ones must NOT call it, and are checked); `[cleanup] kexploit: free thread stopped + joined`, `[cleanup] kexploit: target fds closed` |
+  | `kexploit_opa334()` tail (was 4 inline lines, src 2229-2233) | - (was correct) | the same helper, so the success path and the early returns cannot drift apart again | lint check above; the tail's 4 lines are gone |
+  | pe_v1 `socketPorts`/`socketPcbIds` (per cycle, src 1667) | the previous cycle's pair: up to 6 pairs of ~22.5k NSNumbers each, alive for the whole attempt | `tracker_arrays_reset()` at the same point in the allocation order; the FUNNEL also calls `tracker_arrays_release()` on every exit | lint checks "the funnel releases the spray-tracking pair", "only created inside tracker_arrays_reset()"; `[cleanup] spray tracking arrays released` |
+  | pe_v2 `socketPorts`/`socketPcbIds` (per mapping + the socket-limit reset, src 1997/2243) | the same, per iteration | `tracker_arrays_reset()` at both re-creation sites; `tracker_arrays_release()` at the calloc/all-sizes/search-mapping/memory-entry exits and the tail | lint check "pe_v2: every exit releases the spray-tracking pair" (4 exits) |
+  | pe_v1 `searchMappings` (per cycle) | the per-cycle owned array (capacity buffer included) | `[searchMappings release]` in the funnel, after the loop drained it | lint check "pe_v1 funnel empties the mapping array before releasing" + `[cleanup] pe_v1: searchMappings tracker released` |
+  | pe_v1/pe_v2 `targetInpGencntList` (per call) | the third owned object, held for the whole call | `release_gencnt_tracker()` at every terminal exit (7 in pe_v1, 3 in pe_v2) - NOT on the pe_v1 cycles that loop back, because the list is shared across cycles on purpose | lint check "every terminal exit releases the gencnt tracker" (7 + 2 exits traced, the pre-creation exits named as exempt) |
+  | pe_v2 `wiredAddrs` (the 2GB/4096 = ~4MB tracker) | already fixed in the first pass | 4 release sites (retry, both FAILURE exits, tail) | lint check "released on all four exit shapes" |
+
+  A NEW hazard found while fixing item 2 (worth knowing, it is why the stop flag
+  exists): a plain `pthread_join` in the teardown can HANG. `free_thread`'s first
+  wait is `while (goSync == 0);`, and the pe_v1 OOB-calloc failure exit returns
+  before `initialize_physical_read_write()` ever sets `goSync = 1` - joining that
+  thread blocks the exploit thread forever. `g_freeThreadStop` is checked by all
+  four waits plus the post-wait break, so the join always terminates; the thread
+  also leaves WITHOUT mapping if it is stopped between waits.
+
+  Residual risk inside the audited paths themselves: a `mach_port_deallocate` on
+  the memory object that fails twice still leaves that one right held - it is
+  logged with its kr now instead of silently aborting the attempt. And the two
+  pressure sources this item named are UNCHANGED by the audit: the scan still
+  writes `randomMarker` into every page of every search mapping and the initial
+  spray still holds ~22.5k sockets, so an A13 pass should still be measured
+  against `W0lfTerm.diskwrites_resource-*.ips` (plus the CPU/wakeup axes) before
+  the technique question is called closed.
+
+  Separate observation from this round, NOT a release path and NOT fixed here
+  (pre-existing, unchanged by the audit): after pe_v1 returns, the socket arrays
+  have been emptied by `sockets_release()`, so `restore_corrupted_socket()` -
+  which re-opens its fds from `socketPorts[g_probe_control_idx]` - cannot re-open
+  them on the staged -5 path (`kexploit_opa334`, kbase-scan exhausted) when the
+  in-walk restore was never confirmed. Same in HEAD. That is a BUG.1 restore
+  question (keep the corrupted pair addressable past pe_v1), not a leak, so it
+  stays out of this patch and is recorded here so it is not re-discovered.
+  FIXED in the same device-day pass - BUG.1 step 1 below (the promotion's fds are
+  now the fallback, stamped with the save generation, and the restore reports its
+  own outcome on that exit instead of writing nothing).
+
+  Verification that actually ran (host, no device, no device commands):
+  `python3 scripts/check_bug2_release_paths.py` -> `34 check(s) passed, 0 failed`,
+  exit 0 - 43 checks and thirteen mutations after the BUG.1 step-1 checks below
+  [T17 note on those three numbers: the `34`, the `43` and the `thirteen` are the
+  counts of THAT pass. This lint is untracked - no revision of it exists in git -
+  and no log of that run was kept, so none of the three is reproducible. What IS
+  captured on the current tree is `56 check(s) passed, 0 failed` plus 19 selftest
+  mutations and their baseline
+  (`t17/suite_logs/w0lf_host_verification/bug2_release_paths.log`,
+  `.../bug2_release_paths_self.log`).]
+
+  extended the same lint with the restore contract (it traces every
+  function-level exit of both functions and prints the funnel
+  call found for each; requires the funnel - not just "some release" - before every
+  exit, with the two exits that legitimately hold nothing named explicitly by their
+  branch log line; asserts no release site bypasses `release_memory_object()`;
+  enforces pe_v1's one-release-site rule; accounts for every `surface_mlock()`
+  against a documented munlock path; requires every `[cleanup]` log line and all
+  four `wiredAddrs` release sites; and, from round 3, walks every exit of
+  `kexploit_opa334()` through the block scopes of its own path - so an exit covered
+  only by a SIBLING branch's teardown fails - checks that the teardown never fires
+  before `pe_init()`, that no bare `[NSMutableArray new]` re-created the spray
+  trackers outside `tracker_arrays_reset()`, that the previous OOB mapping is
+  released before a new one replaces it, and that every gencnt/tracker exit is
+  covered). The first version of this lint was itself audited and had two checks
+  that could not fail (a lookback that accepted a bare `free(readBuffer)` as "the
+  resource was released", and a `^(?!...)` lookahead that matched any line NOT
+  containing the forbidden call); a third was found in round 3 (the block scanner
+  filtered brace depths with a slice-relative index, so two exits got empty scope
+  windows). All three are real now, and
+  `python3 scripts/check_bug2_release_paths.py --selftest` mutates a TEMP COPY of
+  the source SEVEN ways (drops pe_v1's -4 funnel, drops pe_v1's -4 teardown,
+  restores a bare `[NSMutableArray new]` tracker pair, drops the previous-mapping
+  release, removes one `g_freeThreadStop` wait, bypasses
+  `release_memory_object`, drops the pe_v2 tail tracker release) and requires the
+  lint to fail on each -> `selftest: all mutations caught`, exit 0. `THEOS=$HOME/theos
+  make libengine` -> `OK: .theos/libengine/libw0lfengine.a (788K, 49 objects)` with
+  a 0-byte `.theos/libengine/build.log` (zero warnings, zero errors); W0lfTerm
+  `THEOS=$HOME/theos REBUILD_ENGINE=1 bash scripts/build_ipa.sh sideload 0.19` ->
+  `OK: dist/W0lfTerm-0.19-sideload.ipa` (153264 bytes; the rebuilt engine library
+  still links into the app). NOT device-verified: the next device run - plus a
+  `W0lfTerm.diskwrites_resource-*.ips` / CPU / wakeup comparison - is what proves
+  the freed resources are actually gone.
+
+  T12 closing pass (task 12/12, host only, no device command) - the LEAK half of
+  this item is what the 2026-09-11 device day could act on, and it is closed with
+  per-exit evidence, not with the word "fixed":
+  `python3 scripts/check_bug2_release_paths.py` -> `56 check(s) passed, 0 failed`
+  (exit 0) traces EVERY function-level exit of `pe_v1` (8) and `pe_v2` (4),
+  prints the funnel call it found for each, requires the funnel - not "some
+  release" - before every one, with the two exits that legitimately hold nothing
+  named by their own branch log line, and `--selftest` -> `selftest: all
+  mutations caught` (19/19, exit 0) shows those checks bite (dropping pe_v1's -4
+  funnel, its -4 teardown, the previous-mapping release, a `g_freeThreadStop`
+  wait, `release_memory_object`, the pe_v2 tail tracker release, or re-adding a
+  bare `[NSMutableArray new]` tracker pair each fail the lint). The cancel half
+  is asserted in the same run's other lint: `python3
+  scripts/check_scan_budget_cancel_writes.py` -> `25 check(s) passed, 0 failed`
+  including "BUG.4 engine pe_v2: the aborted (-7) path frees the mapping, the
+  object and the spray", "BUG.4 engine pe_v1: the -7 cancel exit releases the
+  spray AND the mappings" and "every -7 exit goes through the funnel (no cancel
+  exit leaks)". No leaked search mapping and no leaked socket spray on the cancel
+  path, as far as static + host evidence can show.
+  OPEN and deliberately NOT patched - so this checkbox is not read as more than
+  it is: the two pressure sources named above (the scan dirtying every page of
+  every search mapping, ~30 MB per pass, and the up-front spray holding ~22.5k
+  sockets) are unchanged, and "allocate/scan/free the mappings one at a time"
+  remains a documented OPTION. It is a technique change to the proven kernel path
+  and no host test can decide it, so it is recorded rather than attempted. Its
+  evidence is the measurement this item asks for: `idevicecrashreport -e <dir>`
+  -> `W0lfTerm.diskwrites_resource-*.ips` / CPU / wakeup reports, before and
+  after. The one part of that budget that COULD be bounded without a device - the
+  per-line log fsync - is throttled and counted now; see the closing note under
+  `SG.10` and W0lfTerm 0.6 `BUG.3`.
+
+  The remaining half now has a regression guard instead of only a note:
+  `scripts/check_pressure_budget.py` parses the real constants out of
+  `kexploit/kexploit_opa334.m` and pins them, and fails if any of them grows -
+  the page count and the RAM scaling, the mapping size and therefore the mapping
+  count, the per-page marker loops (a mutation that marks one page instead of
+  every page is caught), the `OPEN_MAX * 3 - 4096 * 2` spray bound (22528
+  sockets), and the per-cycle release funnel that keeps the PEAK at one cycle's
+  worth rather than six. Evidence: `python3 scripts/check_pressure_budget.py` ->
+  `8 check(s) passed, 0 failed` (exit 0) with a printed table (T17 re-run, raw
+  log `t17/suite_logs/w0lf_host_verification/pressure_budget.log`); `--selftest`
+  -> `selftest: all mutations caught` (exit 0). The `7 check(s) passed` /
+  `7/7` this note used to carry is a T12-dated count from before the disk-budget
+  check (the 8th) was added, with no retained log of that run. That table also
+  CORRECTS this item's own figure: see the 384 MB note below.
 
 - [x] `BUG.3` — **the 120 s budget is shorter than a full walk on this device.**
   The 19:10 run aborted at offset `0x1cc4000` of the mapping after exactly 120 s,
@@ -516,6 +1174,95 @@
   deeper in the CPU/wakeup/disk-write budgets (0.10, BUG.2), so a device run with
   600 s should be measured against all three resource axes before it is called
   done.
+
+  Default raised to 600 s (task 10, same day - the "settable" half was not the
+  bug, the default was): `EXPLOIT_SCAN_BUDGET_SEC` is 600 and the app's
+  `g_scanBudget` default is 600 (the top of the same 120/300/600 menu), so an
+  untouched run gets the budget the measured ~8.5 min walk actually needs - the
+  old 120 s default aborted at a quarter of the walk every time. One stale
+  `#define EXPLOIT_SCAN_BUDGET_SEC 120` was still in the file under the new one;
+  it is gone (it also warned `-Wmacro-redefined` in the engine build log, which
+  is how the duplicate surfaced). Evidence: `THEOS=$HOME/theos make libengine` ->
+  `OK: .theos/libengine/libw0lfengine.a (804K, 51 objects)` with a 0-byte build
+  log, and `python3 scripts/check_scan_budget_cancel_writes.py` ->
+  `20 check(s) passed, 0 failed` (it fails if either default is not 600, if the
+  app stops pushing the row into the engine, or if the banner stops reading the
+  value back from the engine). NOT device-verified.
+
+  Round 4 (task 10, the verification pass): the same lint now reports
+  `21 check(s) passed, 0 failed` and `--selftest` -> `selftest: all mutations
+  caught` (16/16) - it gained one structural check, written up under `BUG.4`
+  below. What this round adds for BUG.3 specifically is the link-level half: the
+  SET row really reaches the engine in the BUILT app, not just in the source.
+  `THEOS=$HOME/theos make libengine` -> `OK: .theos/libengine/libw0lfengine.a
+  (804K, 51 objects)` (exit 0), `bash scripts/build_ipa.sh sideload 0.20` ->
+  `OK: dist/W0lfTerm-0.20-sideload.ipa` (exit 0), and in the linked binary
+  `llvm-nm` shows `T _kexploit_set_scan_budget` / `T _kexploit_scan_budget`
+  defined while `llvm-objdump` shows `+[TermSettings setScanBudget:]` ending in
+  `bl _kexploit_set_scan_budget` - i.e. the UI's setter and the engine's setter
+  are the same call, in the artifact the device would install. NOT
+  device-verified.
+
+  T12 closing pass (task 12/12, host only, no device command):
+  `python3 scripts/check_scan_budget_cancel_writes.py` -> `25 check(s) passed,
+  0 failed` (exit 0) - 21 at the last pass, the four new ones are BUG.6's throttle
+  checks - including "BUG.3 engine: the default budget is the one that fits the
+  walk (600 s)", "BUG.3 engine: the budget is settable and clamped, and every
+  scan/spray loop reads it", "BUG.3 engine: the cancel/budget check sits INSIDE
+  each walk, not after it", "BUG.3 app: the default budget matches the engine
+  default and is pushed in at load", "BUG.3 app: a SET row exists, persists, and
+  pushes every change into the engine" and "BUG.3 app: the boot banner reads the
+  budget back from the ENGINE". `--selftest` -> `selftest: all mutations caught`
+  (21/21, exit 0; the budget default back to 120 s on either side is one of them,
+  and so is the app dropping the `kexploit_set_scan_budget` push). The artifact
+  half: `THEOS=$HOME/theos make libengine` -> `OK:
+  .theos/libengine/libw0lfengine.a (804K, 52 objects)` (exit 0, 0-byte build
+  log) and `bash scripts/build_ipa.sh sideload 0.20` -> `OK:
+  dist/W0lfTerm-0.20-sideload.ipa` (exit 0); in the linked binary (sha256
+  `2922ebb3c8138e6dcbd2efb95101afdceb26e409b83f8129d28bdb351eaf14c8`) `llvm-nm`
+  still defines `T _kexploit_set_scan_budget` / `T _kexploit_scan_budget` and
+  `llvm-objdump` still shows `+[TermSettings setScanBudget:] -> bl
+  _kexploit_set_scan_budget`. NOT device-verified (the banner reading 600 back on
+  the SE is a device-day check).
+
+  T16 closing pass (task 16/16, host only, no device command): re-run, not
+  re-quoted. `python3 scripts/check_scan_budget_cancel_writes.py` -> `25 check(s)
+  passed, 0 failed` (exit 0), incl. "BUG.3 engine: the default budget is the one
+  that fits the walk (600 s)" and "BUG.3 app: the boot banner reads the budget back
+  from the ENGINE"; `--selftest` -> `selftest: all mutations caught` (21/21, exit
+  0 - either default back to 120 s fails the lint on the mutated copy).
+  `python3 scripts/check_pressure_budget.py` -> `8 check(s) passed, 0 failed`,
+  `--selftest` 9/9. Two checkers written for this pass then read the two trees AND
+  the built artifact independently of the lint (a lint that drifts from the tree
+  has to pass twice): `docs/verification/2026-09-11-0.12/t16/rerun/
+  invariant_check.py` -> `27 ok, 0 failed` (engine default 600 == app default 600,
+  clamp 30..1800 with both bounds applied in the setter, 13 `SCAN_BUDGET_SEC()`
+  reads across the spray/race/pe_v1/pe_v2 guards) and `rerun/callgraph_check.py` ->
+  `6 ok, 0 failed` (`+[TermSettings setScanBudget:]` -> `bl
+  _kexploit_set_scan_budget` in the freshly linked binary, next to the BUG.4/BUG.5
+  call edges). Both artifacts were rebuilt in this pass by `bash
+  scripts/check_host_verification.sh --with-builds` -> `21 ok, 0 drift` (exit 0):
+  archive `sha256 263ae60d49fd0c15...`, linked binary
+  `sha256 2922ebb3c8138e6d...`. Raw output: `t16/rerun/{VERIFY.md,rerun.sh,RC.txt,
+  *.log}`. NOT device-verified - the banner reading 600 back on the SE is the
+  device-day check.
+
+  T17 re-run (task 17/18, host only, no device command, raw logs in
+  `docs/verification/2026-09-11-0.12/t17/suite_logs/w0lf_host_verification/`,
+  one per suite entry, written by `check_host_verification.sh` itself): `python3
+  scripts/check_scan_budget_cancel_writes.py` -> `25 check(s) passed, 0 failed`
+  (exit 0) with the six BUG.3 checks green and `--selftest` -> `selftest: all
+  mutations caught`; `python3 scripts/check_pressure_budget.py` -> `8 check(s)
+  passed, 0 failed`; `bash scripts/check_host_verification.sh --with-builds` ->
+  `21 ok, 0 drift` (exit 0), which rebuilt `libw0lfengine.a` (`804K, 52 objects`,
+  sha256 `263ae60d...`) and the ipa, and re-read `_kexploit_set_scan_budget` /
+  `_kexploit_scan_budget` out of the linked binary. Count corrections: the
+  `20 check(s) passed` this item quotes from the task-10 pass is a dated count
+  with no retained log - history, not a reproducible number; the reproducible ones
+  are `21` (`docs/verification/2026-09-11-0.12/scan_budget_cancel.log`, the first
+  capture of this lint) and `25` (this pass, re-run in `t12` and `t16` too,
+  `4dc5246d...`). NOT device-verified: the banner reading 600 back on the SE is
+  the device-day check.
 
 - [x] `BUG.4` — **no visible CANCEL in the app.** `cancel` / `abort` / `stop` work
   from the terminal, and the engine honours the flag at all three loop levels
@@ -538,8 +1285,181 @@
   read race, so "next check" is literal. The `cancel` command goes through the
   same bridge function, so the button and the terminal cannot disagree. Host
   evidence: `make libengine` -> `OK: .theos/libengine/libw0lfengine.a`, W0lfTerm
-  `bash scripts/build_ipa.sh sideload 0.17` -> `OK: dist/...ipa`; the app builds
-  with `-Werror`. NOT device-verified.
+  `bash scripts/build_ipa.sh sideload 0.17` -> `OK: dist/...ipa`. (Corrected in
+  the 2026-09-11 verification pass: this line used to say "the app builds with
+  `-Werror`". There is no `-Werror` in the app's Makefile - `W0lfTerm_CFLAGS` is
+  the `-Wno-*` set plus `-DDEBUG`. What is true is that a full
+  `THEOS=$HOME/theos make W0LF_SRC=...` on this tree exits 0 with 0 compiler
+  warnings and 0 errors; the only two diagnostics in the log are ld64.lld's
+  `-ios_version_min` and `-multiply_defined` notes from the Theos link line.)
+  NOT device-verified.
+
+  Round 2 (task 10, same day): the control is now VISIBLE and the cancel path is
+  verified against the leaks. Two changes, both sides:
+  * W0lfTerm (`TerminalViewController.m`): the tap target grows from a bare
+    36 pt dot to a 96 pt control that carries the word `cancel` (9 pt monospaced,
+    right-aligned, accent-coloured) beside the dot. The word is on exactly while
+    the run state is 1 - a dead control that promises a cancel is worse than a
+    dot - and the frames never move (the label fades in/out, the field width is
+    the same in both states), so nothing jumps when a run starts. The geometry is
+    an enum plus `_Static_assert(TERM_CANCEL_CONTROL_W == 96)`, and the control
+    finally has an accessible name (`cancel` / hint "stop the running kernel
+    scan") instead of a colour only.
+  * Engine (`kexploit/kexploit_opa334.m`): the CANCEL was honoured by the walks
+    but NOT by the socket spray, which is the longest thing a cancelled run still
+    paid for - the up-front spray opens up to ~28k sockets (a wakeup/CPU-budget
+    contributor, SG.10) and ran to the end of the file table after a cancel. The
+    stop flag (or the budget) is now checked at the top of pe_v1's spray/race
+    cycle (terminal `-7` exit through the release funnel), inside the up-front
+    spray loop, inside the mid-scan batch loop and inside pe_v2's batch loop.
+  * The release half of the cancel contract is asserted, not assumed:
+    `python3 scripts/check_scan_budget_cancel_writes.py` ->
+    `20 check(s) passed, 0 failed`, including "pe_v1's `-7` exit releases the
+    spray AND the mappings" (the funnel munlocks and deallocates every search
+    mapping, then `sockets_release()`), "pe_v2's aborted path frees the mapping,
+    the memory object and the spray" (munlock -> deallocate -> release, all
+    before `if (aborted) break;`), and "the spray honours a cancel".
+    `--selftest` mutates TEMP COPIES fourteen ways (budget default back to 120 on
+    either side, the funnel call dropped, `sockets_release` dropped from the
+    funnel, pe_v2's munlock dropped, the app retrying on `-7`, the spray check
+    dropped, ...) and requires the lint to fail on each ->
+    `selftest: all mutations caught`. `bash scripts/build_ipa.sh sideload 0.20`
+    -> `OK: dist/W0lfTerm-0.20-sideload.ipa` (the built binary contains the
+    `cancel` label string). NOT device-verified: the device half - tap the word
+    mid-run, watch `[cleanup]` lines for the mapping and the spray - is the next
+    device day.
+
+  Round 3 (same day, in the verification pass for this task): the sentence "both
+  cancel paths reach the app as -7" was not true of `pe_v2`. `pe_v2()` is void and
+  its `FAILURE` exits return bare, so a CANCEL stopped pe_v2's walk and the run
+  then fell through into the krw tail (the `controlSocketPcb` reads and the
+  kernel-base scan) with the app still showing "running" - the A18 branch never saw
+  a `-7`. The old check could not catch that: it only looked for the string
+  `aborted` anywhere in the file. `pe_v2` now records the stop in
+  `g_peV2Aborted` (reset per call) and the A18 branch of `kexploit_opa334()` maps it
+  to the same terminal exit pe_v1 uses (`[cleanup]` teardown + `return -7`), so the
+  app reports "cancelled" and stops instead of continuing. The check now requires
+  the whole propagation (`pe_v2();` -> `if (g_peV2Aborted)` -> teardown ->
+  `return -7`), and the selftest carries a fifteenth mutation for it. The check was
+  also replayed against the pre-fix engine in temp copies (the flag write and the
+  A18 read removed) and fails exactly that one check, so it is known to bite:
+  `checks failing on the pre-fix engine: ['BUG.4 engine: both cancel paths reach
+  the app as -7 (cancelled, not failed)']`. Verified host-side, no device: lint
+  `20 check(s) passed, 0 failed`; `--selftest` -> `selftest: all mutations caught`
+  (15/15); `make libengine` -> `OK: .theos/libengine/libw0lfengine.a (804K, 51
+  objects)`; `bash ../W0lfTerm/scripts/build_ipa.sh sideload 0.20` ->
+  `OK: dist/W0lfTerm-0.20-sideload.ipa` with `pe_v2 scan stopped on request
+  (cancel or %ds budget)`, `[cleanup] pe_v2: search mapping ... munlocked +
+  deallocated` and `(cancelled: mapping + object freed too)` inside the built
+  binary.
+
+  Round 4 (task 10, the verification pass for this task): the release half of the
+  cancel contract was checked per call site in round 2; it is now checked
+  structurally, because a NEW cancel exit that skips the funnel is exactly how
+  this bug comes back. The lint reads `int pe_v1(void)`'s body, finds every
+  `return -7;` in it (one today: the pre-spray exit at the top of the spray/race
+  cycle) and requires the funnel call plus its `release_gencnt_tracker` release in
+  the preceding 300 characters, that the walk's cancel is the `break`
+  (`testResult = -7; break;` at the loop level) that flows into the terminal
+  funnel call, and that that call deallocates the wired mapping for a `-7`
+  (`(testResult != 0) || success`). The selftest gained a sixteenth mutation for
+  it: that exit's funnel + two `free()`s + tracker release are replaced by a bare
+  `return -7;` and the lint fails the new check on the mutated copy
+  (`pe_v1 return -7 sites=1 unguarded=1`), so the leak shape BUG.4 describes is a
+  lint failure now, not a code review.
+
+  Evidence (host, no device, no device command):
+  `python3 scripts/check_scan_budget_cancel_writes.py` -> `21 check(s) passed,
+  0 failed` (exit 0), `--selftest` -> `selftest: all mutations caught` (16/16,
+  exit 0, every mutation applied and caught), `bash
+  scripts/run_kwrite_counter_host_test.sh` -> `checks=53 failures=0` /
+  `KWRITE_COUNTER_HOST_TEST PASS` (exit 0). The app half of the plumbing is
+  proven at link time rather than by strings: `THEOS=$HOME/theos make libengine`
+  -> `OK: .theos/libengine/libw0lfengine.a (804K, 51 objects)`, `bash
+  scripts/build_ipa.sh sideload 0.20` -> `OK: dist/W0lfTerm-0.20-sideload.ipa`,
+  and in the linked app binary (`dist/Payload/W0lfTerm.app/W0lfTerm`, Mach-O
+  arm64) `llvm-nm` lists `T _kexploit_request_stop`, `T _kexploit_stop_requested`,
+  `T _kexploit_clear_stop`, `T _kexploit_set_scan_budget`, `T _kexploit_scan_budget`,
+  `T _kexploit_scan_writes`, `T _kexploit_scan_write_bytes`,
+  `T _kexploit_scan_write_failures` and the `kwrite_*` counter functions as
+  DEFINED symbols, while `llvm-objdump` shows the call sites:
+  `-[TerminalViewController dotTapped:]` -> `bl _term_bridge_cancel`, and
+  `_term_bridge_cancel` -> `bl _kexploit_request_stop`.  A string in a binary says
+  the code was compiled; a `bl` to the engine's symbol says it is called. NOT
+  device-verified: the device half - tap the word mid-run, watch the `[cleanup]`
+  lines for the mapping and the spray - is still the next device day.
+
+  T12 closing pass (task 12/12, host only, no device command):
+  `python3 scripts/check_scan_budget_cancel_writes.py` -> `25 check(s) passed,
+  0 failed` (exit 0), and the cancel-specific checks are the ones this round
+  re-read: "BUG.4 app: a visible CANCEL control that is on only while a run is in
+  flight", "BUG.4 app: the tap reaches the engine stop flag through the one
+  bridge", "BUG.4 app: the run loop treats -7 as cancelled and STOPS (no retry)",
+  "BUG.4 engine: the socket spray honours a CANCEL (it is the longest pre-walk
+  cost)", "BUG.4 engine pe_v1: every -7 exit goes through the funnel (no cancel
+  exit leaks)", "BUG.4 engine pe_v2: the aborted (-7) path frees the mapping, the
+  object and the spray" and "BUG.4 engine: both cancel paths reach the app as -7
+  (cancelled, not failed)". `--selftest` -> `selftest: all mutations caught`
+  (21/21, exit 0) - the new mutations for this item (cancel word hidden, stop flag
+  dropped, the app retrying on -7, the spray ignoring a cancel, the A18 caller
+  ignoring pe_v2's cancel, pe_v1's -7 exit returning bare) all fail the lint on
+  the mutated copy. App artifact: `bash scripts/build_ipa.sh sideload 0.20` ->
+  `OK: dist/W0lfTerm-0.20-sideload.ipa` (exit 0), and in the linked app binary
+  (sha256 `2922ebb3...`) `llvm-nm` lists `T _kexploit_request_stop` /
+  `T _kexploit_stop_requested` as DEFINED with `-[TerminalViewController
+  dotTapped:] -> bl _term_bridge_cancel -> bl _kexploit_request_stop` in the
+  disassembly (the 17 ok / 0 drift suite entry `app_static_symbols`), strings
+  count `cancel` 19 and `pe_v2 scan stopped on request` 1. NOT device-verified:
+  the device half is unchanged.
+
+  T16 closing pass (task 16/16, host only, no device command): the cancel chain
+  re-verified end to end with both halves rebuilt in this pass.
+  `python3 scripts/check_scan_budget_cancel_writes.py` -> `25 check(s) passed, 0
+  failed` (exit 0) with all seven BUG.4 checks green ("a visible CANCEL control
+  that is on only while a run is in flight", "the tap reaches the engine stop flag
+  through the one bridge", "the run loop treats -7 as cancelled and STOPS (no
+  retry)", "the socket spray honours a CANCEL", "every -7 exit goes through the
+  funnel", "pe_v2's aborted (-7) path frees the mapping, the object and the spray",
+  "both cancel paths reach the app as -7"), `--selftest` -> `selftest: all
+  mutations caught` (21/21). In the linked binary rebuilt here
+  (`sha256 2922ebb3c8138e6dcbd2efb95101afdceb26e409b83f8129d28bdb351eaf14c8`):
+  `-[TerminalViewController dotTapped:]` -> `bl _term_bridge_cancel` -> `bl
+  _kexploit_request_stop` -> `stlr w8, [x9]` (the atomic the walks read), read out
+  with `t16/rerun/callgraph_check.py` -> `6 ok, 0 failed`, and
+  `t16/rerun/invariant_check.py` counts 7 `kexploit_stop_requested()` sites plus
+  the cancel-only visibility of the 96 pt control and its VoiceOver name. NOT
+  device-verified: the device half is still tap-the-word-mid-run and watch the
+  `[cleanup]` lines.
+
+  T17 re-run (task 17/18, host only, no device command, raw logs in
+  `docs/verification/2026-09-11-0.12/t17/`): the eight BUG.4 cancel checks are
+  green inside `python3 scripts/check_scan_budget_cancel_writes.py` -> `25
+  check(s) passed, 0 failed` (exit 0, sha256 `4dc5246d...`; `--selftest` ->
+  `selftest: all mutations caught`, 21 mutations incl. the A18 propagation one -
+  countable in the capture, which carries the 21 `ok mutation caught:` lines
+  plus the baseline in
+  `t17/suite_logs/w0lf_host_verification/scan_budget_cancel_self.log`).
+  Quoted from that log's own lines: "the socket spray honours a CANCEL", "a
+  visible CANCEL control that is on only while a run is in flight", "the tap
+  reaches the engine stop flag through the one bridge", "the run loop treats -7 as
+  cancelled and STOPS (no retry)", "pe_v1: the -7 cancel exit releases the spray
+  AND the mappings", "pe_v1: every -7 exit goes through the funnel", "pe_v2: the
+  aborted (-7) path frees the mapping, the object and the spray", "both cancel
+  paths reach the app as -7" (eight lines prefixed `BUG.4`; the T16 note above
+  counts "seven cancel checks" - the log has eight, the extra one being pe_v1's
+  funnel check). The linked-binary half was rebuilt and re-read by `bash
+  scripts/check_host_verification.sh --with-builds` -> `21 ok, 0 drift` (exit 0):
+  `dist/Payload/W0lfTerm.app/W0lfTerm` sha256
+  `2922ebb3c8138e6dcbd2efb95101afdceb26e409b83f8129d28bdb351eaf14c8`, defining
+  `_kexploit_request_stop`, `_kexploit_stop_requested`, `_g_peV2Aborted` and the
+  `kwrite_zone_*` family, carrying `cancel` x19 and "pe_v2 scan stopped on
+  request" x1
+  (`t17/suite_logs/w0lf_host_verification/app_static_symbols.log` is that check's own raw
+  output). Count corrections: the `20 check(s) passed` counts this item quotes
+  from the earlier passes are dated with no retained log; the reproducible ones are
+  `21` (`docs/verification/2026-09-11-0.12/scan_budget_cancel.log`) and `25` (this
+  pass). `checks=53 failures=0` for the write counter re-ran unchanged
+  (`t17/kwrite_counter.log`). NOT device-verified - the device half is unchanged.
 
 - [x] `BUG.5` — **"readonly = zero writes" is too strong a claim.** It is zero
   KERNEL writes (`wolf_test_mode == 1` returns before the corruption), but the
@@ -559,6 +1479,148 @@
   The one verbatim device-log tail under `SG.9` keeps the old string (it is
   pasted output) and now carries a footnote pointing at this item.
 
+  Round 2 (task 10, same day): the wording was the visible half; the invisible
+  half was that NOTHING counted the writes, so "no kernel writes" was still an
+  assertion. It is now a measurement:
+  * new `kexploit/kwrite_counter.c` / `.h` (in `make libengine` and in the tweak's
+    file list): every kernel write this chain can issue goes out through
+    `early_kwrite32bytes` (a 32-byte `setsockopt(ICMP6_FILTER)`) - `early_kwrite64`
+    and `krw_zone_write_block` funnel into it - so the counter is incremented
+    there on success and the refusal counter on `setsockopt != 0`. Attribution is
+    a thread_local route stack (`early_kwrite32bytes` / `early_kwrite64` /
+    `krw_zone_write_block`) because the scan thread and the pe_init free thread
+    both write.
+  * the engine resets the counters per attempt (`kexploit_opa334()` and
+    `kexploit_telemetry_reset()`) and prints a measured summary on every exit that
+    tears down plus the staged -5 exit: `[SCAN] kernel writes issued ...: N
+    write(s), M byte(s) [measured by kwrite_counter, BUG.5]` with the per-route
+    breakdown; the readonly `-2` line and the staged stage-1/2 line carry the
+    number too. Exported as `kexploit_scan_writes()` / `_write_bytes()` /
+    `_write_failures()`, and the app logs the same numbers (`term_log_write_count`
+    -> `[w0lf] kernel writes this attempt (scan + probe): N write(s) / M byte(s)
+    (engine-counted ...)`), so "readonly writes nothing" is a measured 0 in the
+    run log instead of a sentence in the settings row.
+  * host evidence: `bash scripts/run_kwrite_counter_host_test.sh` ->
+    `checks=53 failures=0` / `KWRITE_COUNTER_HOST_TEST PASS` (counting,
+    attribution, refusals counted separately from writes, per-attempt reset, and
+    two threads emitting 10k writes each with no increment lost);
+    `python3 scripts/check_scan_budget_cancel_writes.py` ->
+    `20 check(s) passed, 0 failed` (the primitive must count both outcomes, both
+    entry points must attribute their route, and no shipped log/UI string may
+    claim "zero writes" any more); `--selftest` -> `all mutations caught`
+    (dropping the counting call or the route push is caught).
+
+  Residual, stated plainly: the counter measures writes that LANDED through the
+  one primitive; a write the clamp refuses never reaches it (that is what the
+  refusal counter and the `krw` refusal log lines are for), and the two
+  `so_usecount` writes in `krw_sockets_leak_forever` are counted like any other
+  `early_kwrite64` - the counter says how many writes happened, not whether they
+  were a good idea. NOT device-verified.
+
+  Round 3 (task 10, the verification pass): re-run, and the two halves separated.
+  Counter: `bash scripts/run_kwrite_counter_host_test.sh` -> `checks=53
+  failures=0` / `KWRITE_COUNTER_HOST_TEST PASS` (exit 0) - the test compiles
+  `kexploit/kwrite_counter.c`, the same file the engine archive is built from,
+  and drives counting on emit, refusals counted separately from writes, the
+  route stack nesting and restoring, an out-of-range route still counted instead
+  of dropped, and two threads emitting 10k writes each with no increment lost.
+  Wording: the shared lint's "no shipped log/UI string claims 'zero writes' any
+  more" reads every `.m/.c/.h` in both trees with comments stripped; the only
+  remaining `zero writes` hits in the trees are the comments that describe the
+  bug history (this file's own header, `kexploit_opa334.h`, the host test, the
+  lint script) - no log line, no settings row, no README claim. Confirmed on the
+  artifact too: `strings -a dist/Payload/W0lfTerm.app/W0lfTerm | grep -c` gives
+  `no kernel writes` = 5 and `zero kernel writes` = 0 in the built app binary.
+  The lint reports `21 check(s) passed, 0 failed`; the link-level proof that the
+  app reads these numbers (not only that the strings exist) is under `BUG.4`
+  above (`T _kexploit_scan_writes` / `_write_bytes` / `_write_failures` defined in
+  the linked binary). NOT device-verified.
+
+  T12 closing pass (task 12/12, host only, no device command): the claim and the
+  counter re-checked on the current tree. `bash
+  scripts/run_kwrite_counter_host_test.sh` -> `checks=53 failures=0` /
+  `KWRITE_COUNTER_HOST_TEST PASS` (exit 0) - it compiles
+  `kexploit/kwrite_counter.c`, the file the engine archive is built from, and
+  drives it: an accepted write counts once for its own route and for its exact
+  length, a refused `setsockopt` counts as a refusal and never as a write, the
+  route stack is per-thread (two threads, 10k writes each, no increment lost,
+  each route keeping its own count), and reset zeroes everything. `python3
+  scripts/check_scan_budget_cancel_writes.py` -> `25 check(s) passed, 0 failed`
+  (exit 0), including "BUG.5: no shipped log/UI string claims 'zero writes' any
+  more" (the lint reads every .m/.c/.h in both trees with comments stripped) -
+  the only remaining `zero writes` hits are the comments that describe the bug
+  history. Artifact: `strings -a dist/Payload/W0lfTerm.app/W0lfTerm | grep -cF`
+  gives `no kernel writes` = 5 and `zero kernel writes` = 0, and the linked
+  binary defines `T _kexploit_scan_writes` / `T _kexploit_scan_write_bytes` /
+  `T _kexploit_scan_write_failures`, so the app reads the engine's measured
+  numbers rather than asserting a sentence (see `BUG.4`'s closing note for the
+  link-level call graph). Residual, unchanged: the counter measures writes that
+  LANDED through the one primitive; a write the clamp refuses never reaches it
+  (that is what the refusal counter is for), and it counts writes, not whether
+  they were a good idea. NOT device-verified.
+
+  T14 closing pass (task 14/14, host only, no device command): the last clause of
+  the fix ("back the claim with a write-accounting check tied to the 1 GB/day
+  limit") is now a check rather than a sentence. `scripts/check_pressure_budget.py`
+  gained an 8th check, "BUG.5/BUG.6 disk budget: the write accounting is pinned
+  against the 1 GB/day limit", which parses the constants out of both trees
+  (`TWEAK_LOG_FSYNC_MIN_INTERVAL_MS`, `EXPLOIT_SCAN_BUDGET_SEC`,
+  `KEXPLOIT_SCAN_BUDGET_MAX`, the app's `while (attempt < 3 ...)` retry cap, the
+  engine's `if (cycle > 6)` cycle cap, and the 3 GB class' dirtied bytes from the
+  mapping arithmetic) and prints the two halves against the figure the device day
+  was measured on: `scan: 384 MB per cycle x 7 cycle(s) x 3 attempt(s) = 8064 MB
+  dirtied per run (7.88x the limit)` and `log: 600 s run, one fsync per 200 ms = at
+  most 3001 fsync(s)`. It fails if any of those constants moves, so the ratio
+  cannot drift unnoticed, and it says in its own output that the scan half is still
+  over the limit - the check backs the accounting, it does not claim the budget is
+  met. `python3 scripts/check_pressure_budget.py` -> `8 check(s) passed, 0 failed`
+  / `PRESSURE_BUDGET LINT PASS` (exit 0), `--selftest` -> `selftest: all mutations
+  caught` (9/9; the two new ones are the fsync window shrunk to 20 ms and the retry
+  cap grown to 5, i.e. one mutation per half). The two expected hashes in
+  `scripts/check_host_verification.sh` were re-pinned in the same pass because both
+  logs moved (7 checks / 7 mutations before, 8 / 9 after).
+  `bash scripts/check_host_verification.sh --with-builds` -> `21 ok, 0 drift`
+  (exit 0) and `docs/WORKLOG.md` `T14` carries the commands, the raw output and the
+  `docs/verification/2026-09-11-0.12/t14/MANIFEST.txt` hashes. NOT device-verified:
+  how many bytes one fsync flushes stays a device measurement.
+
+  T16 closing pass (task 16/16, host only, no device command): the claim and the
+  counter re-run on this tree, and the artifact re-read. `bash
+  scripts/run_kwrite_counter_host_test.sh` -> `checks=53 failures=0` /
+  `KWRITE_COUNTER_HOST_TEST PASS` (exit 0); `python3
+  scripts/check_scan_budget_cancel_writes.py` -> `25 check(s) passed, 0 failed`
+  (exit 0) incl. "BUG.5: no shipped log/UI string claims 'zero writes' any more",
+  "BUG.5 app: the run log carries the measured number, not the claim", "BUG.5
+  engine: the counters reset per attempt, are exported, and are printed" and
+  "BUG.5 counter: the ONE write primitive counts both outcomes". The independent
+  reader written for this pass
+  (`docs/verification/2026-09-11-0.12/t16/rerun/invariant_check.py`) -> `27 ok, 0
+  failed`, and on the freshly linked binary `zero writes` = 0 / `zero kernel
+  writes` = 0 / `no kernel writes` = 5, with `_term_log_write_count` carrying the
+  CALL edges `bl _kexploit_scan_writes` / `bl _kexploit_scan_write_bytes` / `bl
+  _kexploit_scan_write_failures` (a call, not a symbol name in a table). Note for
+  the next reader: the first draft of that checker failed two checks, both times by
+  matching a history COMMENT that quotes the old wording verbatim ("the old
+  hard-coded `#define EXPLOIT_SCAN_BUDGET_SEC 120` lived here", "\"zero kernel
+  writes\" read as \"safe to leave running\"") - it strips `//`-comments now, and
+  the two lines are named in `t16/rerun/VERIFY.md`. NOT device-verified: the
+  readonly run's counter reading 0 on the SE stays a device-day measurement.
+
+  T17 re-run (task 17/18, host only, no device command, raw logs in
+  `docs/verification/2026-09-11-0.12/t17/`): `bash
+  scripts/run_kwrite_counter_host_test.sh` -> `checks=53 failures=0` /
+  `KWRITE_COUNTER_HOST_TEST PASS` (exit 0; raw log `t17/kwrite_counter.log`,
+  sha256 `1dc9c1d4b0e35b86e23667ff627e4b57bb7f6ec8385e622fc78c585dd6424e63`), and
+  the wording half re-ran green inside `python3
+  scripts/check_scan_budget_cancel_writes.py` -> `25 check(s) passed, 0 failed`
+  (exit 0), whose six `BUG.5` lines include "no shipped log/UI string claims
+  'zero writes' any more". The linked app binary still carries `no kernel writes`
+  x5 and `zero kernel writes` x0
+  (`t17/suite_logs/w0lf_host_verification/app_static_symbols.log` - the
+  binary hash there is the fresh `2922ebb3...` rebuild). Count correction: the
+  `20 check(s) passed` this item's host-evidence bullet quotes is a dated count
+  with no retained log; the reproducible one is `25`. NOT device-verified.
+
 - [x] `BUG.6` — **a stale host pairing blocks every log pull.** After the
   watchdog panic the host got `Invalid HostID (-21)` on lockdown (the host record
   dated Sep 2 no longer matched), which silently kills `idevicesyslog`,
@@ -576,8 +1638,33 @@
   prompt -> `sudo rm /var/lib/lockdown/<UDID>.plist` + replug when no prompt
   appears -> `sudo systemctl kill -s KILL usbmuxd` + `start` when the mux is
   wedged) and the two pull commands (`afcclient --container <bundle-id> get
-  Documents/FilzaTweak.log`, `idevicecrashreport -e <dir>`). Documentation only -
-  no device run, no engine change.
+  Documents/FilzaTweak.log`, `idevicecrashreport -e <dir>`). Documentation only - no device run, no engine change.
+
+  T12 closing pass (task 12/12): half of this item's claim was NOT backed, and
+  that is now fixed rather than re-asserted. The app-side half exists and is
+  complete - `W0lfTerm/README.md` `## Pulling logs over USB` (line 219) carries the
+  two-row error table (`Mux error (-8)` vs `Invalid HostID (-21)`), the recovery
+  order (unlock -> Trust -> `rm /var/lib/lockdown/<UDID>.plist` -> replug ->
+  `systemctl kill -s KILL usbmuxd`), the `ls -l /var/lib/lockdown/` rule for
+  finding the stale record, both pull commands (`afcclient --container ... get
+  Documents/FilzaTweak.log`, `idevicecrashreport -e <dir>`) and the sentence that
+  `idevicecrashreport` returns the panic plus the three resource reports. The
+  engine-side half did NOT: `references/dead-device-usb-triage.md` was referenced
+  by this item and by W0lfTerm's `BUG.6`, and a filename search over `$HOME` plus
+  a content grep found that path in NOTHING but the two ROADMAP files - no such
+  file in either repo, and none in the `w0lfsword-development` skill's
+  `references/` either (which is what W0lfTerm's wording claims). Created it as
+  `/home/kaffein/Desktop/W0lfSword/references/dead-device-usb-triage.md` (3205
+  bytes): the same table, the same recovery order, both pull commands, the
+  `Action taken:` reading rule, the `1073.75 MB / 1083 s` diskwrite report as the
+  concrete example, and a pointer to the app README so the two copies cannot drift
+  silently. Verified on the created file: `test -f
+  references/dead-device-usb-triage.md` -> present, `wc -c` -> 3205,
+  `grep -c 'Invalid HostID'` -> 2 (the table row plus the recovery step, i.e. the
+  `-8` vs `-21` distinction is stated twice), `grep -c 'idevicecrashreport'` -> 2,
+  `grep -c '1073.75 MB'` -> 1. NOT device-verified - this item is documentation,
+  and the pairing failure itself is a host/USB condition no host test can
+  reproduce.
 
 ## 0.11 — Terminal with full kernel R/W (research, 2026-09-10)
 
@@ -738,9 +1825,30 @@
 > (the log view is the terminal screen; the shell's output goes through
 > TweakLog into the ring the panel already polls).
 > `bash scripts/run_trm_host_test.sh` builds the shell on the host with
-> kernel/mach stubs and runs 65 assertions (parser, path resolution,
+> kernel/mach stubs and runs 108 assertions (parser, path resolution,
 > every filesystem command, unsafe gating, kernel command routing) —
-> **65/65 pass**, so parsing/dispatch bugs are caught without a sideload.
+> **108 checks, 0 failures** / `TRM_SHELL_HOST_TEST PASS` (the count grew with
+> TRM.2's 13 redirect checks and TRM.1's 13 completion checks; the `65/65` this
+> block used to quote is the ROUTE-A REVISION's own count, not a lie - T17
+> replayed commit `8e97aa7` and it really prints `checks=65 failures=0`
+> (`t17/revisions/trm_routea/`, sparse tree in-repo) - but the harness on disk
+> now prints 108, so the old number must not be read as current). The number for
+> THIS tree, re-run at T17 by the authorized suite
+> (`bash scripts/check_host_verification.sh`, exit 0) as its
+> `trm_shell_host_test` entry (that entry's command is
+> `bash scripts/run_trm_host_test.sh`): the count line
+> `checks=108 failures=0` is in that entry's raw log
+> (`docs/verification/2026-09-11-0.12/t17/trm_shell_host_test.log`, a
+> copy of the suite's own
+> `t17/suite_logs/w0lf_host_verification/trm_shell_host_test.log`), while the
+> suite's summary line is `host verification: 21 ok, 0 drift` and its entry for
+> this harness reads
+> `ok   trm_shell_host_test    rc=0 42305c27487f35be...` in
+> `t17/host_verification.log` (the entry's raw hash moves between runs - the
+> harness prints the live `date`/`df`/`loadavg`/tempdir - but that pinned
+> canonical hash `42305c27487f35be...` is the same one
+> `check_host_verification.sh` recorded at T12, so it is the same run), so
+> parsing/dispatch bugs are caught without a sideload.
 > Verification on the device build: `make package` clean, audit PASSED,
 > and the shipped dylib contains the new markers
 > (`TRM][EXEC`×6, `TRM][VERDICT`, `TRM2-CONTAINER-EXEC-OK`, …).
@@ -2149,13 +3257,26 @@ proved, in order of importance:
   RMW at an address nothing had verified. That is the same write class that
   panicked the device; it only failed to panic because the address happened to
   be mapped.
-- OPEN, BUG.7: `kwrite_zone_element`'s clamp does not cover
-  `restore_corrupted_socket()`. The restore still calls `early_kwrite64`, which
-  goes straight to `early_kwrite32bytes` - unclamped, twice per attempt, up to
-  ten times per run. Closing it needs the inpcb object window (base + size); the
-  clean route is the zone's `elem_size` through `inpcbinfo.ipi_zone`
-  (`off_inpcbinfo_ipi_zone` = 0x68), which would let the restore declare the
-  window and be refused instead of guessing.
+- BUG.7, restore half CLOSED (0.12 BUG.1 step 3b, same day): the restore used to
+  call `early_kwrite64`, which goes straight to `early_kwrite32bytes` - unclamped,
+  twice per attempt, up to ten times per run, at a pcb nothing had verified. The
+  restore, the probe's promotion round trip and `krw_sockets_leak_forever`'s inpcb
+  write now all go through the clamped qword writer
+  (`kwrite_zone_element_qword` / `krw_zone_write_qword`), which refuses a block
+  that is not provably inside the window it is given; a refused put-back is logged
+  and reported as a failure. The window is the inpcb's own field span
+  (`krw_zone_window_for_field_end(filt offset + 8)` = 0x160 on both layouts), so a
+  field table that disagrees gets a refusal instead of a write.
+  STILL OPEN, the other half: the clamp verifies a block against the window it is
+  GIVEN, so a window derived from an address that was never verified is
+  self-consistent (that half is the canonical-pointer guard + the live-inpcb value
+  check, not the clamp). A true kalloc size probe - the zone's `elem_size` through
+  `inpcbinfo.ipi_zone` (`off_inpcbinfo_ipi_zone` = 0x68), which would let a caller
+  declare the BUCKET rather than the field span - needs a `struct zone` offset this
+  tree does not have; deriving one is its own task (kernelcache-verified, per the
+  offsets.m convention). The two `so_usecount` writes in
+  `krw_sockets_leak_forever` also stay on `early_kwrite64`: their object is a
+  `struct socket`, with no field table here that could state a window honestly.
 - the run budget is the only thing ending these runs: both stopped at ~29.5 MB
   walked in 120 s with the socket table full (27.4k-27.5k sockets, errno 23),
   1 GB dirtied per pass, 98% CPU. A full walk on this device needs ~8.5 min, so

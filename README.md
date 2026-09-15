@@ -78,12 +78,25 @@ the repo's own table.
 
 The route A terminal shell is host-testable too — the shell core is plain
 C, so it is compiled on Linux against stubbed kernel helpers and run
-through 65 assertions (parser, path resolution, every filesystem command,
+through 108 assertions (parser, path resolution, every filesystem command,
 the `unsafe` gating, kernel command routing) before a sideload is spent:
 
 ```bash
-bash scripts/run_trm_host_test.sh      # 65/65 checks, no device involved
+bash scripts/run_trm_host_test.sh      # checks=108 failures=0, no device involved
 ```
+
+Raw output of the last run: `docs/verification/2026-09-11-0.12/t17/trm_shell_host_test.log`
+(copy of `docs/verification/2026-09-11-0.12/t17/suite_logs/w0lf_host_verification/trm_shell_host_test.log`,
+the `trm_shell_host_test` entry of `bash scripts/check_host_verification.sh`);
+the suite's own summary line for that run is `host verification: 21 ok, 0 drift`
+and its entry for this harness is `ok   trm_shell_host_test rc=0 89e5f65f65e23cc4...`
+(`docs/verification/2026-09-11-0.12/t17/host_verification.log`).
+The `65/65` this README used to quote is the route-A revision's count - HISTORICAL,
+the count of the revision named, never of the tree on disk: replaying that commit
+`8e97aa7` prints `checks=65 failures=0`
+(`docs/verification/2026-09-11-0.12/t17/revisions/trm_routea/`, log + sparse tree
+in-repo) - while the harness on disk, re-run on this tree, prints `checks=108
+failures=0` in the entry's raw log named above.
 
 ![adderall demo](docs/demo.png)
 
@@ -258,7 +271,7 @@ for logs.
 | Terminal (route A, 0.11) | in-process shell under the HUD panel (prompt + field + RUN + TRM in one row): 49 commands with no exec and no pty, so it needs nothing from the sandbox profile. `ls/cat/cd/stat/mkdir/rm/mv/cp/chmod/ps/df/…` plus kernel R/W (`kread`, `kwrite8/16/32/64`, `proc`, `sbxinfo`, `ssvw`). Read-only by default; kernel writes, `chmod`, `rm -r` and the SSV write need an explicit `unsafe 1` |
 | Command packages (0.2) | `pkg` installs/removes in-process command packs: sysinfo (`fetch`/`mem`/`cpu`/`loadavg`), net (`net`/`myip`/`dns`), hex (`hexdump`/`strings`). Packs add builtins, not downloads - the shell cannot exec (0.11 route A), so a tarball could not run. Gated commands answer rc=2 with the package name |
 | Exec/pty probes (0.11) | the HUD TRM button (or the shell's `probe`) runs the TRM.1/2/4/5 measurement: sandbox_check matrix, exec inventory of /bin /usr/bin /usr/libexec, `fork()`, a real `posix_spawn("/bin/sh")`, an off-SSV copy-exec test, the pty sequence, and a sealed-volume read/write verdict — ending in one `[TRM][VERDICT]` line naming the route the device actually supports. Also runs automatically after a successful escape |
-| Safety ladder | release builds default to STAGED auto: readonly compatibility check → light krw write probe → full chain only if both pass; a failed stage is a final verdict with the device left clean (status 6, no retries). Test builds default to READONLY (no kernel writes - it is a userspace scan and the offsets cannot be probed, but the scan still pegs a core and dirties ~1 GB of file-backed memory, BUG.5/SG.10). Switch modes on-device via Documents/w0lf_test_mode: (absent)=staged, 1=readonly, 2=writetest, 3=full immediate |
+| Safety ladder | release builds default to STAGED auto: readonly compatibility check → light krw write probe → full chain only if both pass; a failed stage is a final verdict with the device left clean (status 6, no retries). Test builds default to READONLY (no kernel writes - it is a userspace scan and the offsets cannot be probed, and the engine COUNTS every kernel write it issues and prints the total per run; the scan still pegs a core and dirties ~1 GB of file-backed memory, BUG.5/SG.10). Switch modes on-device via Documents/w0lf_test_mode: (absent)=staged, 1=readonly, 2=writetest, 3=full immediate |
 | Failure cleanup | on the final give-up the tweak removes everything it created (SSV diag files, /var/lib/filza, thousands of spray sockets) so a failed run leaves the device clean |
 | Unsupported-iOS gate | outside 17.0–26.0.1 the tweak goes quiet (status 5, no probes, no writes); a staged incompatibility (bad offsets / wrong device) stops at status 6; jailbroken devices still get helper mode so the browser works |
 | Kill switch | `touch /var/mobile/Documents/.filza_tweak_disable` |
@@ -294,7 +307,8 @@ One asset per release on the GitHub releases page. The sideload builds:
 - `FilzaArctic.ipa` - release build, display name "Filza Arctic", original
   Filza icons. Full chain, cleans up after itself on failure.
 - `FilzaArctic-Test.ipa` - same thing with the safety ladder compiled in.
-  Defaults to READONLY on the device (no kernel writes - BUG.5: the scan still
+  Defaults to READONLY on the device (no kernel writes - BUG.5: the engine counts
+  every kernel write and the run prints the measured total; the scan still
   pegs a core and dirties ~1 GB of file-backed memory, SG.10) until you write
   a mode into Documents/w0lf_test_mode: 1 readonly, 2 writetest, 3 full.
 - `FilzaArctic-JBtest.ipa` - test-bed build with the jailbreak force

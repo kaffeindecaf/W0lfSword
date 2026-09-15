@@ -1,0 +1,70 @@
+docs/verification/2026-09-11-0.12/t15 - manifest (sha256, bytes, name)
+generated 2026-09-12T00:16:58+0200 on Linux-7.0.13+parrot7-amd64-x86_64-with-glibc2.41
+scope: T15 BUG.1 (zone-bound write fix) closing verification - the three sub-steps, host only
+(no device, no device command, no exploit run, no git write)
+
+1e902a01ab0352810f19abb2cdcbf4a61ad0d1cd807517ce6c48ac7a322c3965      12470  BUG1-CASES.txt
+dacf9e5e7e6e6238ab157d1aaefac75b80ee4efb3a2672f7e6a92d8a5920b26f       5890  BUG1-EVIDENCE.txt
+4785d4d5d0579c025ac6482d2c9484c3d41a4c3ea01aa6d85b3eac1a33cc4a86       2144  COMMANDS.txt
+2376fb4df33d2415d35e16d7065ee72f1cb4489b2ce2cec295e82f1e656ef12d        436  RC.txt
+bfcf35f757f410ef8341d27a1bdb470be98fc327792c47dd70fd92d2539c72d4       1951  audit.log
+1df3ce4c11439d92bf412a4f411140e20fcb0bc260dd3370cc670413460a171f       7170  bug2_release_paths.log
+03bc081c48798f73959714628936f48d818d8c7e04c6a8af1a09c250b1a7f612       4768  bug2_release_paths_selftest.log
+66c7ecc79b315e592b0c1fb48b2e96dbe05e99b1839705f8f9b869a3ac1760d2      11965  capture.out
+c885095994769bef8bdf0b12946683e25a80dcae42465ecee952ae7fef12030c       5122  capture.sh
+056cfb1def3c3ba03f5008f7875c632396ceaa5e042f9c43e0e6dbdc48b4d790        391  engine_archive_symbols.log
+458867def5b493ee5073b74b004719c6b1f487cbbb28b48a1b4a7913611a0c67         99  engine_lib_archive.sha256
+334a5c211aedbcef4436eb7731927659a5bef0f10be980caaf0b44d3b2082668         88  engine_lib_build.log
+4985098ab9041945676a096d55e9b9b3eb3aaee80f4e142fd9d0a5890dd1399c      11035  extract_cases.py
+de999ed56a63049241981ea3836568a51bf4efef601e238a726740d7f504f0ea       1379  host_verification.log
+4d3982302ca1e0c7114f6dbfe78cdcdc7e752486a9e1ef964d25b6f0fe131a4a       8338  independent_clamp_sweep.c
+1386b0b6e393b4923dc3ad9cd69547b8e9471e78f2c904688b5a09cc3b0ea5be       7492  krw_zone_write_host_test.log
+b306fb4ac606745998e7ada3c6ac190e9d74bac3198adc54f1047609b2f5fca9        133  portable_syntax.log
+91bd530e7bf386a527b9d56e01bae5812821c5a281315bd6ffd4c3ac3c29d549       1666  pressure_budget.log
+98be7a751526bbd282f158c2d0522a78acedb4f8f8797d2f7f78217b534fe9ad      17515  pressure_budget_selftest.log
+62f760e7402071fcb823a7ec5191904e098ac6b520907ef13135ba6fa729cf4b       4830  probe_restore_e2e_host_test.log
+97e2173af1a31a7e57ebcfb20289a524b99f1b74723faee2507578c38840a935        852  probe_restore_e2e_selftest.log
+2d4f8158f4c2e8bc0c8baf2f728081809432474b37c953f620f7f43e73fb6f7e        424  regression_bug1_section.log
+c23a1cc8e667fed710b4781b8874ea171e0fecf386cbce5ad04079294f8dce7f       3904  regression_bug1_section.sh
+1df3ce4c11439d92bf412a4f411140e20fcb0bc260dd3370cc670413460a171f       7170  s1_bug2_release_paths.log
+03bc081c48798f73959714628936f48d818d8c7e04c6a8af1a09c250b1a7f612       4768  s1_bug2_release_paths_selftest.log
+1386b0b6e393b4923dc3ad9cd69547b8e9471e78f2c904688b5a09cc3b0ea5be       7492  s1_krw_zone_write_host_test.log
+62f760e7402071fcb823a7ec5191904e098ac6b520907ef13135ba6fa729cf4b       4830  s1_probe_restore_e2e.log
+97e2173af1a31a7e57ebcfb20289a524b99f1b74723faee2507578c38840a935        852  s1_probe_restore_e2e_selftest.log
+91bd530e7bf386a527b9d56e01bae5812821c5a281315bd6ffd4c3ac3c29d549       1666  s2_pressure_budget.log
+98be7a751526bbd282f158c2d0522a78acedb4f8f8797d2f7f78217b534fe9ad      17515  s2_pressure_budget_selftest.log
+458867def5b493ee5073b74b004719c6b1f487cbbb28b48a1b4a7913611a0c67         99  s3_engine_archive_hash.log
+83b0891db80dabfbccc0f8cc9a453d77ae69d6600cf97790d219e377660e464b        492  s3_engine_archive_symbols.log
+334a5c211aedbcef4436eb7731927659a5bef0f10be980caaf0b44d3b2082668         88  s3_engine_lib_build.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855          0  s3_portable_syntax.log
+70cc82be97ee8cd45b14b9a03979cba61d694bb679909a5f9d2422107f5d4a6d    3972478  s3b_independent_clamp_sweep.log
+0e1e936a906bcc1176879a90be5cc0440e6de9dc7bfa6e7f4cddf89eb73767d2       1807  suite_audit.log
+de999ed56a63049241981ea3836568a51bf4efef601e238a726740d7f504f0ea       1379  suite_host_verification.log
+2d4f8158f4c2e8bc0c8baf2f728081809432474b37c953f620f7f43e73fb6f7e        424  suite_regression_bug1_section.log
+16b3b6f3b3d5df834a566b2ba9791d7983a1b14b8c8d544e3868bdc4e579c635       3767  write_manifest.py
+
+determinism: the same command run twice, byte-identical output
+  IDENTICAL  krw_zone_write_host_test.log == s1_krw_zone_write_host_test.log
+  IDENTICAL  probe_restore_e2e_host_test.log == s1_probe_restore_e2e.log
+  IDENTICAL  probe_restore_e2e_selftest.log == s1_probe_restore_e2e_selftest.log
+  IDENTICAL  pressure_budget.log == s2_pressure_budget.log
+  IDENTICAL  pressure_budget_selftest.log == s2_pressure_budget_selftest.log
+  IDENTICAL  bug2_release_paths.log == s1_bug2_release_paths.log
+  IDENTICAL  bug2_release_paths_selftest.log == s1_bug2_release_paths_selftest.log
+
+independent check written for this pass (not a re-run of the project harness):
+  ok   the last legal block (0x20 at +0x40 of a 0x60 object) is written, 1 block, inside
+  shapes=15253 allowed=2460 refused=12793 violations=0
+  INDEPENDENT_CLAMP_SWEEP PASS
+  source: independent_clamp_sweep.c (this directory), linked against
+  kexploit/krw_zone_write.c - the shipped clamp, a monitor this file owns.
+
+build artifact this pass produced (hashed on disk):
+  263ae60d49fd0c1557ac8d26f365b6d9d4c8475387ab45451306da31167f9661  engine archive  /home/kaffein/Desktop/W0lfSword/.theos/libengine/libw0lfengine.a
+  (pinned by scripts/check_host_verification.sh: 263ae60d49fd0c1557ac8d26f365b6d9d4c8475387ab45451306da31167f9661)
+
+tool versions:
+  cc           cc (Debian 14.2.0-19) 14.2.0
+  python3      Python 3.13.5
+  llvm-nm-19   llvm-nm, compatible with GNU nm
+  make         GNU Make 4.4.1

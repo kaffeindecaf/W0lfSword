@@ -1,0 +1,15 @@
+s1_krw_zone_write_host_test :: cwd=/home/kaffein/Desktop/W0lfSword :: bash scripts/run_krw_zone_write_host_test.sh
+s1_probe_restore_e2e :: cwd=/home/kaffein/Desktop/W0lfSword :: bash scripts/run_probe_restore_e2e_host_test.sh
+s1_probe_restore_e2e_selftest :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/probe_restore_e2e_selftest.py --selftest
+s1_bug2_release_paths :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_bug2_release_paths.py
+s1_bug2_release_paths_selftest :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_bug2_release_paths.py --selftest
+s2_pressure_budget :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_pressure_budget.py
+s2_pressure_budget_selftest :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_pressure_budget.py --selftest
+s3_engine_lib_build :: cwd=/home/kaffein/Desktop/W0lfSword :: make THEOS=/home/kaffein/theos libengine
+s3_engine_archive_hash :: cwd=/home/kaffein/Desktop/W0lfSword :: sha256sum .theos/libengine/libw0lfengine.a
+s3_engine_archive_symbols :: cwd=/home/kaffein/Desktop/W0lfSword :: bash -c llvm-nm-19 .theos/libengine/libw0lfengine.a | grep -E "krw_zone_write_qword|krw_zone_block_align_down|krw_zone_window_for_field_end|kwrite_zone_element_qword|probe_exit_action_for|probe_restore_fd_source" | sort -u
+s3_portable_syntax :: cwd=/home/kaffein/Desktop/W0lfSword :: cc -std=gnu99 -Wall -Wextra -Wno-unused-parameter -fsyntax-only -I. kexploit/krw_zone_write.c kexploit/probe_restore_policy.c
+s3b_independent_clamp_sweep :: cwd=/home/kaffein/Desktop/W0lfSword :: bash -c cc -std=gnu99 -Wall -Wextra -Wno-unused-parameter -I. -o "${TMPDIR:-/tmp}/indep_clamp" docs/verification/2026-09-11-0.12/t15/independent_clamp_sweep.c kexploit/krw_zone_write.c && "${TMPDIR:-/tmp}/indep_clamp"
+suite_host_verification :: cwd=/home/kaffein/Desktop/W0lfSword :: bash scripts/check_host_verification.sh
+suite_regression_bug1_section :: cwd=/home/kaffein/Desktop/W0lfSword :: bash /home/kaffein/Desktop/W0lfSword/docs/verification/2026-09-11-0.12/t15/regression_bug1_section.sh
+suite_audit :: cwd=/home/kaffein/Desktop/W0lfSword :: ./W0lfSword audit

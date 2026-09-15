@@ -1,0 +1,8 @@
+# trm_trm2
+commit: dfe75f2b3eba9bebc08fae293ce39529482b5f7e terminal: output redirection (TRM.2) - 'cmd > file' / 'cmd >> file', errors stay visible, 13 new host checks (95 pass)
+paths exported: tests terminal utils kexploit sandbox_escape.h
+tree: revisions/trm_trm2/tree (sparse export of that commit, in-repo)
+tree sha256 (sorted per-file hashes): 2799447eaa387eed2aedf514be935428546d40003d18df7adb987d1ca1ae71e2
+tree files: 61
+command (cwd = revisions/trm_trm2/tree):
+  cc -std=gnu99 -Wall -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare -I. -Itests/hostshim -o trm_test tests/trm_shell_host_test.c terminal/trm_shell.c terminal/trm_common.c -lpthread && ./trm_test

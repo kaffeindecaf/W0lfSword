@@ -16,6 +16,8 @@
 #import <os/log.h>
 #endif
 
+#include "tweak_log_policy.h"   // BUG.6: the fsync rate gate the sink consults
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,6 +47,14 @@ void tweak_log_hook_emit(const char *line);
 // True when a host app installed a hook, so the file sink can fsync each line
 // and survive a kernel panic (see the 2026-09-11 SE panic: the tail was lost).
 int tweak_log_hook_installed(void);
+
+// BUG.6 (2026-09-11 device day): may the file sink fsync THIS line? One gate for
+// the whole process (owned by tweak_log.m), at most one grant per
+// TWEAK_LOG_FSYNC_MIN_INTERVAL_MS - the fsync-per-line version dirtied ~1.07 GB
+// in 18 minutes on the SE against a 1 GB/day disk-write limit. The decision
+// lives in utils/tweak_log_policy.c so tests/tweak_log_throttle_host_test.c can
+// count the grants with a simulated clock.
+int tweak_log_fsync_due_now(void);
 
 // TweakLog writes every line to up to four sinks so the tweak is debuggable
 // on BOTH a jailbroken phone (read /tmp/FilzaTweak.log over SSH) and a clean
@@ -138,22 +148,17 @@ static void TweakLog(const char *format, ...) {
             fprintf(df, "[%s] %s\n", ts, buf);
             // Get the tail to disk before returning - a kernel panic gives the
             // page cache no chance to flush, which cost us the whole tail of the
-            // 2026-09-11 SE panic run. But RATE LIMIT it: fsyncing every single
-            // line during a burst made the app dirty ~1.07 GB of file-backed
-            // memory in 18 minutes on the SE (iOS diskwrites resource report,
-            // limit 1 GB/day). At most one fsync per 200 ms keeps the forensic
-            // value (a panic loses at most 200 ms of lines) without the I/O.
-            if (tweak_log_hook_installed()) {
-                static struct timespec lastFsync;
-                struct timespec now_mono;
-                clock_gettime(CLOCK_MONOTONIC, &now_mono);
-                long long delta_ms = (long long)(now_mono.tv_sec - lastFsync.tv_sec) * 1000LL
-                                   + (long long)(now_mono.tv_nsec - lastFsync.tv_nsec) / 1000000LL;
-                if (lastFsync.tv_sec == 0 || delta_ms >= 200) {
-                    lastFsync = now_mono;
-                    fflush(df);
-                    fsync(fileno(df));
-                }
+            // 2026-09-11 SE panic run. But RATE LIMIT it (BUG.6): fsyncing every
+            // single line made the app dirty ~1.07 GB of file-backed memory in
+            // 18 minutes on the SE (iOS diskwrites resource report, limit
+            // 1 GB/day). The gate is one per process and grants at most one
+            // fsync per TWEAK_LOG_FSYNC_MIN_INTERVAL_MS, through the compiled,
+            // host-tested policy (utils/tweak_log_policy.c: at most 3001 fsyncs
+            // for the longest run, whatever the line rate), so a panic loses at
+            // most 200 ms of lines instead of buying a gigabyte of I/O.
+            if (tweak_log_hook_installed() && tweak_log_fsync_due_now()) {
+                fflush(df);
+                fsync(fileno(df));
             }
             fclose(df);
         }

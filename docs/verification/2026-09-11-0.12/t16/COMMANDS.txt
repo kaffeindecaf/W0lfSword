@@ -1,0 +1,91 @@
+T16 - BUG.3 / BUG.4 / BUG.5 closing verification (engine + app)
+captured 2026-09-12, host only, no device command, no exploit run, no git commit
+
+Everything below was run from /home/kaffein/Desktop/W0lfSword and is reproducible with
+    W0LF_TERM=/home/kaffein/Desktop/W0lfTerm bash docs/verification/2026-09-11-0.12/t16/capture.sh
+(that is the script that produced every .log file in this directory; RC.txt holds its exit code).
+
+1. the two checkers named by the task
+
+   python3 scripts/check_scan_budget_cancel_writes.py            -> 25 check(s) passed, 0 failed; rc=0
+       check_scan_budget_cancel_writes.log
+       includes "BUG.3 engine: the default budget is the one that fits the walk (600 s)",
+                "BUG.3 engine: the budget is settable and clamped, and every scan/spray loop reads it",
+                "BUG.3 engine: the cancel/budget check sits INSIDE each walk, not after it",
+                "BUG.3 app: the default budget matches the engine default and is pushed in at load",
+                "BUG.3 app: a SET row exists, persists, and pushes every change into the engine",
+                "BUG.3 app: the boot banner reads the budget back from the ENGINE",
+                "BUG.4 app: a visible CANCEL control that is on only while a run is in flight",
+                "BUG.4 app: the tap reaches the engine stop flag through the one bridge",
+                "BUG.4 app: the run loop treats -7 as cancelled and STOPS (no retry)",
+                "BUG.4 engine: the socket spray honours a CANCEL (it is the longest pre-walk cost)",
+                "BUG.5 counter: the ONE write primitive counts both outcomes",
+                "BUG.5 engine: the counters reset per attempt, are exported, and are printed",
+                "BUG.5 app: the run log carries the measured number, not the claim",
+                "BUG.5: no shipped log/UI string claims 'zero writes' any more"
+   python3 scripts/check_scan_budget_cancel_writes.py --selftest -> selftest: all mutations caught
+                                                                    (21 mutations), rc=0
+   python3 scripts/check_pressure_budget.py                      -> 8 check(s) passed, 0 failed; rc=0
+       includes "BUG.5/BUG.6 disk budget: the write accounting is pinned against the 1 GB/day limit"
+       and the printed arithmetic: "1073.75 MB in 1083 s, limit 1 GB/day"
+   python3 scripts/check_pressure_budget.py --selftest           -> selftest: all mutations caught
+                                                                    (9 mutations), rc=0
+
+2. the host harnesses under those lints
+
+   bash scripts/run_kwrite_counter_host_test.sh     -> checks=53 failures=0 / KWRITE_COUNTER_HOST_TEST PASS
+   bash scripts/run_tweak_log_throttle_host_test.sh -> checks=30 failures=0 / TWEAK_LOG_THROTTLE_HOST_TEST PASS
+   bash scripts/run_probe_restore_e2e_host_test.sh  -> checks=56 failures=0 / PROBE_RESTORE_E2E_HOST_TEST PASS
+
+3. the full host verification suite, including the two cross-builds
+
+   W0LF_TERM=/home/kaffein/Desktop/W0lfTerm bash scripts/check_host_verification.sh --with-builds
+   -> "host verification: 21 ok, 0 drift"  (rc=0), see host_verification.log
+      engine_lib_build  rc=0, engine_lib_archive 263ae60d49fd0c15... (matches the pinned hash)
+      app_ipa_build     rc=0, app_binary        2922ebb3c8138e6d... (matches the pinned hash)
+      app_static_symbols rc=0, fd7a746a6f461d09... (matches the pinned hash)
+   The archive and the linked app binary were REBUILT from this working tree by that
+   command and came out byte-identical to the hashes pinned in the script, so the
+   evidence below is about the current tree, not a stale artifact.
+
+4. the linked binary: symbols (llvm-nm-19)
+
+   linked_binary_symbols.log - sha256 2922ebb3c8138e6dcbd2efb95101afdceb26e409b83f8129d28bdb351eaf14c8
+     000000010000d1a0 T _kexploit_scan_writes
+     000000010000d1b4 T _kexploit_scan_write_bytes
+     000000010000d1c8 T _kexploit_scan_write_failures
+     000000010000d1dc T _kexploit_set_scan_budget
+     000000010000d238 T _kexploit_scan_budget
+     000000010000d254 T _kexploit_request_stop
+     000000010000d278 T _kexploit_stop_requested
+     000000010000d298 T _kexploit_clear_stop
+     000000010000bd1c T _kwrite_count_reset
+     000000010000bdb4 T _kwrite_count_emit
+     -> engine symbols still UNDEFINED: (none)
+
+5. the linked binary: the two UI link edges (llvm-objdump-19)
+
+   ui_link_edges.log
+     setScanBudget: 100020c30  str w8, [x9, #0xd38]     (g_scanBudget)
+                    100020c38  bl ...       <_kexploit_set_scan_budget>
+     dotTapped:     100007f44  bl ...       <_term_bridge_cancel>
+     term_bridge_cancel: 10001df50 bl ...   <_kexploit_request_stop>
+     kexploit_request_stop: 10000d26c stlr w8, [x9]     (the atomic the walks read)
+
+6. the linked binary: string markers
+
+   linked_binary_marker_counts.log
+     cancel                         19
+     pe_v2 scan stopped on request   1
+     no kernel writes                5
+     zero kernel writes              0
+     zero writes                     0
+     measured by kwrite_counter      1
+   plus the measured-write format strings, e.g.
+     [SCAN] kernel writes issued %s: %llu write(s), %llu byte(s) [measured by kwrite_counter, BUG.5]
+     [w0lf] kernel writes %s: %llu write(s) / %llu byte(s) (engine-counted, reset per attempt; refused: %llu) - BUG.5
+
+NOT covered by this capture (plainly): the device half. No device ran and no exploit
+was run, so "the budget is what a full A13 walk needs", "the CANCEL tap stops a
+spinning run" and "the readonly counter reads 0 after a run" are still host-verified
+claims, not device-verified ones. They are what the next device day measures.

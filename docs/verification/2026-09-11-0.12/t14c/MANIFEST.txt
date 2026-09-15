@@ -1,0 +1,44 @@
+docs/verification/2026-09-11-0.12/t14c - manifest (sha256, bytes, name)
+generated 2026-09-12T00:03:50+0200 on Linux-7.0.13+parrot7-amd64-x86_64-with-glibc2.41
+scope: T14c re-run of the KRW / TRM / W0lfTerm host suites from the working tree (no device, no exploit, no git write)
+
+86dfe618b7bc9a4a5e1884c3e124fc2052aa62e685cf6a4f553bad0fcf281a44       2378  COMMANDS.txt
+8d0f7cd74f9497a7b2afc9477fa06141d4354595c2577a933b8fe43f0c8fb6d3        488  RC.txt
+47edc78839ff8991f283d79c10c37d758a5eab7498151541b3e96d39d295fbb6      12945  append_worklog.py
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855          0  bash_syntax.log
+10248454c6b4109dfe29cddfb42166367b30547c6bc154a383961a3a3090a827       3180  capture.sh
+279fdbc9a29576a63c91c49c5b48b1cfba92cfc78f90bb408e63c5d1b503aa2d       1474  e10_symbols_strings.log
+c2084cdfe1f782ebf5b328ffb353bfcab2d94dc3ed9b6472a45ffe232f6de275    2510338  e10b_app_disassembly.txt
+3476937abcd850e45679f2f825966d080ddd8e100e5ba7da5258c35ab6ce1635        549  e10c_app_call_edges.log
+6c784f80e5069a521592ff77e13d354ffb15877a1784e023ce6160ca77069517       1731  e11_host_suite_with_builds.log
+1386b0b6e393b4923dc3ad9cd69547b8e9471e78f2c904688b5a09cc3b0ea5be       7492  e1_krw_zone_write.log
+1dc9c1d4b0e35b86e23667ff627e4b57bb7f6ec8385e622fc78c585dd6424e63       2629  e2_kwrite_counter.log
+62f760e7402071fcb823a7ec5191904e098ac6b520907ef13135ba6fa729cf4b       4830  e3_probe_restore_e2e.log
+97e2173af1a31a7e57ebcfb20289a524b99f1b74723faee2507578c38840a935        852  e3b_probe_restore_selftest.log
+1df3ce4c11439d92bf412a4f411140e20fcb0bc260dd3370cc670413460a171f       7170  e4_bug2_release_paths.log
+03bc081c48798f73959714628936f48d818d8c7e04c6a8af1a09c250b1a7f612       4768  e4b_bug2_release_paths_self.log
+4dc5246d0662e7df01b483d7cb9e859244210c7f31cba283198d4c658547790d       2161  e5_scan_budget_cancel.log
+e24a0f3e9a1e9bc7b7be800439e50ab11d7190fa77c7c6858eafa28e5b98a040      46714  e5b_scan_budget_cancel_self.log
+91bd530e7bf386a527b9d56e01bae5812821c5a281315bd6ffd4c3ac3c29d549       1666  e6_pressure_budget.log
+98be7a751526bbd282f158c2d0522a78acedb4f8f8797d2f7f78217b534fe9ad      17515  e6b_pressure_budget_selftest.log
+d59cd9fd7d8be99c390a569e1c7430af0b37a8023433fc4beaf5806b530653ab       2873  e7_tweak_log_throttle.log
+a2d57696cd22325a5213d204ea1547ab9134d2e58676d2f24984273d20924305      15415  e8_trm_shell.log
+334a5c211aedbcef4436eb7731927659a5bef0f10be980caaf0b44d3b2082668         88  e9_engine_lib_build.log
+458867def5b493ee5073b74b004719c6b1f487cbbb28b48a1b4a7913611a0c67         99  e9b_engine_lib_archive_hash.log
+3d58bf3d8f500de354c4852c7fe5640ac511aff83b3f2d948721aa4a97e9dc07       2282  e9c_app_ipa_build.log
+c66cdb10f3fcee837f01bee44e24738587570a0568e13797fa1fdd7a653e80ba        101  e9d_app_binary_hash.log
+90bb313fcb66569a6658eabae13c36626c6f69b33a15807fbc10807e7e88b861         98  e9e_app_ipa_hash.log
+5a060d0d307d0458e4ebc0c3674e92d0ae0bb07194899a64dd93109eb9f74602       1688  extract_edges.py
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855          0  py_compile.log
+ea4b8668035aca7463958b1dbf600ebffc5e1a48e4b3a80fd45e5b2839b0cd79       2156  write_manifest.py
+
+build artifacts this pass produced (hashed on disk):
+  263ae60d49fd0c1557ac8d26f365b6d9d4c8475387ab45451306da31167f9661  engine archive  /home/kaffein/Desktop/W0lfSword/.theos/libengine/libw0lfengine.a
+  2922ebb3c8138e6dcbd2efb95101afdceb26e409b83f8129d28bdb351eaf14c8  app binary  /home/kaffein/Desktop/W0lfTerm/dist/Payload/W0lfTerm.app/W0lfTerm
+  00827826d3ef17ea6c4a6aa71275168879890ebd6a4b1fd65c7f477a2578d261  app ipa (zip mtimes, not byte-stable)  /home/kaffein/Desktop/W0lfTerm/dist/W0lfTerm-0.20-sideload.ipa
+
+tool versions:
+  cc           cc (Debian 14.2.0-19) 14.2.0
+  python3      Python 3.13.5
+  llvm-nm-19   llvm-nm, compatible with GNU nm
+  clang        Debian clang version 19.1.7 (3+b1)

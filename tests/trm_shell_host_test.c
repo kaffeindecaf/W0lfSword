@@ -153,6 +153,14 @@ void trm_probe_sealed_volume(void) {}
 // --- test body ------------------------------------------------------------
 
 int main(void) {
+    // Line-buffer stdout. The harness writes its own result lines while the
+    // shell under test runs `system()`/`popen()` children (the selftest path
+    // runs `df`), and a redirected stdout is fully buffered by default: the
+    // child's write then lands in the middle of a parent line, which made this
+    // harness's output nondeterministic between runs (the pinned canon hash in
+    // scripts/check_host_verification.sh drifted for that reason alone - the
+    // interleave moved, no test changed).
+    setvbuf(stdout, NULL, _IOLBF, 0);
     char tmpdir[] = "/tmp/trm_shell_test_XXXXXX";
     if (!mkdtemp(tmpdir)) {
         fprintf(stderr, "mkdtemp failed: %s\n", strerror(errno));

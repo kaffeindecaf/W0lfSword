@@ -61,11 +61,35 @@ void tweak_log_hook_emit(const char *line) {
 }
 
 // True when a host app is mirroring the log (W0lfTerm). The file sink uses
-// this to fsync every line: on 2026-09-11 a kernel panic on the SE left the
-// on-disk log with the boot banner but NONE of the exploit lines, because the
-// appends were still in the page cache when the kernel died. fsync costs a
-// little per line, so it is only paid when a UI is watching the same lines
-// (the case where post-panic forensics matter).
+// this to fsync: on 2026-09-11 a kernel panic on the SE left the on-disk log
+// with the boot banner but NONE of the exploit lines, because the appends were
+// still in the page cache when the kernel died. fsync costs a little per line,
+// so it is only paid when a UI is watching the same lines (the case where
+// post-panic forensics matter).
 int tweak_log_hook_installed(void) {
     return g_log_hook != NULL;
 }
+
+// BUG.6 (2026-09-11 device day): ONE rate gate for the whole process, not one
+// per translation unit. TweakLog() is a static function in tweak_log.h, so a
+// gate declared in the header would exist once per file that logs - each with
+// its own 200 ms window, i.e. one fsync per window per TU. The disk-write
+// budget (1 GB/day, W0lfTerm.diskwrites_resource-*.ips) is per app, so the gate
+// is too. The decision itself is utils/tweak_log_policy.c (compiled into the
+// engine archive and driven by tests/tweak_log_throttle_host_test.c).
+static tweak_log_fsync_gate g_fsyncGate;
+
+int tweak_log_fsync_due_now(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        // No clock, no window. The line itself is already written and fclose()
+        // flushes it to the page cache, so the only thing lost here is
+        // post-panic durability - the disk budget is the hard constraint.
+        // (CLOCK_MONOTONIC does not fail on iOS or Linux; this is the cheap
+        // "cannot happen" branch, and it must not fsync per line.)
+        return 0;
+    }
+    long long nowNs = (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
+    return tweak_log_fsync_due(&g_fsyncGate, nowNs);
+}
+

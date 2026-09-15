@@ -1,0 +1,15 @@
+CORRECTED (T17 second pass) - the tree of this revision IS in the repo:
+  revisions/trm_trm2/tree   (sparse export, 61 files, sha256 2799447eaa387eed2aedf514be935428546d40003d18df7adb987d1ca1ae71e2)
+  paths exported: tests terminal utils kexploit sandbox_escape.h
+  commit: dfe75f2b3eba9bebc08fae293ce39529482b5f7e terminal: output redirection (TRM.2) - 'cmd > file' / 'cmd >> file', errors stay visible, 13 new host checks (95 pass)
+
+This note used to say the extracted source tree was moved OUT of the repo to a
+temp directory, because a whole-repo export of this revision is ~15 MB. That made
+the capture depend on a path outside the repo, and a capture that stops resolving
+once that directory is cleared is not evidence. The second pass re-exported every
+replayed revision SPARSE - only the paths that revision's host harness compiles,
+~0.6 MB each - into revisions/trm_trm2/tree/, and nothing in this capture
+references the old temp copy any more.
+
+Superseded by: revisions/trm_trm2/COMMANDS.txt (tree path + digest) and
+../../retired-round1/README.md (why the round-1 layout was replaced).

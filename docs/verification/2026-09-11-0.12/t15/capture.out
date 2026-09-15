@@ -1,0 +1,210 @@
+s1_krw_zone_write_host_test rc=0
+s1_probe_restore_e2e rc=0
+s1_probe_restore_e2e_selftest rc=0
+s1_bug2_release_paths rc=0
+s1_bug2_release_paths_selftest rc=0
+s2_pressure_budget rc=0
+s2_pressure_budget_selftest rc=0
+s3_engine_lib_build rc=0
+s3_engine_archive_hash rc=0
+s3_engine_archive_symbols rc=0
+s3_portable_syntax rc=0
+s3b_independent_clamp_sweep rc=0
+suite_host_verification rc=0
+suite_regression_bug1_section rc=0
+suite_audit rc=0
+
+--- BUG.1 host cases, pass/fail PER CASE (the two harnesses that drive the real sources) ---
+[s1_krw_zone_write_host_test] 116 ok, 0 FAIL (of 116 cases)
+  PASS  len < 0x20 is refused
+  PASS  len < 0x20 emits no block
+  PASS  len < 0x20 logs why
+  PASS  len 0x40 (multiple of 0x20) inside a declared object is written
+  PASS  len 0x40 emits 2 blocks
+  PASS  blocks are dst, dst+0x20 (no shift)
+  PASS  both blocks inside the object
+  PASS  the requested bytes landed
+  PASS  the rest of the object was not touched
+  PASS  shifted tail without a declared object is refused
+  PASS  refused write emits no block (no half-applied write)
+  PASS  refused write changed no kernel byte
+  PASS  refusal logs 'refusing 32-byte block: shifted start ... has no enclosing object declared'
+  PASS  shifted tail with the object declared is written
+  PASS  no refusal logged when the write is allowed
+  PASS  len 0x38 emits 1 full block + the shifted tail
+  PASS  last block is the backward-shifted dst+0x18
+  PASS  shifted block ends exactly at dst+len (never past the request)
+  PASS  every block (and the RMW read) inside the object
+  PASS  the requested bytes landed
+  PASS  RMW put the object bytes outside the request back unchanged
+  PASS  nothing before the object was touched
+  PASS  SE write (0x50 into a 0x60 object) is refused
+  PASS  SE write emits no block
+  PASS  no 32-byte write left the object
+  PASS  SE refusal logs the block and the object bounds
+  PASS  shifted variant of the SE write is refused
+  PASS  no block emitted, nothing outside the object
+  PASS  a declaration that does not contain dst is treated as no declaration
+  PASS  foreign declaration emitted no block
+  PASS  window contains its base
+  PASS  window contains its last byte
+  PASS  window excludes base+size
+  PASS  window excludes base-1
+  PASS  base 0 = nothing declared
+  PASS  size 0 = nothing declared
+  PASS  shifted start below objBase is refused
+  PASS  reported shifted start is dst+len-0x20
+  PASS  writer path reports the same call as 'no object declared'
+  PASS  a write ending exactly at the object end is allowed
+  PASS  its last block starts at base+0x40
+  PASS  its last block ends exactly at base+0x60 (inside kalloc.96)
+  PASS  nothing left the object
+  PASS  one byte past the object end is refused
+  PASS  the refusal emits no block
+  PASS  the refusal changed no kernel byte
+  PASS  the refusal names the object bounds
+  PASS  the SE write itself: one block at +0x50 of a 0x60 object
+  PASS  ... emitted no block and no RMW read
+  PASS  ... changed no kernel byte
+  PASS  ... and the log says which declaration is missing
+  PASS  a block at the object base (inside the object, but unprovable)
+  PASS  ... emitted no block and no RMW read
+  PASS  ... changed no kernel byte
+  PASS  ... and the log says which declaration is missing
+  PASS  two blocks in the middle
+  PASS  ... emitted no block and no RMW read
+  PASS  ... changed no kernel byte
+  PASS  ... and the log says which declaration is missing
+  PASS  a write with a shifted tail
+  PASS  ... emitted no block and no RMW read
+  PASS  ... changed no kernel byte
+  PASS  ... and the log says which declaration is missing
+  PASS  a write one byte over a block boundary
+  PASS  ... emitted no block and no RMW read
+  PASS  ... changed no kernel byte
+  PASS  ... and the log says which declaration is missing
+  PASS  a window that does not contain dst is no window
+  PASS  the foreign window emitted no block
+  PASS  size 0 is nothing declared
+  PASS  sweep: not one emitted block left the object
+  PASS  sweep: verdict is OK exactly when dst+len fits the object
+  PASS  sweep: allowed writes landed correctly and stayed inside the object
+  PASS  sweep: not one undeclared shape emitted a block (default deny)
+  PASS  qword at +0x50 of a 0x60 object with the object declared is written
+  PASS  it emits the 0x20-aligned block containing the qword (base+0x40, not base+0x50)
+  PASS  that block ends exactly at the object end - inside kalloc.96
+  PASS  the qword landed at the requested address
+  PASS  the RMW read and the block stayed inside the object
+  PASS  the RMW put the surrounding bytes back unchanged (only the qword changed)
+  PASS  a window ending mid-block is refused (the aligned block would leave it)
+  PASS  the refusal emitted nothing
+  PASS  the refusal names the object bounds
+  PASS  an undeclared qword write is refused
+  PASS  the undeclared qword write emitted no block
+  PASS  a qword write under a window that excludes it is refused
+  PASS  a qword whose aligned block would start below the declared base is refused
+  PASS  that refusal names the base it would precede
+  PASS  the aligned block of the inpcb's filt/chksum qwords is 0x140 (0x160 is already aligned)
+  PASS  no field end = no window (nothing declared)
+  PASS  a field ending inside the first block needs one block
+  PASS  a field ending on a block boundary stays there
+  PASS  one byte over a boundary rounds up
+  PASS  18.x/26.x (filt 0x148, chksum 0x150)
+  PASS  ... both put-back qwords sit in the same aligned block
+  PASS  ... the restore's two qword writes are inside the declared window
+  PASS  ... and neither left the inpcb window
+  PASS  ... both saved values landed where the restore writes them
+  PASS  17.0-17.7.x (filt 0x150, chksum 0x158)
+  PASS  ... both put-back qwords sit in the same aligned block
+  PASS  ... the restore's two qword writes are inside the declared window
+  PASS  ... and neither left the inpcb window
+  PASS  ... both saved values landed where the restore writes them
+  PASS  the promotion code is KERN_SUCCESS (0)
+  PASS  the promotion is the ONE exit handed to the caller (there the socket IS the primitive)
+  PASS  probe exit -1 restores before the caller sees it
+  PASS  probe exit -7 restores before the caller sees it
+  PASS  an exit code the policy has never seen still restores (fail-safe default, not hand-off)
+  PASS  before the release funnel: the restore re-opens from the spray tracking array
+  PASS  the tracking array wins while it still holds the pair
+  PASS  array emptied, promotion fds live: the restore still reaches the pair
+  PASS  neither source: UNREACHABLE (the engine logs a failure, never a silent success)
+  PASS  staged -5 step 1: at promotion time the array holds the pair
+  PASS  staged -5 step 3: the restore is NOT unreachable after the spray array was released
+  PASS  staged -5 step 3: it writes the saved values back through the promotion's fds
+  PASS  a pair opened for an earlier save is refused (no write through a foreign socket)
+[s1_probe_restore_e2e] 56 ok, 0 FAIL (of 56 cases)
+  PASS  control: the harness counts a raw 32-byte write at +0x50 of a 0x60 object (the SE overrun)
+  PASS  injected overrun (0x20 at +0x50 of 0x60) is REFUSED
+  PASS  the refusal emitted no block and no RMW read
+  PASS  the refused overrun changed no kernel byte
+  PASS  the refusal is logged with the block and the object bounds
+  PASS  the qword shape at the same address is allowed (block +0x40..+0x60)
+  PASS  it emits the aligned block +0x40..+0x60, wholly inside the 0x60 object
+  PASS  the first qword past the object end is refused
+  PASS  and it emits no block either
+  PASS  and the refusal says the object does not contain the target
+  PASS  18.x/26.x (filt 0x148, chksum 0x150): the probe's marker write is inside the declared window
+  PASS  ... and the marker is in the object (the corruption is live)
+  PASS  exit -1 (write-verify exhaustion) restores
+  PASS  ... through the spray tracking array (it still holds the pair)
+  PASS  ... and the saved values are back in the object (read back, not assumed)
+  PASS  ... both fields byte-identical to the saved values (marker gone)
+  PASS  ... the put-back emitted exactly the two blocks (one per qword)
+  PASS  ... and not one of them left the declared inpcb window
+  PASS  ... the qword before the first put-back field was not touched
+  PASS  17.0-17.7.x (filt 0x150, chksum 0x158): the probe's marker write is inside the declared window
+  PASS  ... and the marker is in the object (the corruption is live)
+  PASS  exit -1 (write-verify exhaustion) restores
+  PASS  ... through the spray tracking array (it still holds the pair)
+  PASS  ... and the saved values are back in the object (read back, not assumed)
+  PASS  ... both fields byte-identical to the saved values (marker gone)
+  PASS  ... the put-back emitted exactly the two blocks (one per qword)
+  PASS  ... and not one of them left the declared inpcb window
+  PASS  ... the qword before the first put-back field was not touched
+  PASS  cancel (-7) restores (it is not the promotion)
+  PASS  cancel in the write-verify loop: the pair is re-opened from the array and the values go back
+  PASS  cancel: both fields are byte-identical to the saved values again
+  PASS  cancel after the array was released: the promotion's fds are used (not UNREACHABLE)
+  PASS  cancel after the release funnel: the saved values still go back (BUG.1's 'one exit later')
+  PASS  cancel with no usable fd pair: the restore writes NOTHING (no write through a foreign socket)
+  PASS  ... and it reports a FAILED restore, never a silent success
+  PASS  ... the field is still corrupted, which is what the failure report says
+  PASS  the promotion (0) is handed to the caller
+  PASS  ... and this path issues no put-back at all (the corrupted socket IS the primitive)
+  PASS  the restore is attempted (its fd pair is live) with the kalloc.96 bucket declared
+  PASS  ... and it is reported as a FAILED restore, never as a written one
+  PASS  ... not one block was emitted for the put-back (refused, not written unproven)
+  PASS  ... no kernel byte changed anywhere in the window
+  PASS  ... and the refusal names the missing declaration
+  PASS  a window that cuts the put-back's aligned block: refused, no block, no restore claimed
+  PASS  ... the refusal names the block and the object it would leave
+  PASS  ... and no kernel byte changed
+  PASS  the same put-back under the engine's field-derived window does go back
+  PASS  ... with every block and RMW read inside the declared window
+  PASS  18.x/26.x (filt 0x148, chksum 0x150): the declared window is 0x160 (field end rounded up)
+  PASS  18.x/26.x (filt 0x148, chksum 0x150): both put-back qwords share one 0x20-aligned block
+  PASS  18.x/26.x (filt 0x148, chksum 0x150): the declared window contains both put-back qwords
+  PASS  18.x/26.x (filt 0x148, chksum 0x150): the 32-byte block holding them ends inside the window (no refusal)
+  PASS  17.0-17.7.x (filt 0x150, chksum 0x158): the declared window is 0x160 (field end rounded up)
+  PASS  17.0-17.7.x (filt 0x150, chksum 0x158): both put-back qwords share one 0x20-aligned block
+  PASS  17.0-17.7.x (filt 0x150, chksum 0x158): the declared window contains both put-back qwords
+  PASS  17.0-17.7.x (filt 0x150, chksum 0x158): the 32-byte block holding them ends inside the window (no refusal)
+BUG.1 host cases: 172 pass, 0 fail
+BUG.1 HOST VERDICT: PASS
+(same logs rendered as a file by extract_cases.py -> BUG1-CASES.txt)
+--- capture complete (rc per command in RC.txt; per-case verdict rc=0) ---
+s1_krw_zone_write_host_test rc=0
+s1_probe_restore_e2e rc=0
+s1_probe_restore_e2e_selftest rc=0
+s1_bug2_release_paths rc=0
+s1_bug2_release_paths_selftest rc=0
+s2_pressure_budget rc=0
+s2_pressure_budget_selftest rc=0
+s3_engine_lib_build rc=0
+s3_engine_archive_hash rc=0
+s3_engine_archive_symbols rc=0
+s3_portable_syntax rc=0
+s3b_independent_clamp_sweep rc=0
+suite_host_verification rc=0
+suite_regression_bug1_section rc=0
+suite_audit rc=0

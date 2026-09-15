@@ -20,7 +20,9 @@ endif
 
 # Main-device safety ladder: make W0LF_TEST_MODE=1 builds the test IPA whose
 # DEFAULT mode is READONLY (offsets validation, no kernel writes - BUG.5: that is
-# kernel writes only, the scan still pegs a core and dirties file-backed memory).
+# kernel writes only; the engine counts every write it issues and prints the
+# measured total per run, while the scan still pegs a core and dirties file-backed
+# memory).
 # The mode
 # can be switched at runtime via the app's Documents/w0lf_test_mode file
 # (1=readonly, 2=writetest, 3=full).
@@ -41,7 +43,7 @@ FilzaApplySandboxExt_FILES = Tweak.m sandbox_escape.m TweakExploit.m FilzaPadloc
 endif
 
 # --- kexploit ---
-FilzaApplySandboxExt_FILES += kexploit/kexploit_opa334.m kexploit/krw.m kexploit/krw_zone_write.c kexploit/kutils.m kexploit/offsets.m kexploit/vnode.m kexploit/file.m kexploit/vnode_research.m kexploit/sandbox.m kexploit/Exception.m kexploit/Thread.m kexploit/VM.m kexploit/MigFilterBypassThread.m kexploit/RemoteCall.m kexploit/PAC.m kexploit/mcm_bridge.m kexploit/container_access.m kexploit/bad_query_escape.m
+FilzaApplySandboxExt_FILES += kexploit/kexploit_opa334.m kexploit/krw.m kexploit/krw_zone_write.c kexploit/probe_restore_policy.c kexploit/kwrite_counter.c kexploit/kutils.m kexploit/offsets.m kexploit/vnode.m kexploit/file.m kexploit/vnode_research.m kexploit/sandbox.m kexploit/Exception.m kexploit/Thread.m kexploit/VM.m kexploit/MigFilterBypassThread.m kexploit/RemoteCall.m kexploit/PAC.m kexploit/mcm_bridge.m kexploit/container_access.m kexploit/bad_query_escape.m
 
 # --- MobileGestalt (Chain F) ---
 # Substrate-free plain ObjC (in both MHA and jailbroken builds).
@@ -56,7 +58,7 @@ FilzaApplySandboxExt_FILES += sbtweak/sbtweak.m
 FilzaApplySandboxExt_FILES += SSV/SSVUtils.m
 
 # --- utils ---
-FilzaApplySandboxExt_FILES += utils/hexdump.c utils/process.c utils/permission_utils.m utils/state.m utils/tweak_log.m
+FilzaApplySandboxExt_FILES += utils/hexdump.c utils/process.c utils/permission_utils.m utils/state.m utils/tweak_log.m utils/tweak_log_policy.c
 
 # --- terminal (ROADMAP 0.11) ---
 # Route A in-process shell + the TRM.1/2/4/5 device probes. Plain C, no

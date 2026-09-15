@@ -1,0 +1,122 @@
+TRM shell host test - every pass/fail line, in order (extracted from suite/trm_shell_host_test.log;
+the sh-output lines between them are in that file, which is hashed in MANIFEST.txt)
+
+[1] parser + dispatch
+  ok   command table populated (>30 commands)
+  ok   echo output correct
+  ok   quotes group into one argv
+  ok   comment produces no output
+  ok   empty line produces no output
+  ok   whitespace-only line produces no output
+  ok   unknown command reported
+  ok   all args passed through
+[2] filesystem commands (real POSIX, temp dir)
+  ok   pwd is the container
+  ok   mkdir reported
+  ok   touch reported
+  ok   ls lists the new dir
+  ok   ls lists the file
+  ok   stat identifies a file
+  ok   cp reported
+  ok   cat prints file content
+  ok   head prints the first line
+  ok   mv reported
+  ok   mv visible in ls
+  ok   rm removed the file
+  ok   rm refuses a non-empty dir
+  ok   rmdir refuses a non-empty dir
+[3] cd / path resolution
+  ok   cwd is inside sub
+  ok   cd ~ lands in the container
+  ok   cd / works
+  ok   cd failure reports errno
+  ok   cwd restored to the container
+[4] gating (unsafe)
+  ok   unsafe off
+  ok   rm -r refused without unsafe
+  ok   kernel write refused without unsafe
+  ok   chmod refused without unsafe
+  ok   SSV write refused without unsafe
+  ok   unsafe on
+  ok   prompt shows unsafe state
+  ok   kernel write routed to kwrite32
+  ok   kernel write routed to kwrite64
+  ok   kernel write routed to kwrite16
+  ok   non-kernel address refused
+  ok   chmod works when allowed
+  ok   rm -r no longer gated
+  ok   rm -r removed the tree
+  ok   unsafe off again
+  ok   gating is not sticky
+[5] kernel + probe commands
+  ok   krw reports the live primitive
+  ok   kread hexdump starts at the address
+  ok   kread prints an ascii column
+  ok   kread refuses non-kernel addresses
+  ok   kread rejects non-numeric input
+  ok   id shows posix + kernel creds
+  ok   proc reports the kernel proc address
+  ok   proc reports a miss
+  ok   sbxinfo names the route-B target
+  ok   sbxtest routed to the probe layer
+  ok   probe reached trm_probe_run_all
+  ok   verdict prints the probe layer's line
+  ok   spawn reports the denial rc
+  ok   pty probe reports the denial
+  ok   execsurf routed to the probe layer
+  ok   uname reports the host kernel
+  ok   date formatted
+  ok   df reports space
+  ok   help header present
+  ok   help for one command
+  ok   help reports an unknown command
+[6] packages (in-process command packs)
+  ok   three packages registered
+  ok   package index lookup
+  ok   unknown package -> -1
+  ok   package name + description
+  ok   pkg lists the packages
+  ok   package command refuses until installed
+  ok   sysinfo starts disabled
+  ok   install enables the package
+  ok   fetch renders the system card
+  ok   loadavg available
+  ok   cpu reports the model
+  ok   net lists interfaces
+  ok   strings finds both runs
+  ok   hexdump reports offset + length
+  ok   unknown package reported
+  ok   remove disables the package
+  ok   gating is re-applied after remove
+[7] selftest path (the device smoke test, stubbed deps)
+  ok   trm_shell_selftest() ran without crashing
+[8] redirection (TRM.2)
+  ok   reports 'written to' after a redirect
+  ok   the payload landed in the file
+  ok   >> added the second line
+  ok   >> did not truncate (2 lines)
+  ok   plain > truncates back to 1 line
+  ok   the truncated content is gone
+  ok   the redirected payload did not print to the terminal
+  ok   and it is in the file
+  ok   an unwritable target fails
+  ok   the failure is still reported in the terminal
+  ok   a missing path after '>' is refused
+  ok   '>' inside a word is not a redirect
+  ok   normal commands are unaffected
+[9] completion (TRM.1)
+  ok   a command name completes and gains a space
+  ok   gated command names complete too
+  ok   kwrite8/16/32/64 are all candidates
+  ok   an ambiguous token with no common prefix is left alone
+  ok   the candidate list names them
+  ok   no candidate stays silent
+  ok   path completion appends the rest of the name
+  ok   three entries share the prefix
+  ok   an already-complete common prefix reports no change
+  ok   a directory candidate gets a trailing slash
+  ok   a non-path command gets no path candidates
+  ok   an unmatched path stays silent
+  ok   an empty line completes to nothing
+checks=108 failures=0
+TRM_SHELL_HOST_TEST PASS

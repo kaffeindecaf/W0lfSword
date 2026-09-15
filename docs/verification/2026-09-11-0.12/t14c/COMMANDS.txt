@@ -1,0 +1,19 @@
+e1_krw_zone_write :: cwd=/home/kaffein/Desktop/W0lfSword :: bash scripts/run_krw_zone_write_host_test.sh
+e2_kwrite_counter :: cwd=/home/kaffein/Desktop/W0lfSword :: bash scripts/run_kwrite_counter_host_test.sh
+e3_probe_restore_e2e :: cwd=/home/kaffein/Desktop/W0lfSword :: bash scripts/run_probe_restore_e2e_host_test.sh
+e3b_probe_restore_selftest :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/probe_restore_e2e_selftest.py --selftest
+e7_tweak_log_throttle :: cwd=/home/kaffein/Desktop/W0lfSword :: bash scripts/run_tweak_log_throttle_host_test.sh
+e8_trm_shell :: cwd=/home/kaffein/Desktop/W0lfSword :: bash scripts/run_trm_host_test.sh
+e5_scan_budget_cancel :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_scan_budget_cancel_writes.py
+e5b_scan_budget_cancel_self :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_scan_budget_cancel_writes.py --selftest
+e6_pressure_budget :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_pressure_budget.py
+e6b_pressure_budget_selftest :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_pressure_budget.py --selftest
+e4_bug2_release_paths :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_bug2_release_paths.py
+e4b_bug2_release_paths_self :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 scripts/check_bug2_release_paths.py --selftest
+py_compile :: cwd=/home/kaffein/Desktop/W0lfSword :: python3 -m py_compile scripts/check_scan_budget_cancel_writes.py scripts/check_bug2_release_paths.py scripts/check_pressure_budget.py scripts/probe_restore_e2e_selftest.py
+bash_syntax :: cwd=/home/kaffein/Desktop/W0lfSword :: bash -n scripts/run_krw_zone_write_host_test.sh scripts/run_probe_restore_e2e_host_test.sh scripts/run_kwrite_counter_host_test.sh scripts/run_tweak_log_throttle_host_test.sh scripts/build_libengine.sh scripts/regression.sh
+e9_engine_lib_build :: cwd=/home/kaffein/Desktop/W0lfSword :: make THEOS=/home/kaffein/theos libengine
+e9b_engine_lib_archive_hash :: cwd=/home/kaffein/Desktop/W0lfSword :: sha256sum .theos/libengine/libw0lfengine.a
+e9c_app_ipa_build :: cwd=/home/kaffein/Desktop/W0lfTerm :: bash scripts/build_ipa.sh sideload 0.20
+e9d_app_binary_hash :: cwd=/home/kaffein/Desktop/W0lfTerm :: sha256sum dist/Payload/W0lfTerm.app/W0lfTerm
+e9e_app_ipa_hash :: cwd=/home/kaffein/Desktop/W0lfTerm :: sha256sum dist/W0lfTerm-0.20-sideload.ipa

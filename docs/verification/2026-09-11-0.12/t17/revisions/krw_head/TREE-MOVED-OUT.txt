@@ -1,0 +1,15 @@
+CORRECTED (T17 second pass) - the tree of this revision IS in the repo:
+  revisions/krw_head/tree   (sparse export, 45 files, sha256 e262a981131c1f28f9313d10f21fee4014086d2f93686eec8da7166cbd381987)
+  paths exported: tests kexploit
+  commit: e51b1729b14b41097e1f5269b8f3e704b14b763c roadmap: 0.13 findings (le_next fix, restore-through-bogus-address, BUG.7 clamp gap, walk pace)
+
+This note used to say the extracted source tree was moved OUT of the repo to a
+temp directory, because a whole-repo export of this revision is ~15 MB. That made
+the capture depend on a path outside the repo, and a capture that stops resolving
+once that directory is cleared is not evidence. The second pass re-exported every
+replayed revision SPARSE - only the paths that revision's host harness compiles,
+~0.6 MB each - into revisions/krw_head/tree/, and nothing in this capture
+references the old temp copy any more.
+
+Superseded by: revisions/krw_head/COMMANDS.txt (tree path + digest) and
+../../retired-round1/README.md (why the round-1 layout was replaced).

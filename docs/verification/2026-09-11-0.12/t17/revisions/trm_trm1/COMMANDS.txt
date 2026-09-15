@@ -1,0 +1,8 @@
+# trm_trm1
+commit: 979b8dfe981a3955dc106f3bfb18e08eaa1180b6 terminal: tab completion (TRM.1) - command names + paths for path-taking commands, 13 new host checks (108 pass)
+paths exported: tests terminal utils kexploit sandbox_escape.h
+tree: revisions/trm_trm1/tree (sparse export of that commit, in-repo)
+tree sha256 (sorted per-file hashes): 356388fb0559d3b9342fe8ca85b7ed426681974aa315789a07933de11c54261b
+tree files: 61
+command (cwd = revisions/trm_trm1/tree):
+  cc -std=gnu99 -Wall -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare -I. -Itests/hostshim -o trm_test tests/trm_shell_host_test.c terminal/trm_shell.c terminal/trm_common.c -lpthread && ./trm_test

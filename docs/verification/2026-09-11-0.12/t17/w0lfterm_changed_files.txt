@@ -1,0 +1,14 @@
+repo: /home/kaffein/Desktop/W0lfTerm
+HEAD: a3b1ed4ef750039d1fc36c9f2317dc6ce79d14a0
+
+== git status --porcelain ==
+ M README.md
+ M ROADMAP.md
+ M SettingsViewController.m
+ M TerminalViewController.m
+ M term_bridge.m
+ M term_settings.m
+
+== sha256 of the changed app file + the linked binary ==
+4d9a0e7492c61b8168af389c2e834112aab5a2a1d9fe5347fb8c6e53da68e2cb  /home/kaffein/Desktop/W0lfTerm/ROADMAP.md
+167faf5da4919ab5c77766988feba999bf8bcad2a68bda492bfb3d967d7f700b  /home/kaffein/Desktop/W0lfTerm/dist/Payload/W0lfTerm.app/W0lfTerm

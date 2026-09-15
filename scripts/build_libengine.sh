@@ -36,13 +36,13 @@ CFLAGS="-target arm64-apple-ios15.0 -isysroot $SDK -arch arm64 -miphoneos-versio
   -Wno-deprecated-declarations -Wno-nonportable-include-path -Wno-format -DDEBUG"
 
 SOURCES="sandbox_escape.m \
-  kexploit/kexploit_opa334.m kexploit/krw.m kexploit/krw_zone_write.c kexploit/kutils.m kexploit/offsets.m \
+  kexploit/kexploit_opa334.m kexploit/krw.m kexploit/krw_zone_write.c kexploit/probe_restore_policy.c kexploit/kwrite_counter.c kexploit/kutils.m kexploit/offsets.m \
   kexploit/vnode.m kexploit/file.m kexploit/vnode_research.m kexploit/sandbox.m \
   kexploit/Exception.m kexploit/Thread.m kexploit/VM.m kexploit/MigFilterBypassThread.m \
   kexploit/RemoteCall.m kexploit/PAC.m kexploit/mcm_bridge.m kexploit/container_access.m \
   kexploit/bad_query_escape.m \
   SSV/SSVUtils.m \
-  utils/hexdump.c utils/process.c utils/permission_utils.m utils/state.m utils/tweak_log.m \
+  utils/hexdump.c utils/process.c utils/permission_utils.m utils/state.m utils/tweak_log.m utils/tweak_log_policy.c \
   kpf/patchfinder.m \
   XPF/src/xpf.c XPF/src/common.c XPF/src/decompress.c XPF/src/bad_recovery.c XPF/src/non_ppl.c XPF/src/ppl.c \
   XPF/external/ChOma/src/arm64.c XPF/external/ChOma/src/Base64.c XPF/external/ChOma/src/BufferedStream.c \

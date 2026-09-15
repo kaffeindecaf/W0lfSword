@@ -1,0 +1,4 @@
+krw_zone_write 0
+kwrite_counter 0
+host_verification 0
+host_verification_builds 0

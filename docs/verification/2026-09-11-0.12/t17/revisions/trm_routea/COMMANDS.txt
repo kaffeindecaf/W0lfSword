@@ -1,0 +1,8 @@
+# trm_routea
+commit: 8e97aa7d85abd8cff798dfbf759812e151c6d4ec feat: route A in-process terminal (0.11) + TRM exec/pty probes
+paths exported: tests terminal utils kexploit sandbox_escape.h
+tree: revisions/trm_routea/tree (sparse export of that commit, in-repo)
+tree sha256 (sorted per-file hashes): f0a2ac4f778804e8762ed3953d1f7d0dbf36bdba8278fcdaa7f38f2ecb0c86db
+tree files: 60
+command (cwd = revisions/trm_routea/tree):
+  cc -std=gnu99 -Wall -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare -I. -Itests/hostshim -o trm_test tests/trm_shell_host_test.c terminal/trm_shell.c terminal/trm_common.c -lpthread && ./trm_test

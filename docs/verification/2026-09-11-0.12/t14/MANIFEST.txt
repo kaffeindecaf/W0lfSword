@@ -1,0 +1,32 @@
+docs/verification/2026-09-11-0.12/t14 - manifest (sha256, bytes, path)
+generated 2026-09-11T23:54:11+02:00 on Linux 7.0.13+parrot7-amd64
+
+c2084cdfe1f782ebf5b328ffb353bfcab2d94dc3ed9b6472a45ffe232f6de275   2510338  app_disassembly.txt
+6067fe89e5050ba8a64ea08beba7adf4368a82d6289db8dff2e73659e4dd714a      2308  app_ipa_build_rebuild_engine.log
+b1959cd10d331f08734532a77786654b808a0c50e77510aa3d014c5d917f43ff      1302  extract_edges.py
+6c784f80e5069a521592ff77e13d354ffb15877a1784e023ce6160ca77069517      1731  host_suite_with_builds.log
+91bd530e7bf386a527b9d56e01bae5812821c5a281315bd6ffd4c3ac3c29d549      1666  pressure_budget.log
+98be7a751526bbd282f158c2d0522a78acedb4f8f8797d2f7f78217b534fe9ad     17515  pressure_budget_selftest.log
+956d4644791930e717857ab3d501ab3c18a3918264600cd3c42bc0f5e22e9023      1027  regression_host_section.log
+af241f54b7210def1f6d00edb25d0cec4fc82d3a92b3f2e8eb9df90c6ea315a4      2282  suite/app_ipa_build.log
+fd7a746a6f461d09f9bdd655d9f33bd114edd08513d2e31376afc2c5cf98ac42       943  suite/app_static_symbols.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  suite/bash_syntax.log
+1df3ce4c11439d92bf412a4f411140e20fcb0bc260dd3370cc670413460a171f      7170  suite/bug2_release_paths.log
+03bc081c48798f73959714628936f48d818d8c7e04c6a8af1a09c250b1a7f612      4768  suite/bug2_release_paths_self.log
+334a5c211aedbcef4436eb7731927659a5bef0f10be980caaf0b44d3b2082668        88  suite/engine_lib_build.log
+1386b0b6e393b4923dc3ad9cd69547b8e9471e78f2c904688b5a09cc3b0ea5be      7492  suite/krw_zone_write.log
+1dc9c1d4b0e35b86e23667ff627e4b57bb7f6ec8385e622fc78c585dd6424e63      2629  suite/kwrite_counter.log
+91bd530e7bf386a527b9d56e01bae5812821c5a281315bd6ffd4c3ac3c29d549      1666  suite/pressure_budget.log
+98be7a751526bbd282f158c2d0522a78acedb4f8f8797d2f7f78217b534fe9ad     17515  suite/pressure_budget_self.log
+62f760e7402071fcb823a7ec5191904e098ac6b520907ef13135ba6fa729cf4b      4830  suite/probe_restore_e2e.log
+97e2173af1a31a7e57ebcfb20289a524b99f1b74723faee2507578c38840a935       852  suite/probe_restore_e2e_self.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  suite/py_compile.log
+4dc5246d0662e7df01b483d7cb9e859244210c7f31cba283198d4c658547790d      2161  suite/scan_budget_cancel.log
+e24a0f3e9a1e9bc7b7be800439e50ab11d7190fa77c7c6858eafa28e5b98a040     46714  suite/scan_budget_cancel_self.log
+9a596a45ef210f9b0238c8c2fc595887a88b66e8b260818a02798e2d2092fbc6      2129  suite/test_chain_select.log
+eead34fbfc466f966c32ceb1d2e43f1312400ccf97fa2894239a85550f47857d       552  suite/test_offsets.log
+5e4d4909a97a0b40209d447d3fafa0dc5e8851fe510d120d579271ea4026aebb     15415  suite/trm_shell_host_test.log
+d59cd9fd7d8be99c390a569e1c7430af0b37a8023433fc4beaf5806b530653ab      2873  suite/tweak_log_throttle.log
+ca98783ca85689e76c6cf26677282ece4c458a2de4f35aa3f39ee748859e5acd      4347  trm_passfail.txt
+4441c08397497f1877e4f48c544c96edba0db6a93f4dda3e700722ec43dfc825      1673  w0lfterm_call_edges.log
+dafcd6f587e8cf5a32a163e36ab2a789aed7b05c7d4a9f5fbfe9533fec2c5fa0      1583  w0lfterm_strings_and_symbols.log

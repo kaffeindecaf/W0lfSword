@@ -1,0 +1,6 @@
+# replay of the COMMITTED harness revision to check the '41 checks' claim
+git show HEAD:tests/krw_zone_write_host_test.c > tests/krw_zone_write_host_test.c
+git show HEAD:kexploit/krw_zone_write.c  > kexploit/krw_zone_write.c
+git show HEAD:kexploit/krw_zone_write.h  > kexploit/krw_zone_write.h
+cc -std=gnu99 -Wall -Wextra -Wno-unused-parameter -I. -o head_test tests/krw_zone_write_host_test.c kexploit/krw_zone_write.c
+./head_test

@@ -1,0 +1,6 @@
+repo:       /home/kaffein/Desktop/W0lfSword
+captured:   2026-09-15T12:56:32Z (UTC) / 2026-09-15 14:56:32 +0200
+branch:     main
+HEAD:       e51b1729b14b41097e1f5269b8f3e704b14b763c
+HEAD subject: roadmap: 0.13 findings (le_next fix, restore-through-bogus-address, BUG.7 clamp gap, walk pace)
+dirty:      39 entries (see changed_files.txt)

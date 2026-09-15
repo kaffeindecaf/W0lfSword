@@ -1,0 +1,15 @@
+s1_krw_zone_write_host_test rc=0
+s1_probe_restore_e2e rc=0
+s1_probe_restore_e2e_selftest rc=0
+s1_bug2_release_paths rc=0
+s1_bug2_release_paths_selftest rc=0
+s2_pressure_budget rc=0
+s2_pressure_budget_selftest rc=0
+s3_engine_lib_build rc=0
+s3_engine_archive_hash rc=0
+s3_engine_archive_symbols rc=0
+s3_portable_syntax rc=0
+s3b_independent_clamp_sweep rc=0
+suite_host_verification rc=0
+suite_regression_bug1_section rc=0
+suite_audit rc=0
