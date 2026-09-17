@@ -316,6 +316,8 @@ W0LF_COMMANDS=(
     "fuzz|f|f|-|research|ImageIO Fuzzer|mutate DNG/HEIF → phone → crash capture (K4.2)|-|1|-"
     "kernelcache|k|k|-|research|Kernelcache Diff|offline XPF offset research  -  resolve/diff kernelcaches|-|1|-"
     "kcwatch|w|w|kw|research|kcwatch|auto kernel-delta watcher  -  poll → fetch → resolve → report|-|1|-"
+    "diffs|i|i|ipswdiffs|research|IPSW Diffs|pre-computed Apple build diffs (blacktop/ipsw-diffs): kext/macho/dylib/firmware/entitlement deltas, no IPSW download|-|1|-"
+    "drift|z|z|offdrift|research|Offsets Drift|which kexploit offsets to re-verify for a build this tree has not verified yet|-|1|-"
     "readiness|r|r|-|research|readiness|device capability + exploit-readiness report (live probes)|-|1|-"
     "poclab|o|o|lab|research|PoC Lab|test found-but-unimplemented bugs (C6)|-|1|-"
     "mobilegestalt|mg|mg|-|research|MobileGestalt|full MobileGestalt editing - set/unset/dump keys via Filza Arctic (26.0.1)|-|1|-"
@@ -1664,6 +1666,83 @@ EOF
             err "Unknown kcwatch subcommand: $sub"
             hint "Usage: ./W0lfSword kcwatch [poll|status|diff|verify|index|atom] [--board t8030] [--dry-run]"
             return 1
+            ;;
+    esac
+}
+
+
+# ── IPSW-DIFFS  -  pre-computed Apple build diffs (no IPSW download) ──
+#  blacktop/ipsw-diffs publishes the output of `ipsw diff` for every
+#  consecutive build pair (kernel + kext sections/symbols/strings, MachO,
+#  dylibs, firmware, entitlements, file lists). scripts/ipswdiffs.py reads
+#  it per file from raw.githubusercontent  -  no clone, no 6-8 GB IPSW.
+#  scripts/offsets_drift.py turns that into "which offsets to re-verify".
+# ─────────────────────────────────────────────────────────────
+
+cmd_diffs() {
+    local script="$PROJECT_DIR/scripts/ipswdiffs.py"
+    if [ ! -f "$script" ]; then
+        err "ipswdiffs.py missing  -  expected at scripts/ipswdiffs.py"
+        return 1
+    fi
+    local sub="${1:-index}"
+    case "$sub" in
+        help|-h|--help)
+            cat <<'EOF'
+diffs  -  pre-computed Apple build diffs (blacktop/ipsw-diffs).
+  index              every build pair the dataset has (152 as of 2026-09)
+  resolve <a> <b>    find the pair dir for two builds/versions
+  info <dir>         kernel/iBoot/WebKit version tables + section counts
+  kexts <dir>        kext deltas: version, sections, kalloc_type/var,
+                     functions, symbols, strings (build stamps filtered)
+  symbols <dir>      symbol adds/removes (empty when the dataset has none)
+  dylibs|firmware|files|ents <dir>   the other sections
+  grep <pat> <dir>   search target diffs (--section kernel|dylibs|macho)
+  sweep <dir>        ranked hit counts for a whole watchlist file
+  show <dir> <target>   print one target's raw diff
+  fetch <path>       raw dataset path -> stdout
+  Options: --json  --section S  --limit N  --changed-only  --max-hits N
+           --cache DIR (env IPSWDIFFS_CACHE, default ~/.cache/ipswdiffs)
+  Example: ./W0lfSword diffs kexts 26_6_23G71_vs_26_6_1_23G83
+EOF
+            ;;
+        index|resolve|info|list|kexts|symbols|dylibs|firmware|files|ents|grep|sweep|show|fetch)
+            shift
+            python3 "$script" "$sub" "$@"
+            ;;
+        *)
+            err "Unknown diffs subcommand: $sub"
+            hint "Usage: ./W0lfSword diffs [index|resolve|info|kexts|symbols|dylibs|firmware|files|ents|grep|sweep|show|fetch]"
+            return 1
+            ;;
+    esac
+}
+
+cmd_drift() {
+    local script="$PROJECT_DIR/scripts/offsets_drift.py"
+    if [ ! -f "$script" ]; then
+        err "offsets_drift.py missing  -  expected at scripts/offsets_drift.py"
+        return 1
+    fi
+    case "${1:-}" in
+        help|-h|--help)
+            cat <<'EOF'
+drift  -  which kexploit offsets need re-verification for a build.
+  Groups every offset in kexploit/offsets.h by the struct it walks, reads the
+  matching pair out of the ipsw-diffs dataset, and reports the groups whose
+  owning kext changed in a way that names that struct (added bounds checks,
+  resized kalloc descriptor sections, symbol changes).
+  Usage: ./W0lfSword drift --pair 23G71 23G83
+         ./W0lfSword drift                    # newest iOS pair in the dataset
+         ./W0lfSword drift --structs inpcb,socket --json
+  Options: --pair PREV NEXT  --structs a,b  --json  --no-write
+           --fail-on never|strings|layout   (exit 3 = a group needs a look)
+  Writes .w0lfsword/offsets-drift/<prev>__<next>.md (env OFFSETS_DRIFT_DIR).
+  A hit is a signal to re-verify (kcwatch / kc_zone_fields.py), not proof.
+EOF
+            ;;
+        *)
+            python3 "$script" "$@"
             ;;
     esac
 }
@@ -6990,6 +7069,43 @@ kcwatch  -  automated kernel-delta watcher (research/kcwatch.md).
   Feed reports: .w0lfsword/kcwatch/<board>/reports/kernel-deltas.md
 EOF
             ;;
+        diffs)
+            cat <<'EOF'
+diffs  -  pre-computed Apple build diffs (blacktop/ipsw-diffs).
+  blacktop/ipsw-diffs holds the output of `ipsw diff` for every consecutive
+  build pair: kernel + kext section/symbol/string deltas, MachO, dyld-cache
+  dylibs, firmware images, entitlements and the added/removed file lists.
+  This command reads it per file, so there is no 3.4 GB clone and no 6-8 GB
+  IPSW download. Host stamps (compile time/date) are filtered out, and a
+  "same size, changed content" section counts as a code signal.
+    index              every build pair the dataset has
+    resolve <a> <b>    find the pair dir for two builds/versions
+    info <dir>         kernel/iBoot/WebKit versions + section counts
+    kexts <dir>        per-kext deltas (the patch-diff lane for free)
+    symbols | dylibs | firmware | files | ents <dir>
+    grep <pat> <dir>   search the target diffs
+    sweep <dir> --watchlist <file>   ranked multi-pattern sweep
+    show <dir> <target> | fetch <path>
+  Cache: ~/.cache/ipswdiffs (env IPSWDIFFS_CACHE)
+  Example: ./W0lfSword diffs kexts 26_6_23G71_vs_26_6_1_23G83
+EOF
+            ;;
+        drift)
+            cat <<'EOF'
+drift  -  which kexploit offsets need re-verification for a build.
+  Groups every offset in kexploit/offsets.h by the kernel struct it walks,
+  resolves the build pair in the ipsw-diffs dataset (or --pair A B), and
+  reports the groups whose owning kext changed in a way that names that
+  struct: added bounds/assert strings, a resized __DATA_CONST.__kalloc_type
+  /__kalloc_var (the sprayed object layouts), symbol changes, or a section
+  whose content changed at identical size.
+    ./W0lfSword drift --pair 23G71 23G83
+    ./W0lfSword drift --structs inpcb,socket --json
+  Writes .w0lfsword/offsets-drift/<prev>__<next>.md and prints the re-verify
+  list. --fail-on layout exits 3 for CI. A hit is a signal to re-verify on
+  the real kernelcache (kcwatch / scripts/kc_zone_fields.py), not proof.
+EOF
+            ;;
         readiness)
             cat <<'EOF'
 readiness  -  device capability + exploit-readiness report (live probes).
@@ -7352,6 +7468,8 @@ main() {
         fuzz|f)    cmd_fuzz "${args[@]}";;
         kernelcache|k) cmd_kernelcache "${args[@]}";;
         kcwatch|kw|w) cmd_kcwatch "${args[@]}";;
+        diffs|ipswdiffs) cmd_diffs "${args[@]}";;
+        drift|offdrift) cmd_drift "${args[@]}";;
         readiness|r) cmd_readiness "${args[@]}";;
         poclab|lab|o) cmd_poclab "${args[@]}";;
         mobilegestalt|mg) cmd_mobilegestalt "${args[@]}";;

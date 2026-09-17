@@ -76,6 +76,27 @@ resized, SPTM status), extract a kernelcache from an IPSW, and classify
 crash logs. This is the part that caught a wrong `itk_space` offset in
 the repo's own table.
 
+Two more host tools work off [blacktop/ipsw-diffs](https://github.com/blacktop/ipsw-diffs),
+which publishes the output of `ipsw diff` for every consecutive Apple build
+pair. Nothing is cloned and no 6-8 GB IPSW is downloaded: `scripts/ipswdiffs.py`
+reads single files from raw.githubusercontent and caches them, and turns them
+into per-kext section/symbol/string deltas (compile timestamps filtered out,
+"same size, changed content" sections flagged). `scripts/offsets_drift.py`
+groups every offset in `kexploit/offsets.h` by the struct it walks and reports
+which groups the delta actually names, so a build you have not verified yet
+comes with a re-verify list instead of a surprise:
+
+```bash
+./W0lfSword diffs index                              # every build pair (152)
+./W0lfSword diffs kexts 26_6_23G71_vs_26_6_1_23G83   # per-kext delta table
+./W0lfSword diffs grep 'remaining >=' --pair 23G71 23G83 --section kernel
+./W0lfSword drift --pair 23G71 23G83                 # .w0lfsword/offsets-drift/*.md
+./W0lfSword drift --fail-on layout                   # exit 3 when a group needs a look
+```
+
+Host tests (no network, 27 assertions over the dataset parsers and the drift
+verdicts): `python3 -m unittest tests.test_ipswdiffs -v`
+
 The route A terminal shell is host-testable too — the shell core is plain
 C, so it is compiled on Linux against stubbed kernel helpers and run
 through 108 assertions (parser, path resolution, every filesystem command,
@@ -215,6 +236,8 @@ command with its group, CLI aliases and interactive key.
 | `poc exr [ip]` | deploy the CVE-2026-28990 EXR ImageIO trigger | `./W0lfSword poc exr` |
 | `fuzz [cmd]` | ImageIO fuzz harness: mutate -> push -> open/probe -> crash capture (K4.2, K4.13) | `./W0lfSword fuzz probe --device 192.168.1.5` |
 | `kcwatch` | auto kernel-delta watcher: poll -> ranged-fetch -> XPF -> report + offsets.m verdict | `./W0lfSword kcwatch poll --board t8030` |
+| `diffs` | pre-computed Apple build diffs (blacktop/ipsw-diffs): kernel/kext/MachO/dylib/firmware/entitlement deltas for any build pair, no IPSW download | `./W0lfSword diffs kexts 26_6_23G71_vs_26_6_1_23G83` |
+| `drift` | which kexploit offsets need re-verification for a build: groups offsets.h by struct, reads that build pair's delta, writes a report | `./W0lfSword drift --pair 23G71 23G83` |
 | `mha <ipa>` | Re-sign Filza as MobileHouseArrest -> pre-exploit container access (K4.12) | `./W0lfSword mha Filza.ipa` |
 | `tweaks [install <id>]` | SpringBoard tweak catalog + installer | `./W0lfSword tweaks install five_icon_dock` |
 | `device add\|list\|switch\|info` | manage multiple phones | `./W0lfSword device add 192.168.1.5` |
