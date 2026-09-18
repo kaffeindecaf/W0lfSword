@@ -36,7 +36,7 @@ CFLAGS="-target arm64-apple-ios15.0 -isysroot $SDK -arch arm64 -miphoneos-versio
   -Wno-deprecated-declarations -Wno-nonportable-include-path -Wno-format -DDEBUG"
 
 SOURCES="sandbox_escape.m \
-  kexploit/kexploit_opa334.m kexploit/krw.m kexploit/krw_zone_write.c kexploit/probe_restore_policy.c kexploit/kwrite_counter.c kexploit/kutils.m kexploit/offsets.m \
+  kexploit/kexploit_opa334.m kexploit/krw.m kexploit/krw_zone_write.c kexploit/krw_zone_size.c kexploit/probe_restore_policy.c kexploit/kwrite_counter.c kexploit/kutils.m kexploit/offsets.m \
   kexploit/vnode.m kexploit/file.m kexploit/vnode_research.m kexploit/sandbox.m \
   kexploit/Exception.m kexploit/Thread.m kexploit/VM.m kexploit/MigFilterBypassThread.m \
   kexploit/RemoteCall.m kexploit/PAC.m kexploit/mcm_bridge.m kexploit/container_access.m \

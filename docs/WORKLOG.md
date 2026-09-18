@@ -3479,3 +3479,110 @@ back, the cancel tap and the `[cleanup]` lines, the readonly run's write counter
 reading 0, the CPU/wakeup/disk-write reports with the yields and the fsync
 throttle in place - still waits for a device day, and readonly stays the only mode
 on unproven device/iOS pairs.
+
+---
+
+## T19 (2026-09-18) - BUG.7 closed on the host: the window is the kalloc bucket the ZONE reports, not the struct's field span
+
+Scope: the open half of BUG.7 (ROADMAP 0.13). BUG.1 step 3b made every 32-byte
+write prove itself against an object, but the object a caller could name was the
+inpcb's own field span (`0x160` from `filt+8`) - a statement about a struct, not
+about the allocation. The zone an object came from carries the element size it
+was allocated with, and that number is printed by the very check that panicked the
+SE (`zone bound checks: buffer %p of length %zd overflows object %p of size %zd in
+zone %p[%s%s]`), so it is readable off a kernelcache instead of guessed.
+
+HARD RULE compliance: host only. No device command, no exploit run, no
+`scripts/regression.sh` (its "Live device smoke" section would ssh to
+`.w0lfsword/active_device`). Every command below either compiles C with the host
+`cc`, runs a Python source lint, or runs the Theos cross-build.
+
+What changed:
+
+- `scripts/kc_zone_fields.py` (new): reads `struct zone`'s field offsets off a
+  kernelcache or a decompressed Mach-O by locating the zone bound-check routine
+  and following the zone register. Agrees across all eight kernelcaches on hand
+  (17.0 + 18.4.1 t8030, 26.1/26.2 t8110, 26.6/26.6.1 on both boards): z_name
+  +0x10, z_quo_magic +0x28, `z_elem_size` +0x34, z_elem_offs +0x36, flags +0x3c.
+- `kexploit/krw_zone_size.c` / `.h` (new, engine + tweak build): the whole chain
+  `pcb -> inpcbinfo.ipi_zone -> z_elem_size` with an injected reader
+  (`krw_zone_bucket_for_pcb` - one canonical-pointer check per hop, one aligned
+  qword read, masked to the u16, rejected unless it is a kalloc size class) and
+  the window decision (`krw_zone_window_from_bucket`: bucket >= field span ->
+  declare the bucket; 0/implausible -> keep the field span; a plausible bucket
+  SMALLER than the field span -> refuse with window 0).
+- `kexploit/kexploit_opa334.m`: `probe_zone_bucket_size()` now delegates to that
+  chain through a one-line kernel-I/O wrapper (`probe_zone_read64`), and the
+  window it feeds the clamp comes from `probe_window_for_pcb()`; a window of 0 is
+  never written through (`if (windowSize == 0)` logs the contradiction and
+  returns false). `run_write_test()` logs the bucket it *would* declare before any
+  write, so a device log answers "does the zone read work" first.
+- `offsets.m`: `off_zone_elem_size = 0x34` in all three version blocks
+  (kernelcache-verified via the tool above).
+- `tests/krw_zone_size_host_test.c` + `scripts/run_krw_zone_size_host_test.sh`
+  (new): compiles the shipped decision file against a fake kernel window and
+  drives the qword extraction, the size classes, every refused hop, the window
+  verdicts and the SE's own shape end to end.
+- `scripts/check_bug2_release_paths.py`: six new zone-window checks plus four new
+  selftest mutations, so the delegation, the injected reader and the refusal
+  branch cannot be edited away silently.
+- `scripts/regression.sh`: the new harness in the BUG.1 host section (six host
+  results now). `scripts/check_host_verification.sh`: new entry `krw_zone_size`,
+  and the four re-pins below plus `_krw_zone_bucket_for_pcb` added to the app-side
+  `nm` check.
+
+### Evidence (all host, all re-run on the tree being landed)
+
+```
+bash scripts/run_krw_zone_size_host_test.sh              # checks=57 failures=0, PASS   sha256 5d1e08cf... (3637 B)
+python3 scripts/check_bug2_release_paths.py              # 61 check(s) passed, 0 failed sha256 68e092eb... (7645 B)
+python3 scripts/check_bug2_release_paths.py --selftest   # selftest: all mutations caught (23/23) sha256 eb73de27...
+bash scripts/run_krw_zone_write_host_test.sh             # checks=116 failures=0, PASS  sha256 1386b0b6...
+bash scripts/run_probe_restore_e2e_host_test.sh          # checks=56 failures=0, PASS   sha256 62f760e7...
+bash scripts/check_host_verification.sh                  # 17 ok, 0 drift             sha256 f1074dbb...
+bash scripts/check_host_verification.sh --with-builds    # 22 ok, 0 drift             sha256 f56ed9c6...
+python3 scripts/test_offsets.py                          # PASS                       sha256 eead34fb...
+./W0lfSword audit                                        # AUDIT PASSED (180 defs/0 dead, 61 files parse)
+THEOS=$HOME/theos make package DEBUG=0                   # 1.5.0-13 arm64 .deb; dylib ships the new log strings
+THEOS=$HOME/theos make libengine                         # OK: .theos/libengine/libw0lfengine.a (808K, 53 objects)
+```
+
+All eleven `rc=0`; raw logs, command lines and the sha256 of each are under
+`docs/verification/2026-09-18-bug7/` (`capture.sh` reproduces the whole set,
+`MANIFEST.txt` hashes it, `*.log` stays local by the usual rule). The engine
+archive recorded there is `9acea9964e08984d43c9805c0d01247c1a55044479674b8620dd8e0129d7b035`
+with a 0-byte build log (zero warnings, zero errors).
+
+Link-level proof rather than "it compiles": `llvm-nm` shows the archive defines
+`_krw_zone_bucket_for_pcb`, `_krw_zone_window_from_bucket` and
+`_krw_zone_elem_size_from_qword` with `kexploit_opa334.o` referencing (U) them,
+and the W0lfTerm app binary (0.20) lists `T _krw_zone_bucket_for_pcb` at
+`0x10000b634` - and that symbol is now one of the nm entries the suite pins.
+
+### Re-pins (old -> new, six entries, all in `scripts/check_host_verification.sh`)
+
+| entry | was | now | why |
+| --- | --- | --- | --- |
+| `krw_zone_size` (new) | - | `5d1e08cf...` | the new harness; entry 3 of the suite, 57 checks |
+| `bug2_release_paths` | `7c2c853a...` | `68e092eb...` | six zone-window checks added (55 -> 61 checks) |
+| `bug2_release_paths_self` | `53a89a3b...` | `eb73de27...` | four mutations added (19 -> 23), all caught |
+| `engine_lib_build` | `334a5c21...` | `573a137e...` | the archive gained a member: 804K/52 objects -> 808K/53 |
+| `engine_lib_archive` | `32f6af7e...` | `9acea996...` | the same new member and the engine edit |
+| `app_binary` | `167faf5d...` | `39615183...` | the app links the rebuilt archive (no app-side source change) |
+| `app_static_symbols` | `5b4ab0e4...` | `abe1e022...` | `_krw_zone_bucket_for_pcb` added to the nm list, plus the address shifts above |
+
+No HISTORICAL count was touched: the `41 checks` clamp-only revision, the `65`
+route-A count, the `95` TRM.2 count and the withdrawn `65`/`43` figures all stay
+what they were, since every one of them is the count of a nameable revision.
+
+### What this pass does NOT prove
+
+Nothing was run on a phone. The device half of BUG.7 is whether the zone read
+(`pcbinfo -> ipi_zone -> z_elem_size`) returns a real bucket on the SE, and
+whether the new `[STAGED] zone window: ...` line reports `bucket` rather than
+`field span (bucket unknown)` there - that is the next device day, and readonly
+stays the only mode offered on unproven device/iOS pairs until it happens. Two
+things stay open by design: the `so_usecount` writes still go through
+`early_kwrite64` (no field table for `struct socket` in this tree), and the clamp
+still checks a block against the window it is *given*, so address trust remains
+with the canonical-pointer guard plus the live-inpcb value check.

@@ -54,6 +54,20 @@ if [ -f scripts/run_krw_zone_write_host_test.sh ]; then
 else
     note "run_krw_zone_write_host_test.sh missing — skipping"
 fi
+# BUG.7's half: the window those writes are proved against is the kalloc BUCKET
+# read out of the zone (pcb -> inpcbinfo.ipi_zone -> z_elem_size), not the
+# struct's own field span. The decision file (kexploit/krw_zone_size.c) is
+# compiled here as the engine compiles it, including the refusal verdict for an
+# object whose bucket contradicts the field table. Host-only, like the rest.
+if [ -f scripts/run_krw_zone_size_host_test.sh ]; then
+    if bash scripts/run_krw_zone_size_host_test.sh >/tmp/regression_krw_zone_size.log 2>&1; then
+        ok "krw_zone_size_host_test ($(grep -c '^  ok ' /tmp/regression_krw_zone_size.log) checks)"
+    else
+        bad "run_krw_zone_size_host_test.sh — see /tmp/regression_krw_zone_size.log"
+    fi
+else
+    note "run_krw_zone_size_host_test.sh missing — skipping"
+fi
 # The end-to-end half of the same item: the 32-byte overrun injected, then the
 # probe's save -> corrupt -> exit -> put-back sequence on the -1 (write-verify)
 # and -7 (cancel/budget) exits, including the shape where pe_v1's release funnel

@@ -101,6 +101,12 @@ echo
 # --- the three named harnesses (ROADMAP 0.12 BUG.1 / BUG.3 / BUG.5) ---
 check krw_zone_write         "$ROOT" 0 1386b0b6e393b4923dc3ad9cd69547b8e9471e78f2c904688b5a09cc3b0ea5be raw \
     'bash scripts/run_krw_zone_write_host_test.sh'
+# BUG.7: the window the clamp is given is the kalloc bucket read out of the zone
+# (pcb -> inpcbinfo.ipi_zone -> z_elem_size), including the refusal verdict for an
+# object whose bucket contradicts the field table. Same decision file the engine
+# archive compiles (kexploit/krw_zone_size.c).
+check krw_zone_size          "$ROOT" 0 5d1e08cffa5f28acedeec7fadd7e567a5493b8a8c75b1ccbeb2ded3715627725 raw \
+    'bash scripts/run_krw_zone_size_host_test.sh'
 # BUG.1 end to end: the same two files, driven through the probe's
 # save -> corrupt -> exit -> put-back sequence (the 32-byte overrun injected,
 # then the -1 and -7 exits), plus its own selftest on temp copies.
@@ -121,9 +127,13 @@ check scan_budget_cancel_self "$ROOT" 0 e24a0f3e9a1e9bc7b7be800439e50ab11d7190fa
     'python3 scripts/check_scan_budget_cancel_writes.py --selftest'
 
 # --- the rest of regression.sh's host half (run directly, never the whole file) ---
-check bug2_release_paths     "$ROOT" 0 7c2c853aa5c8089b9fd41fce5a3659bae53df9954ffc698a61f02e8a733817d8 raw \
+# re-pinned 2026-09-18 (BUG.7): the lint gained six zone-window checks and four
+# mutations for them (the bucket read delegated to the tested chain, the injected
+# reader, the field-span floor, the refused-window branch), so both hashes moved:
+# 55 checks / 19 mutations before, 61 / 23 after.
+check bug2_release_paths     "$ROOT" 0 68e092eb5bd3c215350d03f93f1912f527fdaf1b767566753aad0ed668f19161 raw \
     'python3 scripts/check_bug2_release_paths.py'
-check bug2_release_paths_self "$ROOT" 0 53a89a3bd8e25bac8117e41818b437e087d30ca97551ee2ceb726c3858a30a03 raw \
+check bug2_release_paths_self "$ROOT" 0 eb73de27dd79cb551dbf3ad4e4748390ed7fc934dae667d6af00aaab2e6a9b4f raw \
     'python3 scripts/check_bug2_release_paths.py --selftest'
 check test_offsets           "$ROOT" 0 eead34fbfc466f966c32ceb1d2e43f1312400ccf97fa2894239a85550f47857d raw \
     'python3 scripts/test_offsets.py'
@@ -151,11 +161,18 @@ if [ "$WITH_BUILDS" = 1 ]; then
     if [ -d "$TERM_SRC" ]; then
         # 1) engine archive: the host-tested C files are in it, so a drift
         #    between the tested sources and the shipped ones fails here.
+        #    Re-pinned 2026-09-18 (BUG.7): the engine gained the zone-bucket read
+        #    (kexploit/krw_zone_size.c is a new archive member and
+        #    kexploit_opa334.m now delegates its chain to it), so the build log
+        #    (804K/52 objects -> 808K/53 objects), the archive and the linked app
+        #    all moved. The archive was rebuilt with a 0-byte build log (zero
+        #    warnings, zero errors) and llvm-nm shows the archive defines
+        #    _krw_zone_bucket_for_pcb while kexploit_opa334.o references it.
         # shellcheck disable=SC2016  # eval'd command string: the expansion is the point
-        check engine_lib_build "$ROOT" 0 334a5c211aedbcef4436eb7731927659a5bef0f10be980caaf0b44d3b2082668 raw \
+        check engine_lib_build "$ROOT" 0 573a137e7bd6f9eb4ab379bfcc6c1ad68ac8a0e152fb042d92b3d037aa0190c2 raw \
             'THEOS=${THEOS:-$HOME/theos} make libengine'
         got_ar=$(sha256sum .theos/libengine/libw0lfengine.a | cut -d' ' -f1)
-        if [ "$got_ar" = 32f6af7e665ab15d58031528d4e9cd912c6ba5b94ee4aab05345fddc44c411e5 ]; then
+        if [ "$got_ar" = 9acea9964e08984d43c9805c0d01247c1a55044479674b8620dd8e0129d7b035 ]; then
             printf 'ok   %-34s %s\n' "engine_lib_archive" "${got_ar:0:16}..."
             PASS=$((PASS + 1))
         else
@@ -168,24 +185,31 @@ if [ "$WITH_BUILDS" = 1 ]; then
         check app_ipa_build "$TERM_SRC" 0 e4f7235f621013d694bcc495ec41d92d733019d2cdd0afe05dadf51fd1778241 canon \
             'bash scripts/build_ipa.sh sideload 0.20'
         got_bin=$(sha256sum "$TERM_SRC/dist/Payload/W0lfTerm.app/W0lfTerm" | cut -d' ' -f1)
-        if [ "$got_bin" = 167faf5da4919ab5c77766988feba999bf8bcad2a68bda492bfb3d967d7f700b ]; then
+        # Re-pinned 2026-09-18 (BUG.7): the app links the rebuilt engine archive,
+        # so the binary moved with it. Same build (0.20), no source change on the
+        # app side.
+        if [ "$got_bin" = 396151837a0e85a05efe82b80cb81897f1040072fceb8f185c997740fd6eabae ]; then
             printf 'ok   %-34s %s\n' "app_binary" "${got_bin:0:16}..."
             PASS=$((PASS + 1))
         else
             printf 'BAD  %-34s sha256=%s\n     want %s\n' "app_binary" "$got_bin" \
-                167faf5da4919ab5c77766988feba999bf8bcad2a68bda492bfb3d967d7f700b
+                396151837a0e85a05efe82b80cb81897f1040072fceb8f185c997740fd6eabae
             FAIL=$((FAIL + 1))
         fi
         # 3) the app-side static check (llvm-nm: GNU nm cannot read Mach-O)
+        #    Re-pinned 2026-09-18 (BUG.7): the linked binary moved with the engine
+        #    archive, and _krw_zone_bucket_for_pcb was added to the nm list so the
+        #    shipped app is proved to link the zone-bucket chain the host test
+        #    drives - not just to compile it.
         # shellcheck disable=SC2016  # eval'd command string: the expansion is the point
-        check app_static_symbols "$TERM_SRC" 0 5b4ab0e4c2bb1221be154301201af387c5110ef94a2b9f3b511df3ccb26f8e54 raw \
+        check app_static_symbols "$TERM_SRC" 0 abe1e022fbf5f3194e4dd8b7ad3a4e00236e718906f2b0c102fd472f0df6dc88 raw \
             'BIN=dist/Payload/W0lfTerm.app/W0lfTerm
              { echo "W0lfTerm app-side static check (linked binary produced by the 0.20 rebuild)"
                echo "binary: $BIN"
                echo "sha256: $(sha256sum "$BIN" | cut -d" " -f1)"
                echo
                echo "== nm: cancel/verification symbols =="
-               llvm-nm-19 "$BIN" | grep -E " _g_peV2Aborted| _probe_exit_action_for| _kexploit_request_stop| _kexploit_stop_requested| _kwrite_zone_element| _tweak_log_fsync_due"
+               llvm-nm-19 "$BIN" | grep -E " _g_peV2Aborted| _probe_exit_action_for| _kexploit_request_stop| _kexploit_stop_requested| _kwrite_zone_element| _tweak_log_fsync_due| _krw_zone_bucket_for_pcb"
                echo
                echo "== strings markers (count) =="
                for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter"; do

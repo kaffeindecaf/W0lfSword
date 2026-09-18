@@ -3277,6 +3277,48 @@ proved, in order of importance:
   offsets.m convention). The two `so_usecount` writes in
   `krw_sockets_leak_forever` also stay on `early_kwrite64`: their object is a
   `struct socket`, with no field table here that could state a window honestly.
+  CLOSED 2026-09-18 (BUG.7, the kalloc-bucket half): the missing offset was read
+  off the kernelcaches instead of guessed. XNU's own zone bound check - the
+  message that panicked the SE three times - PRINTS the element size it compares
+  against ("... overflows object %p of size %zd in zone %p[%s%s]"), so
+  `scripts/kc_zone_fields.py` finds that routine, finds the zone register and
+  reads off every field it touches: z_name +0x10, z_quo_magic +0x28,
+  `z_elem_size +0x34`, z_elem_offs +0x36, flags +0x3c. All eight kernelcaches on
+  hand agree (17.0 + 18.4.1 t8030, 26.1/26.2 t8110, 26.6/26.6.1 on both boards),
+  and `offsets.m` carries `off_zone_elem_size = 0x34` in all three version blocks.
+  The chain `pcb -> inpcbinfo.ipi_zone -> z_elem_size` and the window decision
+  built on it live in `kexploit/krw_zone_size.c` (a new engine-archive member,
+  also in the tweak build) and are delegated to from
+  `probe_zone_bucket_size()`; the DECISION is: an element size that is a kalloc
+  class and >= the field span becomes the declaration (the widening the task
+  asked for), an unreadable/implausible one keeps the field span exactly as
+  before, and a PLAUSIBLE bucket SMALLER than the field span is a refusal with a
+  window of 0 - two kernel-derived statements contradicting each other is the
+  object the SE overran, and every write through it is now refused and logged
+  (`[STAGED] zone window: pcb ... REFUSED`). The probe additionally logs the
+  bucket it will declare (`[TEST] WRITETEST zone bucket: ...`), so the next device
+  log shows whether the zone read works before any write is attempted.
+  Host evidence: `bash scripts/run_krw_zone_size_host_test.sh` ->
+  `checks=57 failures=0` / `KRW_ZONE_SIZE_HOST_TEST PASS` (compiles the shipped
+  decision file against a fake kernel window; the SE's own shape - bucket 0x60
+  against the 0x160 field span - is refused end to end),
+  `python3 scripts/check_bug2_release_paths.py` -> `61 check(s) passed, 0 failed`
+  with six new zone-window checks, `--selftest` -> `selftest: all mutations
+  caught` (23/23, four of them new: the bucket read dropped, the chain read
+  inline, the PAC-stripping reader wrapper, the refused-window branch removed),
+  `bash scripts/check_host_verification.sh --with-builds` -> `22 ok, 0 drift`
+  (the new harness is entry `krw_zone_size`; the engine archive, the linked app
+  binary and its symbol table are re-pinned to this tree, and `llvm-nm` shows
+  `_krw_zone_bucket_for_pcb` defined in the archive AND in the W0lfTerm app, so
+  the chain is linked, not merely compiled), `THEOS=$HOME/theos make package` ->
+  the tweak dylib ships the new log strings, `./W0lfSword audit` -> `AUDIT
+  PASSED`. NOT device-verified: the next SE run is what proves the zone read
+  returns a real bucket on hardware, and readonly stays the only mode offered on
+  unproven device/iOS pairs until then. What this does NOT close: the
+  `so_usecount` writes (still `early_kwrite64`, no field table for `struct
+  socket`) and address trust itself - a caller that derives a window from an
+  address nothing verified still gets a self-consistent answer; that half stays
+  with the canonical-pointer guard plus the live-inpcb value check.
 - the run budget is the only thing ending these runs: both stopped at ~29.5 MB
   walked in 120 s with the socket table full (27.4k-27.5k sockets, errno 23),
   1 GB dirtied per pass, 98% CPU. A full walk on this device needs ~8.5 min, so

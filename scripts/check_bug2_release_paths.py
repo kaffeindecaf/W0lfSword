@@ -417,14 +417,46 @@ def bug1_step3b(text, writer, sandbox):
     report(ok, "krw_sockets_leak_forever's inpcb write is clamped too",
            "clamped " + ("yes" if ok else "NO (it still writes through early_kwrite64)"))
 
-    # 6. the window the probe declares is derived, not guessed
+    # 6. the window the probe declares: derived from the probed field offset, and
+    #    (BUG.7, 0.13) widened to the zone's own element size where the kernel
+    #    answers. A hardcoded size would be a guess, and a window that never asks
+    #    the zone is the field span this item's text calls the open half - so both
+    #    halves are pinned here.
     _, window = body(text, "static uint64_t probe_inpcb_window_size(void)")
-    ok = ("g_test_filt_offset" in window and "krw_zone_window_for_field_end(" in window)
+    ok = ("g_test_filt_offset" in window and "probe_window_for_pcb(" in window)
     report(ok, "probe_inpcb_window_size derives the window from the probed field offset",
            "derivation " + ("present" if ok else "MISSING (a hardcoded size would be a guess)"))
-    ok = "off_inpcb_inp_depend6_inp6_chksum" in text.split("probe_inpcb_window_size_for_offsets")[1][:400]
+    _, window_offsets = body(text, "static uint64_t probe_inpcb_window_size_for_pcb(uint64_t pcb)")
+    ok = (window_offsets != "" and "off_inpcb_inp_depend6_inp6_chksum" in window_offsets and
+          "probe_window_for_pcb(" in window_offsets)
     report(ok, "the offsets-table window uses the inp6_chksum field the table pins",
            "offset constant " + ("used" if ok else "MISSING"))
+
+    # 6b. BUG.7: the window is the kalloc BUCKET read out of the zone, through the
+    #     file the host test compiles, and a window of 0 (the refusal verdict) is
+    #     never written through.
+    _, zone_probe = body(text, "static uint64_t probe_zone_bucket_size(uint64_t pcb)")
+    ok = (zone_probe != "" and "krw_zone_bucket_for_pcb(" in zone_probe and
+          "off_zone_elem_size" in zone_probe and "probe_zone_read64" in zone_probe)
+    report(ok, "probe_zone_bucket_size reads z_elem_size through the tested chain",
+           "chain " + ("delegated to krw_zone_size.c" if ok else
+                       "MISSING (the bucket would not be read, or read inline)"))
+    ok = "xpaci(early_kread64(" in text.split("static uint64_t probe_zone_bucket_size")[0][-400:]
+    report(ok, "the injected reader is the kernel read the engine compiles",
+           "reader wrapper " + ("present" if ok else "MISSING"))
+    _, win_for_pcb = body(text, "static uint64_t probe_window_for_pcb(uint64_t pcb, uint64_t fieldEnd)")
+    ok = ("krw_zone_window_from_bucket(" in win_for_pcb and
+          "probe_zone_bucket_size(" in win_for_pcb)
+    report(ok, "the window verdict is computed from the zone bucket and the field span",
+           "verdict call " + ("present" if ok else "MISSING"))
+    ok = ("if (windowSize == 0) {" in text and
+          "no window — the zone and the field table disagree" in text)
+    report(ok, "a refused window (0) is never written through, and is logged",
+           "refusal branch " + ("present" if ok else
+                                "MISSING (a contradictory object would still be written)"))
+    ok = "off_zone_elem_size == 0 || pcb == 0" in zone_probe
+    report(ok, "the zone read is skipped when the offsets table has no z_elem_size",
+           "guard " + ("present" if ok else "MISSING (it would read the wrong field)"))
 
     # 7. the one caller outside the probe that used the undeclared form declares now
     bare = re.search(r"(?<!_)\bkwrite_zone_element\(", sandbox)
@@ -531,6 +563,31 @@ MUTATIONS = [
      SRC_SANDBOX.name,
      lambda s: s.replace("kwrite_zone_element_declared(ext_class_node_kptr, cn_buf, 0x20,",
                          "kwrite_zone_element(ext_class_node_kptr, cn_buf, 0x20) /* declared:")),
+    # --- BUG.7 (the window is the zone's own element size) ------------------
+    ("the zone bucket read is dropped, leaving the field span again",
+     SRC.name,
+     lambda s: s.replace("    return krw_zone_bucket_for_pcb(pcb, off_inpcb_inp_pcbinfo, "
+                         "off_inpcbinfo_ipi_zone,\n"
+                         "                                   off_zone_elem_size, probe_zone_read64);",
+                         "    return 0;   // BUG.7 dropped: the window is the field span again")),
+    ("the bucket is read inline instead of through the tested chain",
+     SRC.name,
+     lambda s: s.replace("    return krw_zone_bucket_for_pcb(pcb, off_inpcb_inp_pcbinfo, "
+                         "off_inpcbinfo_ipi_zone,\n"
+                         "                                   off_zone_elem_size, probe_zone_read64);",
+                         "    return xpaci(early_kread64(pcb + off_inpcb_inp_pcbinfo));")),
+    ("the injected reader stops stripping PAC",
+     SRC.name,
+     lambda s: s.replace("    return xpaci(early_kread64(where));",
+                         "    return early_kread64(where);")),
+    ("a refused window (0) is written through again",
+     SRC.name,
+     lambda s: s.replace("    if (windowSize == 0) {\n"
+                         "        KPRINTF(\"[STAGED] %s: no window — the zone and the field table "
+                         "disagree for pcb %#llx; \"\n"
+                         "                \"nothing was written for it\\n\", what, pcb);\n"
+                         "        return false;\n"
+                         "    }\n", "")),
 ]
 
 

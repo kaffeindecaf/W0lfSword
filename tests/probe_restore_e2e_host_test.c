@@ -234,8 +234,13 @@ static const inpcb_layout g_layouts[] = {
 };
 
 // The kernel objects involved. kalloc.96 is the bucket the SE panic named; the
-// inpcb is bigger, so the clamp is given the field-derived window the engine
-// derives (probe_inpcb_window_size()), not an invented bucket size.
+// inpcb is bigger, so the clamp is given a window derived from the field table
+// (krw_zone_window_for_field_end) rather than an invented bucket size. Since
+// BUG.7 the engine asks the zone for the real allocation size and declares THAT
+// when it can read one (kexploit/krw_zone_size.c); the field span stays the floor
+// and is what this harness drives, because its subject is the restore contract
+// on the write path, not the bucket read (that one has its own harness:
+// tests/krw_zone_size_host_test.c).
 #define KALLOC96_SIZE 0x60u
 static uint64_t inpcb_window_for(const inpcb_layout *l)
 {
