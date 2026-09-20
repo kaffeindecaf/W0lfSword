@@ -60,12 +60,22 @@
 #     fade longer than the log hook's batch cadence.
 #   * `term_anim_host_test` is new: the app's term_anim.c (caret blink rule, boot
 #     budget arithmetic, the line-fade rule and its frame count) driven on the
-#     host, 29 checks. It reads the art from THIS tree, which is the file the
+#     host, 36 checks. It reads the art from THIS tree, which is the file the
 #     W0lfTerm Makefile copies into the bundle, so the sequence it prices is the
 #     sequence the device draws.
 #   * `app_ipa_build` moved because the app rebuilt (new source file, new
 #     resource, version label 0.20 -> 0.21), and `app_binary` with it
-#     (396151837a0e... -> e06e5674... -> 214fd5c0..., the next build).
+#     (396151837a0e... -> e06e5674... -> 214fd5c0... -> 725384bd..., the ANIM.5
+#     build). The canon log hash has not moved since the first 0.21 build: the
+#     file list and the version label are what it sees, and neither changed.
+#   * the ANIM.5 pass (transitions: `clear` scrolls, a theme cross-fade, the
+#     settings slide) moved the two lint hashes again - 30 -> 31 checks,
+#     31 -> 36 mutations (a `clear` that ignores Reduce Motion, output wiped by
+#     the scroll it landed during, a cross-fade per settings tick, the sheet
+#     losing its slide, a dismissal that animates under Reduce Motion) - and the
+#     harness to 36 checks. `app_static_symbols` grew the ANIM.5 symbols
+#     (_term_should_animate, _term_settings_slide, _term_clear_scroll_ms,
+#     _term_theme_crossfade_ms).
 #   * `app_static_symbols` grew the term_anim symbols, the two new selector
 #     strings and the bundled-art comparison (`cmp` against
 #     scripts/wolf_art.txt here - a drift between the shipped art and the tested
@@ -148,16 +158,16 @@ check kwrite_counter         "$ROOT" 0 1dc9c1d4b0e35b86e23667ff627e4b57bb7f6ec83
 # the tweak build ship, so a drift between tested and shipped fails at entry 12f.
 check tweak_log_throttle     "$ROOT" 0 d59cd9fd7d8be99c390a569e1c7430af0b37a8023433fc4beaf5806b530653ab raw \
     'bash scripts/run_tweak_log_throttle_host_test.sh'
-check scan_budget_cancel     "$ROOT" 0 2cd62398caf19343db55327f2b61780958d0d8991bb53d2d0cfa578cc189d0b8 raw \
+check scan_budget_cancel     "$ROOT" 0 10ea294ebad7da40895743c79dc01205dfae68bf2733c28aecb7f182a677b4cd raw \
     'python3 scripts/check_scan_budget_cancel_writes.py'
-check scan_budget_cancel_self "$ROOT" 0 263d00941c4815ccd53ef42e3c1695528dd8e6cfa2f4dd6a0ea2fbe342d18093 raw \
+check scan_budget_cancel_self "$ROOT" 0 ddd180c1285b4e7c98abd84070ec5baa97e0649c3a7815ff386af4a22521327e raw \
     'python3 scripts/check_scan_budget_cancel_writes.py --selftest'
 # ANIM.1 / ANIM.3: the launch animations' decisions (term_anim.c) - the caret
 # blink rule and the boot sequence's budget arithmetic. The app compiles the same
 # file (app entry term_anim.c in the W0lfTerm Makefile) and the harness reads the
 # art from this tree, which is the art the Makefile copies into the bundle, so
 # the sequence the test prices is the sequence the device draws.
-check term_anim_host_test    "$ROOT" 0 40b300e3f451b4b9906f6e390c53290a544a2a554c0ba3b27449c3fbbdb22fdb raw \
+check term_anim_host_test    "$ROOT" 0 1681da1cdb64330efdd51236453a1110b2273e7f84289fbf48e76eec43cfcf07 raw \
     'bash "$TERM_SRC/scripts/run_term_anim_host_test.sh"'
 
 # --- the rest of regression.sh's host half (run directly, never the whole file) ---
@@ -222,12 +232,12 @@ if [ "$WITH_BUILDS" = 1 ]; then
         # Re-pinned 2026-09-18 (BUG.7): the app links the rebuilt engine archive,
         # so the binary moved with it. Same build (0.20), no source change on the
         # app side.
-        if [ "$got_bin" = 214fd5c08409f335957bc0cebadf398cdf5e4ccf4686f218785fdc793f4b7714 ]; then
+        if [ "$got_bin" = 725384bdae6e9585af5472739b503cace83f8a5782c8e2e2957062d4442bc01d ]; then
             printf 'ok   %-34s %s\n' "app_binary" "${got_bin:0:16}..."
             PASS=$((PASS + 1))
         else
             printf 'BAD  %-34s sha256=%s\n     want %s\n' "app_binary" "$got_bin" \
-                214fd5c08409f335957bc0cebadf398cdf5e4ccf4686f218785fdc793f4b7714
+                725384bdae6e9585af5472739b503cace83f8a5782c8e2e2957062d4442bc01d
             FAIL=$((FAIL + 1))
         fi
         # 3) the app-side static check (llvm-nm: GNU nm cannot read Mach-O)
@@ -236,7 +246,7 @@ if [ "$WITH_BUILDS" = 1 ]; then
         #    shipped app is proved to link the zone-bucket chain the host test
         #    drives - not just to compile it.
         # shellcheck disable=SC2016  # eval'd command string: the expansion is the point
-        check app_static_symbols "$TERM_SRC" 0 9a0f9ed87275a7132f8d6704024d4ad07b00c07d9ec543d77aaa245df4eddc10 raw \
+        check app_static_symbols "$TERM_SRC" 0 a6d06dbfdd710c2f2911c3a96a2190c1d613ca44ca7a644b4c37fa3ed2d81a84 raw \
             'BIN=dist/Payload/W0lfTerm.app/W0lfTerm
              { echo "W0lfTerm app-side static check (linked binary produced by the 0.21 rebuild)"
                echo "binary: $BIN"
@@ -246,7 +256,7 @@ if [ "$WITH_BUILDS" = 1 ]; then
                llvm-nm-19 "$BIN" | grep -E " _g_peV2Aborted| _probe_exit_action_for| _kexploit_request_stop| _kexploit_stop_requested| _kwrite_zone_element| _tweak_log_fsync_due| _krw_zone_bucket_for_pcb"
                echo
                echo "== nm: ANIM.1/ANIM.2/ANIM.3 decisions (term_anim.c is inside the app) =="
-               llvm-nm-19 "$BIN" | grep -E " _term_caret_blinks| _term_caret_blink_interval| _term_boot_tick| _term_boot_handover| _term_boot_duration_ms| _term_boot_budget_ms| _term_boot_fits| _term_line_fade_ms| _term_line_should_fade| _term_line_fade_frame_rate"
+               llvm-nm-19 "$BIN" | grep -E " _term_caret_blinks| _term_caret_blink_interval| _term_boot_tick| _term_boot_handover| _term_boot_duration_ms| _term_boot_budget_ms| _term_boot_fits| _term_line_fade_ms| _term_line_should_fade| _term_line_fade_frame_rate| _term_clear_scroll_ms| _term_theme_crossfade_ms| _term_settings_slide| _term_should_animate"
                echo
                echo "== strings markers (count) =="
                for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter" beginBootSequence skipBootSequence wolf_art fadeTick endLineFade; do

@@ -843,7 +843,7 @@ def c_anim_line_fade(src):
     # Every path that rewrites or shifts the storage drops the fade first: the
     # trim (whose deletion moves the range), the repaint, the clear and the
     # in-place replace. The boot art does NOT fade - its ticks are the animation.
-    cancellers = ["- (void)trimIfNeeded", "- (void)repaintAll", "- (void)clearScreen",
+    cancellers = ["- (void)trimIfNeeded", "- (void)repaintAll", "- (void)clearScreenImmediately",
                   "- (void)replaceLastLine:(NSString *)text kind:(TermLineKind)kind"]
     stale = []
     for sig in cancellers:
@@ -885,6 +885,57 @@ def c_anim_fade_cadence(src):
     report(ok, "ANIM.2: the fade ends inside the log hook's batch cadence",
            "fade %d ms vs a %d ms flush cadence (term_bridge.m) - the fade must be "
            "shorter than the gap between batches" % (fade_ms, cadence_ms))
+    return ok
+
+
+@check("ANIM.5 app: clear scrolls out, the theme fades, and Reduce Motion cuts all three")
+def c_anim_transitions(src):
+    code = strip_comments(src.vc_m)
+    settings = strip_comments(src.svc_m)
+
+    # `clear` scrolls the buffer out and then wipes - and the wipe is a separate
+    # method, because two things have to be able to end with it: the animation's
+    # completion and output that arrived first.
+    clear_fn = _objc_method(code, "- (void)clearScreen")
+    wipe = _objc_method(code, "- (void)clearScreenImmediately")
+    gated = clear_fn is not None and "term_should_animate(" in clear_fn
+    scrolls = clear_fn is not None and "contentOffset" in clear_fn
+    paced = clear_fn is not None and "term_clear_scroll_ms()" in clear_fn
+    ends_in_a_wipe = clear_fn is not None and "clearScreenImmediately" in clear_fn
+    wipe_cancels = wipe is not None and "removeAllAnimations" in wipe
+
+    # Output that lands mid-clear ends the wipe FIRST, on both append paths: the
+    # wipe is what the animation ends with, so a line that arrived during it would
+    # otherwise be deleted with the text it landed on.
+    mid_clear = "if (self.clearing) [self clearScreenImmediately];"
+    single = _objc_method(code, "- (void)appendLine:(NSString *)text kind:(TermLineKind)kind fade:")
+    batch = _objc_method(code, "- (void)appendLines:(NSArray *)texts kinds:(NSArray *)kinds")
+    guarded = (single is not None and mid_clear in single
+               and batch is not None and mid_clear in batch)
+
+    # A theme change cross-fades (and only a theme change - the font slider calls
+    # applySettings on every tick, and a cross-fade per tick is a strobe).
+    apply = _objc_method(code, "- (void)applySettings")
+    theme_only = apply is not None and "themeChanged" in apply and "self.appliedTheme" in apply
+    crossfade = (apply is not None and "UIViewAnimationOptionTransitionCrossDissolve" in apply
+                 and "term_theme_crossfade_ms()" in apply)
+    straight_path = _objc_method(code, "- (void)applySettingsNow") is not None
+
+    # The sheet slides up, both halves ask the same gate.
+    slides = "UIModalTransitionStyleCoverVertical" in code
+    present_gated = "term_settings_slide(" in code
+    dismiss_gated = ("term_should_animate(UIAccessibilityIsReduceMotionEnabled() ? 1 : 0) != 0" in settings
+                     and settings.count("dismissViewControllerAnimated:animate") == 2)
+
+    ok = (gated and scrolls and paced and ends_in_a_wipe and wipe_cancels and guarded
+          and theme_only and crossfade and straight_path
+          and slides and present_gated and dismiss_gated)
+    report(ok, "ANIM.5 app: clear scrolls out, the theme fades, and Reduce Motion cuts all three",
+           "clear gated=%s scrolls=%s paced=%s ends-in-a-wipe=%s wipe-cancels=%s "
+           "mid-clear output guarded=%s theme-only=%s cross-fade=%s straight-path=%s "
+           "sheet-slides=%s presentation-gated=%s dismissal-gated=%s"
+           % (gated, scrolls, paced, ends_in_a_wipe, wipe_cancels, guarded, theme_only,
+              crossfade, straight_path, slides, present_gated, dismiss_gated))
     return ok
 
 
@@ -1078,6 +1129,31 @@ def selftest(root, wolfterm):
         return _mutate(text, "#define TERM_FADE_MS          80",
                              "#define TERM_FADE_MS          200")
 
+    # --- ANIM.5 ------------------------------------------------------------
+    def mut_clear_ignores_reduce_motion(text):
+        return _mutate(text, "    if (!term_should_animate([[self class] reduceMotion] ? 1 : 0)\n"
+                             "        || self.output.textStorage.length == 0) {",
+                             "    if (self.output.textStorage.length == 0) {")
+
+    def mut_clear_wipes_output_that_landed(text):
+        return _mutate(text,
+                       "    // ANIM.5: same rule as the single-line path - a wipe in flight would take\n"
+                       "    // this batch with it, so it finishes first.\n"
+                       "    if (self.clearing) [self clearScreenImmediately];\n",
+                       "")
+
+    def mut_every_settings_tick_crossfades(text):
+        return _mutate(text,
+                       "    BOOL themeChanged = (self.appliedTheme >= 0 && TermSettings.themeIndex != self.appliedTheme);",
+                       "    BOOL themeChanged = YES;")
+
+    def mut_sheet_stops_sliding(text):
+        return _mutate(text, "    svc.modalTransitionStyle = UIModalTransitionStyleCoverVertical;\n", "")
+
+    def mut_dismissal_ignores_reduce_motion(text):
+        return _mutate(text, "[presenter dismissViewControllerAnimated:animate completion:NULL];",
+                             "[presenter dismissViewControllerAnimated:YES completion:NULL];")
+
     mutations = [
         ("engine budget default back to 120", "engine", "kexploit/kexploit_opa334.m", mut_engine_budget_120),
         ("app budget default back to 120", "app", "term_settings.m", mut_app_budget_120),
@@ -1110,6 +1186,11 @@ def selftest(root, wolfterm):
         ("the fade cap is ignored (one fade per line)", "app", "TerminalViewController.m", mut_fade_cap_ignored),
         ("the boot art fades line by line again", "app", "TerminalViewController.m", mut_art_fades_line_by_line),
         ("the fade outlives the log hook's batch cadence", "app", "term_anim.c", mut_fade_outlives_the_batch),
+        ("`clear` ignores Reduce Motion", "app", "TerminalViewController.m", mut_clear_ignores_reduce_motion),
+        ("`clear` wipes output that landed during the scroll", "app", "TerminalViewController.m", mut_clear_wipes_output_that_landed),
+        ("every settings tick cross-fades (the slider strobes)", "app", "TerminalViewController.m", mut_every_settings_tick_crossfades),
+        ("the settings sheet stops sliding", "app", "TerminalViewController.m", mut_sheet_stops_sliding),
+        ("the sheet dismissal animates under Reduce Motion", "app", "SettingsViewController.m", mut_dismissal_ignores_reduce_motion),
     ]
 
     tmp = tempfile.mkdtemp(prefix="bug345_lint_selftest_")
