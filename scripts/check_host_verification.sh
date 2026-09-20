@@ -44,24 +44,28 @@
 #     the interleave moved between runs. tests/trm_shell_host_test.c now line-
 #     buffers stdout, and the canon hash is byte-stable over repeated runs.
 #
-# Pins re-taken 2026-09-20 (W0lfTerm ANIM.1/ANIM.3, six entries): the app-side
-# launch work moved the app and everything derived from it, and one new entry
-# joined the suite.
+# Pins re-taken 2026-09-20 (W0lfTerm ANIM.1/ANIM.2/ANIM.3, six entries): the
+# app-side launch work moved the app and everything derived from it, and one new
+# entry joined the suite.
 #
-#   * `scan_budget_cancel` (25 -> 28 checks) and `scan_budget_cancel_self`
-#     (21 -> 26 mutations): the lint gained the ANIM.1/ANIM.3 app checks (one
-#     caret gate, the art-then-banner order, the build wiring) and one mutation
-#     each for the ways those can rot - a text path that forgets the caret gate,
-#     a launch path that boots the banner directly, a boot paced by a literal
-#     instead of term_anim.c, an art line rule that drifts from the host test,
-#     and the art dropping out of the resource list.
-#   * `term_anim_host_test` is new: the app's term_anim.c (caret blink rule,
-#     boot budget arithmetic) driven on the host, 18 checks. It reads the art
-#     from THIS tree, which is the file the W0lfTerm Makefile copies into the
-#     bundle, so the sequence it prices is the sequence the device draws.
+#   * `scan_budget_cancel` (25 -> 30 checks) and `scan_budget_cancel_self`
+#     (21 -> 31 mutations): the lint gained the ANIM app checks (one caret gate,
+#     the art-then-banner order, the line fade and its cadence bound, the build
+#     wiring) and a mutation each for the ways those can rot - a text path that
+#     forgets the caret gate, a launch path that boots the banner directly, a
+#     boot paced by a literal instead of term_anim.c, an art line rule that
+#     drifts from the host test, the art dropping out of the resource list, a
+#     fade range left pointing into text a trim moved, a fade duration that is a
+#     literal, the fade cap ignored, the art fading line by line again, and a
+#     fade longer than the log hook's batch cadence.
+#   * `term_anim_host_test` is new: the app's term_anim.c (caret blink rule, boot
+#     budget arithmetic, the line-fade rule and its frame count) driven on the
+#     host, 29 checks. It reads the art from THIS tree, which is the file the
+#     W0lfTerm Makefile copies into the bundle, so the sequence it prices is the
+#     sequence the device draws.
 #   * `app_ipa_build` moved because the app rebuilt (new source file, new
 #     resource, version label 0.20 -> 0.21), and `app_binary` with it
-#     (396151837a0e... -> e06e5674...).
+#     (396151837a0e... -> e06e5674... -> 214fd5c0..., the next build).
 #   * `app_static_symbols` grew the term_anim symbols, the two new selector
 #     strings and the bundled-art comparison (`cmp` against
 #     scripts/wolf_art.txt here - a drift between the shipped art and the tested
@@ -144,16 +148,16 @@ check kwrite_counter         "$ROOT" 0 1dc9c1d4b0e35b86e23667ff627e4b57bb7f6ec83
 # the tweak build ship, so a drift between tested and shipped fails at entry 12f.
 check tweak_log_throttle     "$ROOT" 0 d59cd9fd7d8be99c390a569e1c7430af0b37a8023433fc4beaf5806b530653ab raw \
     'bash scripts/run_tweak_log_throttle_host_test.sh'
-check scan_budget_cancel     "$ROOT" 0 1ca26681595d37d15e3eafede9a27d92741a28f4856ba72464d73bff10f6a093 raw \
+check scan_budget_cancel     "$ROOT" 0 2cd62398caf19343db55327f2b61780958d0d8991bb53d2d0cfa578cc189d0b8 raw \
     'python3 scripts/check_scan_budget_cancel_writes.py'
-check scan_budget_cancel_self "$ROOT" 0 7ecb79333d441946e590528d80ba10ade26c187bb862aa91a87211a38aef8e35 raw \
+check scan_budget_cancel_self "$ROOT" 0 263d00941c4815ccd53ef42e3c1695528dd8e6cfa2f4dd6a0ea2fbe342d18093 raw \
     'python3 scripts/check_scan_budget_cancel_writes.py --selftest'
 # ANIM.1 / ANIM.3: the launch animations' decisions (term_anim.c) - the caret
 # blink rule and the boot sequence's budget arithmetic. The app compiles the same
 # file (app entry term_anim.c in the W0lfTerm Makefile) and the harness reads the
 # art from this tree, which is the art the Makefile copies into the bundle, so
 # the sequence the test prices is the sequence the device draws.
-check term_anim_host_test    "$ROOT" 0 da1b4e770b9fed9d9faac03167c87a1f1ebb0abb832d7b44a9547714005270a6 raw \
+check term_anim_host_test    "$ROOT" 0 40b300e3f451b4b9906f6e390c53290a544a2a554c0ba3b27449c3fbbdb22fdb raw \
     'bash "$TERM_SRC/scripts/run_term_anim_host_test.sh"'
 
 # --- the rest of regression.sh's host half (run directly, never the whole file) ---
@@ -212,18 +216,18 @@ if [ "$WITH_BUILDS" = 1 ]; then
         fi
         # 2) app build: the log varies only in compile order + zip mtimes (canon
         #    mode); the linked binary is the assertion, so hash it directly.
-        check app_ipa_build "$TERM_SRC" 0 34081be99a352080feede566aab7217fa0d64132b395776fa930290677e2cca5 canon \
+        check app_ipa_build "$TERM_SRC" 0 81c1969c99ef64565d8373c499af5387f545ee69e6d7df1ceead4ba70525ca29 canon \
             'bash scripts/build_ipa.sh sideload 0.21'
         got_bin=$(sha256sum "$TERM_SRC/dist/Payload/W0lfTerm.app/W0lfTerm" | cut -d' ' -f1)
         # Re-pinned 2026-09-18 (BUG.7): the app links the rebuilt engine archive,
         # so the binary moved with it. Same build (0.20), no source change on the
         # app side.
-        if [ "$got_bin" = e06e5674c6c2f4d6eb35d2b891b23f66d664a6ca5c8b2297a128d91b4bae82de ]; then
+        if [ "$got_bin" = 214fd5c08409f335957bc0cebadf398cdf5e4ccf4686f218785fdc793f4b7714 ]; then
             printf 'ok   %-34s %s\n' "app_binary" "${got_bin:0:16}..."
             PASS=$((PASS + 1))
         else
             printf 'BAD  %-34s sha256=%s\n     want %s\n' "app_binary" "$got_bin" \
-                e06e5674c6c2f4d6eb35d2b891b23f66d664a6ca5c8b2297a128d91b4bae82de
+                214fd5c08409f335957bc0cebadf398cdf5e4ccf4686f218785fdc793f4b7714
             FAIL=$((FAIL + 1))
         fi
         # 3) the app-side static check (llvm-nm: GNU nm cannot read Mach-O)
@@ -232,7 +236,7 @@ if [ "$WITH_BUILDS" = 1 ]; then
         #    shipped app is proved to link the zone-bucket chain the host test
         #    drives - not just to compile it.
         # shellcheck disable=SC2016  # eval'd command string: the expansion is the point
-        check app_static_symbols "$TERM_SRC" 0 516e662f8f6709f506d2147c800884e3b1334322879feaef6963c60e013312f7 raw \
+        check app_static_symbols "$TERM_SRC" 0 9a0f9ed87275a7132f8d6704024d4ad07b00c07d9ec543d77aaa245df4eddc10 raw \
             'BIN=dist/Payload/W0lfTerm.app/W0lfTerm
              { echo "W0lfTerm app-side static check (linked binary produced by the 0.21 rebuild)"
                echo "binary: $BIN"
@@ -241,11 +245,11 @@ if [ "$WITH_BUILDS" = 1 ]; then
                echo "== nm: cancel/verification symbols =="
                llvm-nm-19 "$BIN" | grep -E " _g_peV2Aborted| _probe_exit_action_for| _kexploit_request_stop| _kexploit_stop_requested| _kwrite_zone_element| _tweak_log_fsync_due| _krw_zone_bucket_for_pcb"
                echo
-               echo "== nm: ANIM.1/ANIM.3 decisions (term_anim.c is inside the app) =="
-               llvm-nm-19 "$BIN" | grep -E " _term_caret_blinks| _term_caret_blink_interval| _term_boot_tick| _term_boot_handover| _term_boot_duration_ms| _term_boot_budget_ms| _term_boot_fits"
+               echo "== nm: ANIM.1/ANIM.2/ANIM.3 decisions (term_anim.c is inside the app) =="
+               llvm-nm-19 "$BIN" | grep -E " _term_caret_blinks| _term_caret_blink_interval| _term_boot_tick| _term_boot_handover| _term_boot_duration_ms| _term_boot_budget_ms| _term_boot_fits| _term_line_fade_ms| _term_line_should_fade| _term_line_fade_frame_rate"
                echo
                echo "== strings markers (count) =="
-               for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter" beginBootSequence skipBootSequence wolf_art; do
+               for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter" beginBootSequence skipBootSequence wolf_art fadeTick endLineFade; do
                    printf "  %-34s %s\n" "$m" "$(strings -a "$BIN" | grep -cF "$m")"
                done
                echo

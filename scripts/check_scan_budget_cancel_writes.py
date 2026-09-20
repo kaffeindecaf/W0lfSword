@@ -812,6 +812,82 @@ def c_anim_boot_order(src):
     return ok
 
 
+@check("ANIM.2 app: the arriving line fades, and the fade is dropped before the text moves")
+def c_anim_line_fade(src):
+    code = strip_comments(src.vc_m)
+
+    # The decision is term_anim.c's, taken per single-line append, and it is told
+    # whether a fade is already running (that argument is the cap - drop it and a
+    # burst starts one fade per line).
+    asks = "term_line_should_fade(" in code
+    capped = "self.fadeActive ? 1 : 0" in code
+
+    # The fade itself: a range in the text storage, stepped with the duration and
+    # the rate term_anim.c names, with the range checked against the storage every
+    # frame (a buffer that moved under a fade must end it, not light it).
+    tick = _objc_method(code, "- (void)fadeTick:")
+    bounds_checked = tick is not None and "NSMaxRange(self.fadeRange) > ts.length" in tick
+    paced = tick is not None and "term_line_fade_ms()" in tick
+    self_attr = tick is not None and "addAttribute:NSForegroundColorAttributeName" in tick
+
+    begin = _objc_method(code, "- (void)beginLineFadeForRange:")
+    created = begin is not None and "term_line_fade_frame_rate()" in begin
+    snapped = _objc_method(code, "- (void)endLineFade")
+
+    # The line is appended DARK when it will fade, so no frame shows it bright
+    # before the fade starts.
+    body = _objc_method(code, "- (void)appendLine:(NSString *)text kind:(TermLineKind)kind fade:")
+    dark = body is not None and "alpha:(fade ? 0.0 : 1.0)" in body
+    starts = body is not None and "beginLineFadeForRange" in body
+
+    # Every path that rewrites or shifts the storage drops the fade first: the
+    # trim (whose deletion moves the range), the repaint, the clear and the
+    # in-place replace. The boot art does NOT fade - its ticks are the animation.
+    cancellers = ["- (void)trimIfNeeded", "- (void)repaintAll", "- (void)clearScreen",
+                  "- (void)replaceLastLine:(NSString *)text kind:(TermLineKind)kind"]
+    stale = []
+    for sig in cancellers:
+        block = _objc_method(code, sig)
+        if block is None or "endLineFade" not in block:
+            stale.append(sig)
+    batch = _objc_method(code, "- (void)appendLines:(NSArray *)texts kinds:(NSArray *)kinds")
+    batch_lands = batch is not None and "beginLineFadeForRange" not in batch
+    art_crisp = "appendLine:line kind:TermLineNotice fade:NO" in code
+
+    ok = (asks and capped and bounds_checked and paced and self_attr and created
+          and snapped is not None and dark and starts and not stale and batch_lands
+          and art_crisp)
+    report(ok, "ANIM.2 app: the arriving line fades, and the fade is dropped before the text moves",
+           "asks term_anim=%s capped by fades-running=%s range bounds-checked=%s "
+           "duration from term_anim=%s steps the storage=%s rate from term_anim=%s "
+           "appended dark=%s starts the fade=%s paths-with-a-stale-range=%s "
+           "a burst does not fade=%s art drawn crisp=%s"
+           % (asks, capped, bounds_checked, paced, self_attr, created, dark, starts,
+              ", ".join(stale) if stale else "none", batch_lands, art_crisp))
+    return ok
+
+
+@check("ANIM.2: the fade ends inside the log hook's batch cadence")
+def c_anim_fade_cadence(src):
+    # The fade is lit by a timer over 80 ms; the log hook flushes a burst 90 ms
+    # after its first line. If the fade were longer than the cadence, output would
+    # keep arriving while the previous line was still dim, and the fade would never
+    # catch up - the stutter this item exists to avoid. Both numbers live in
+    # different files, so the check does too.
+    fade = re.search(r"#define\s+TERM_FADE_MS\s+(\d+)", strip_comments(src.anim_c))
+    cadence = re.search(r"(\d+)\s*\*\s*NSEC_PER_MSEC", strip_comments(src.b_m))
+    if not fade or not cadence:
+        report(False, "ANIM.2: the fade ends inside the log hook's batch cadence",
+               "fade_ms=%s cadence=%s" % (bool(fade), bool(cadence)))
+        return False
+    fade_ms, cadence_ms = int(fade.group(1)), int(cadence.group(1))
+    ok = 0 < fade_ms <= cadence_ms
+    report(ok, "ANIM.2: the fade ends inside the log hook's batch cadence",
+           "fade %d ms vs a %d ms flush cadence (term_bridge.m) - the fade must be "
+           "shorter than the gap between batches" % (fade_ms, cadence_ms))
+    return ok
+
+
 @check("ANIM.3 build: the host-tested anim file is the compiled one, and the art ships")
 def c_anim_build_wiring(src):
     # '#' comments are not stripped for a Makefile: the anchors here are variable
@@ -974,6 +1050,34 @@ def selftest(root, wolfterm):
                        "W0lfTerm_RESOURCE_FILES = $(W0LF_SRC)/scripts/wolf_art.txt",
                        "# mutation: the art is no longer a shipped resource")
 
+    # --- ANIM.2 ------------------------------------------------------------
+    def mut_stale_fade_range_on_trim(text):
+        # The trim deletes lines, which moves the range the fade is stepping - a
+        # fade left running lights whatever characters now sit at that offset.
+        return _mutate(text,
+                       "    // ANIM.2: the deletion below moves every range after it, so the line being\n"
+                       "    // faded in loses its range - snap it to full BEFORE the text moves.\n"
+                       "    [self endLineFade];\n",
+                       "")
+
+    def mut_fade_duration_is_a_literal(text):
+        return _mutate(text, "    double ms = (double)term_line_fade_ms();",
+                             "    double ms = 80.0;")
+
+    def mut_fade_cap_ignored(text):
+        # fades_running hard-wired to 0: every line of a fast producer starts a
+        # fade of its own, which is the stutter the item is about.
+        return _mutate(text, "                                      self.fadeActive ? 1 : 0) != 0;",
+                             "                                      0) != 0;")
+
+    def mut_art_fades_line_by_line(text):
+        return _mutate(text, "appendLine:line kind:TermLineNotice fade:NO]",
+                             "appendLine:line kind:TermLineNotice fade:YES]")
+
+    def mut_fade_outlives_the_batch(text):
+        return _mutate(text, "#define TERM_FADE_MS          80",
+                             "#define TERM_FADE_MS          200")
+
     mutations = [
         ("engine budget default back to 120", "engine", "kexploit/kexploit_opa334.m", mut_engine_budget_120),
         ("app budget default back to 120", "app", "term_settings.m", mut_app_budget_120),
@@ -1001,6 +1105,11 @@ def selftest(root, wolfterm):
         ("the boot is paced by a literal, not by term_anim.c", "app", "TerminalViewController.m", mut_boot_pacing_is_a_literal),
         ("the app counts art lines differently from the host test", "app", "TerminalViewController.m", mut_art_line_rule_drifts),
         ("the art stops being a shipped resource", "app", "Makefile", mut_art_stops_shipping),
+        ("a fade outlives the text it points into", "app", "TerminalViewController.m", mut_stale_fade_range_on_trim),
+        ("the fade duration is a literal, not term_anim.c's", "app", "TerminalViewController.m", mut_fade_duration_is_a_literal),
+        ("the fade cap is ignored (one fade per line)", "app", "TerminalViewController.m", mut_fade_cap_ignored),
+        ("the boot art fades line by line again", "app", "TerminalViewController.m", mut_art_fades_line_by_line),
+        ("the fade outlives the log hook's batch cadence", "app", "term_anim.c", mut_fade_outlives_the_batch),
     ]
 
     tmp = tempfile.mkdtemp(prefix="bug345_lint_selftest_")
