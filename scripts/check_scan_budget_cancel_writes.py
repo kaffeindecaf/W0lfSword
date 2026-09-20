@@ -75,6 +75,16 @@ APP_FILES = [
     "term_bridge.m",
     "SettingsViewController.m",
     "TerminalViewController.m",
+    # ANIM.1 / ANIM.3: the launch sequence and the decisions under it. The view
+    # and the app delegate wire it, term_anim.c decides it, the Makefile is what
+    # puts the art in the bundle and the anim file in the build, and the harness
+    # is what makes "the tested file is the shipped file" true.
+    "AppDelegate.m",
+    "term_anim.c",
+    "term_anim.h",
+    "Makefile",
+    "scripts/run_term_anim_host_test.sh",
+    "tests/term_anim_host_test.c",
 ]
 
 CHECKS = []
@@ -162,6 +172,12 @@ class Src:
         self.b_m = self.app["term_bridge.m"]
         self.svc_m = self.app["SettingsViewController.m"]
         self.vc_m = self.app["TerminalViewController.m"]
+        self.appdelegate_m = self.app["AppDelegate.m"]
+        self.anim_c = self.app["term_anim.c"]
+        self.anim_h = self.app["term_anim.h"]
+        self.app_makefile = self.app["Makefile"]
+        self.anim_run = self.app["scripts/run_term_anim_host_test.sh"]
+        self.anim_test = self.app["tests/term_anim_host_test.c"]
 
 
 def all_sources_present(src):
@@ -685,6 +701,137 @@ def c_throttle_no_other_fsync(src):
 
 
 # ===========================================================================
+# ANIM.1 / ANIM.3 - the launch animations (caret blink + boot sequence)
+# ===========================================================================
+# Both draw, but each has one decision under the drawing, and those decisions
+# live in term_anim.c - a plain C file the app compiles and
+# scripts/run_term_anim_host_test.sh drives, so the tested file is the shipped
+# file (the rule utils/tweak_log_policy.c follows). What is left to check here is
+# the WIRING: that the view asks that file instead of carrying its own numbers,
+# and that no input path can bypass it.
+def _objc_blocks(text):
+    """Every ObjC method block, from its -/+ header line to the next one."""
+    marks = [m.start() for m in re.finditer(r"^(?:-|\+)\s*\(", text, flags=re.M)]
+    return [text[s:(marks[i + 1] if i + 1 < len(marks) else len(text))]
+            for i, s in enumerate(marks)]
+
+
+def _objc_method(text, signature):
+    """The block whose header line carries `signature`, or None."""
+    for block in _objc_blocks(text):
+        if signature in block.split("\n", 1)[0]:
+            return block
+    return None
+
+
+@check("ANIM.1 app: one gate owns the caret timer and it asks the shipped decision")
+def c_anim_caret_gate(src):
+    code = strip_comments(src.vc_m)
+    gate = _objc_method(code, "- (void)caretBlinkGate")
+    if gate is None:
+        report(False, "ANIM.1 app: one gate owns the caret timer and it asks the shipped decision",
+               "no -caretBlinkGate in TerminalViewController.m")
+        return False
+
+    # The decision and the interval come from term_anim.c, not from a literal the
+    # host test cannot see.
+    asks = code.count("term_caret_blinks(")
+    # The timer is created in exactly one place, and that place is the gate.
+    creators = [b for b in _objc_blocks(code) if "scheduledTimerWithTimeInterval:term_caret_blink_interval()" in b]
+    gate_creates = bool(creators) and creators[0] == gate
+    # ... and the gate stops it (not just hides the caret) before it gets there.
+    stops = gate.find("self.caretTimer = nil")
+    starts = gate.find("scheduledTimerWithTimeInterval")
+    stop_first = 0 <= stops < starts
+
+    # Every path that can change the field's text re-runs the gate: the keys via
+    # the editing target, the rest explicitly. This list is what goes stale when
+    # a new input path is added, which is the point of checking it.
+    paths = ["- (void)inputChanged:", "- (BOOL)textFieldShouldReturn:", "- (void)keyTapped:",
+             "- (void)completeInput", "- (void)historyPrev:", "- (void)historyNext:"]
+    ungated = []
+    for sig in paths:
+        block = _objc_method(code, sig)
+        if block is None or "caretBlinkGate" not in block:
+            ungated.append(sig)
+    editing_target = ("UIControlEventEditingChanged" in code and "@selector(inputChanged:)" in code)
+    one_blinker = code.count("blinkCaret:") == 2      # the @selector and the method
+
+    ok = (asks == 1 and gate_creates and stop_first and not ungated
+          and editing_target and one_blinker)
+    report(ok, "ANIM.1 app: one gate owns the caret timer and it asks the shipped decision",
+           "term_caret_blinks() calls=%d gate-creates-timer=%s stop-before-start=%s "
+           "editing-changed-target=%s blink-owners=%d ungated paths=%s"
+           % (asks, gate_creates, stop_first, editing_target, code.count("blinkCaret:"),
+              ", ".join(ungated) if ungated else "none"))
+    return ok
+
+
+@check("ANIM.3 app: the art is drawn, then the banner - once, and skipped by typing")
+def c_anim_boot_order(src):
+    appdelegate = strip_comments(src.appdelegate_m)
+    code = strip_comments(src.vc_m)
+
+    # The launch path goes through the view's sequence. A direct term_bridge_boot()
+    # in the app delegate is the bug this item exists to prevent: the banner would
+    # print before the art, and the art would then land under it.
+    launch = "beginBootSequence" in appdelegate
+    no_early_banner = "term_bridge_boot(" not in appdelegate
+
+    # One handover, inside the latched finisher.
+    fin = _objc_method(code, "- (void)finishBootSequence")
+    handovers = code.count("term_bridge_boot(")
+    latched = fin is not None and "self.bootDone" in fin and "term_bridge_boot(" in fin
+    # A skip is the same event as the last tick, so the art cannot be drawn after
+    # the banner: skipBootSequence must funnel into the finisher.
+    skip = _objc_method(code, "- (void)skipBootSequence")
+    skip_funnels = skip is not None and "finishBootSequence" in skip
+
+    begin = _objc_method(code, "- (void)beginBootSequence")
+    from_bundle = begin is not None and "pathForResource" in begin
+    paced = begin is not None and "term_boot_tick()" in begin
+    beat = "term_boot_handover()" in code
+    # The line rule the host test counts with: split on newlines, keep non-empty.
+    same_line_rule = begin is not None and "[line length] > 0" in begin
+    # Typing ends it: every input path skips the sequence (the caret gate rides
+    # along with them, so these are the same six paths - plus completion).
+    skippers = ["- (void)inputChanged:", "- (BOOL)textFieldShouldReturn:", "- (void)keyTapped:",
+                "- (void)completeInput"]
+    not_skipped = [s for s in skippers
+                   if (_objc_method(code, s) or "") is None
+                   or "skipBootSequence" not in (_objc_method(code, s) or "")]
+
+    ok = (launch and no_early_banner and handovers == 1 and latched and skip_funnels
+          and from_bundle and paced and beat and same_line_rule and not not_skipped)
+    report(ok, "ANIM.3 app: the art is drawn, then the banner - once, and skipped by typing",
+           "launch-calls-the-sequence=%s no-banner-in-appdelegate=%s handovers=%d latched=%s "
+           "skip-funnels=%s art-from-bundle=%s paced-by-term_anim=%s line-rule-matches=%s "
+           "paths-that-do-not-skip=%s"
+           % (launch, no_early_banner, handovers, latched, skip_funnels, from_bundle,
+              paced, same_line_rule, ", ".join(not_skipped) if not_skipped else "none"))
+    return ok
+
+
+@check("ANIM.3 build: the host-tested anim file is the compiled one, and the art ships")
+def c_anim_build_wiring(src):
+    # '#' comments are not stripped for a Makefile: the anchors here are variable
+    # assignments, and one of the two is only ever named in the comment above it.
+    mk = src.app_makefile
+    compiled = re.search(r"W0lfTerm_FILES\s*=(?:[^:]|\n)*?\bterm_anim\.c\b", mk) is not None
+    art = re.search(r"W0lfTerm_RESOURCE_FILES\s*=\s*\$\(W0LF_SRC\)/scripts/wolf_art\.txt", mk) is not None
+    # The harness must compile the app's own term_anim.c, or the "tested file is
+    # the shipped file" claim is false while the test still passes.
+    runner = src.anim_run
+    tested_shipped = ("term_anim.c" in runner and "tests/term_anim_host_test.c" in runner)
+    declaration = "term_caret_blinks" in src.anim_h and "term_boot_duration_ms" in src.anim_h
+    ok = compiled and art and tested_shipped and declaration
+    report(ok, "ANIM.3 build: the host-tested anim file is the compiled one, and the art ships",
+           "term_anim.c in _FILES=%s art in _RESOURCE_FILES=%s harness compiles the shipped file=%s "
+           "header declares both decisions=%s" % (compiled, art, tested_shipped, declaration))
+    return ok
+
+
+# ===========================================================================
 # selftest: every mutation above must be caught
 # ===========================================================================
 def _mutate(text, old, new, count=1):
@@ -803,6 +950,30 @@ def selftest(root, wolfterm):
                        "    fsync(0);   // mutation: an ungated sink in the app\n"
                        "    TweakLog(\"[w0lf] cancel requested - the scan will stop at its next check\");")
 
+    # --- ANIM.1 / ANIM.3 ---------------------------------------------------
+    def mut_text_path_skips_the_caret_gate(text):
+        # A text path that sets the field and forgets the gate leaves the caret
+        # timer running under typed input - the ANIM.1 regression itself.
+        return _mutate(text, "    [self caretBlinkGate];   // ANIM.1: .text does not fire editing-changed\n", "", 1)
+
+    def mut_launch_boots_the_banner_directly(text):
+        return _mutate(text, "    [vc beginBootSequence];", "    term_bridge_boot();")
+
+    def mut_boot_pacing_is_a_literal(text):
+        return _mutate(text, "scheduledTimerWithTimeInterval:term_boot_tick()",
+                             "scheduledTimerWithTimeInterval:0.014")
+
+    def mut_art_line_rule_drifts(text):
+        # The host test counts non-empty lines; a >= here draws the trailing
+        # empty line too, so the sequence no longer matches its own budget.
+        return _mutate(text, "if ([line length] > 0) [self.bootQueue addObject:line];",
+                             "if ([line length] >= 0) [self.bootQueue addObject:line];")
+
+    def mut_art_stops_shipping(text):
+        return _mutate(text,
+                       "W0lfTerm_RESOURCE_FILES = $(W0LF_SRC)/scripts/wolf_art.txt",
+                       "# mutation: the art is no longer a shipped resource")
+
     mutations = [
         ("engine budget default back to 120", "engine", "kexploit/kexploit_opa334.m", mut_engine_budget_120),
         ("app budget default back to 120", "app", "term_settings.m", mut_app_budget_120),
@@ -825,6 +996,11 @@ def selftest(root, wolfterm):
         ("the throttle policy drops out of the engine archive", "engine", "scripts/build_libengine.sh", mut_policy_not_in_archive),
         ("the rate window is 0 ms (grants every line)", "engine", "utils/tweak_log_policy.h", mut_interval_zero),
         ("the app grows a second, ungated fsync sink", "app", "term_bridge.m", mut_app_adds_a_bare_fsync),
+        ("a text path stops re-gating the caret", "app", "TerminalViewController.m", mut_text_path_skips_the_caret_gate),
+        ("the launch path boots the banner directly", "app", "AppDelegate.m", mut_launch_boots_the_banner_directly),
+        ("the boot is paced by a literal, not by term_anim.c", "app", "TerminalViewController.m", mut_boot_pacing_is_a_literal),
+        ("the app counts art lines differently from the host test", "app", "TerminalViewController.m", mut_art_line_rule_drifts),
+        ("the art stops being a shipped resource", "app", "Makefile", mut_art_stops_shipping),
     ]
 
     tmp = tempfile.mkdtemp(prefix="bug345_lint_selftest_")
