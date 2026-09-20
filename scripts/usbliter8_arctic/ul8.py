@@ -21,9 +21,12 @@ if __name__ == "__main__":
         "command",
         nargs="?",
         default="menu",
-        help="Subcommand: menu, pwn, offsets, explain, health, deps",
+        help="Subcommand: menu, pwn, offsets, preflight, gaps, explain, health, deps, version",
     )
-    args = p.parse_args()
+    p.add_argument("profile", nargs="?", default="", help="profile for preflight")
+    # parse_known_args: flags meant for the wrapped tool (--json, --fetch, --record)
+    # must pass through instead of being rejected by this parser.
+    args, extra = p.parse_known_args()
 
     if args.dry_run:
         import cfw_builder
@@ -37,6 +40,13 @@ if __name__ == "__main__":
     elif args.command == "pwn":
         import pwn_utils
         pwn_utils.print_device_status()
+    elif args.command == "preflight":
+        import preflight
+        argv = ([args.profile] if args.profile else []) + extra
+        sys.exit(preflight.main(argv or None))
+    elif args.command == "gaps":
+        import profile_gen
+        profile_gen.cmd_gaps(json_out="--json" in extra)
     elif args.command == "offsets":
         import device_offsets
         for f in device_offsets.list_offset_files():

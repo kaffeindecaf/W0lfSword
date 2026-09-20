@@ -1,0 +1,34 @@
+# Canonical checkm8 offsets snapshot for the migrate cross-check.
+#
+# This is the in-repo fallback for `profile_gen.py migrate` (see
+# migrate._resolve_canonical_path): UL8_OFFSETS_YAML wins, then the user's
+# ~/.config/opencode/skills/master-router/offsets.yaml, then this file. Keeping
+# a copy here means the cross-check works in CI and on a fresh clone.
+#
+# Values verified 2026-09-20 against the upstream CFW scripts for the exact
+# build+board (wh1te4ever/34306 usbliter8-fun, iPhone12,3 / d421ap) and, for
+# the iBSS/iBEC/TXM sites, against the shipped components.
+constants:
+  checkm8:
+    ios_27_0b2:
+      ibss_image4_validate: "0x23DB0"
+      ibss_boot_args_ptr: "0x2AFBC"
+      ibss_boot_args_string: "0xD3850"
+      txm_queryModule0: "0x39CB0"
+      txm_queryModule1: "0x39E18"
+      txm_queryModule2: "0x39FAC"
+      txm_constraints_sig: "0x3F564"
+      txm_allowedBeforeSecure: "0x2BCB4"
+      mobileactivationd_should_hactivate: "0x2EBB14"
+    ios_27_0b3:
+      ibss_image4_validate: "0x23EFC"
+      ibss_boot_args_ptr: "0x2B0F4"
+      ibss_boot_args_string: "0xD3960"
+      # all three queryModule sites moved -0x8 in b3 (queryModule2 was the only
+      # one updated before the 2026-09-20 audit)
+      txm_queryModule0: "0x39CA8"
+      txm_queryModule1: "0x39E10"
+      txm_queryModule2: "0x39FA4"
+      txm_constraints_sig: "0x3F510"
+      txm_allowedBeforeSecure: "0x2BCB4"
+      mobileactivationd_should_hactivate: "0x2EBB14"

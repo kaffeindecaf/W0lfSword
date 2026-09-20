@@ -21,6 +21,7 @@ from colors import C, ok, err, warn, info, stage, section
 TOOLS_DIR = Path(__file__).parent / "tools"
 DRY_RUN = False
 VERBOSE = True
+FORCE = False          # --force: build despite failed preflight / pending entries
 
 
 def _tool(name: str) -> str:
@@ -259,7 +260,12 @@ def patch_kernel(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> b
                 val = entry["value"]
                 name = entry.get("name", "kernel")
                 try:
-                    data = _hex_to_bytes(val)
+                    try:
+                        data = _hex_to_bytes(val)
+                    except ValueError:
+                        # ASCII payloads (e.g. the kernel identity string
+                        # "/PATCHED_ARM64_T8030") are written verbatim
+                        data = val.encode() if isinstance(val, str) else bytes(val)
                     _patch_at(fp, off, data)
                     count += 1
                     if VERBOSE:
@@ -368,6 +374,56 @@ def patch_userland(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) ->
     return True
 
 
+def _profile_gate(offsets_path: Path) -> bool:
+    """Refuse to patch with an invalid, pending or unverified profile.
+
+    This is the C1.3 gate: the patch manifest is compared against the profile
+    and, when components are available, every site is byte-checked first
+    (preflight.py). Skipped only with --force.
+    """
+    from device_offsets import pending_entries, validate_offsets
+
+    passed, failed, errors = validate_offsets(offsets_path)
+    pend = pending_entries(offsets_path)
+
+    blocked = False
+    if failed:
+        print(err(f"profile has {failed} invalid entry/entries — refusing to patch"))
+        for e in errors[:8]:
+            print(f"    {C.RED}{e}{C.NC}")
+        blocked = True
+    if pend:
+        print(warn(f"profile has {pend} pending entry/entries (sentinel offsets) — "
+                   f"not flashable"))
+        blocked = True
+
+    try:
+        import preflight
+        report = preflight.run_preflight(offsets_path)
+    except Exception as exc:                                  # noqa: BLE001
+        print(info(f"preflight unavailable ({exc}) — offsets not verified"))
+        return not blocked or FORCE
+
+    if report.verdict == "blocked":
+        print(err("preflight blocked this build: the profile does not match the component"))
+        for site in report.sites:
+            if site.severity == "fail":
+                print(f"    {C.RED}{site.section}.{site.entry}: {site.detail}{C.NC}")
+        blocked = True
+    elif report.components:
+        print(ok(f"preflight: {report.count('match', 'plausible')} site(s) checked against "
+                 f"{len(report.components)} component(s), "
+                 f"{report.count('match')} matched recorded evidence"))
+    else:
+        print(warn("preflight: no components found — pass --components/--fetch to verify "
+                   "offsets before flashing"))
+
+    if blocked and not FORCE:
+        print(info("fix the profile or re-run with --force to build anyway"))
+        return False
+    return True
+
+
 def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
     """Full CFW build pipeline."""
     if DRY_RUN:
@@ -386,6 +442,9 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
 
     print(section(f"Target: {device} ({model}) — iOS {ios}"))
     print()
+
+    if not _profile_gate(offsets_path):
+        return False
 
     if not ipsw_path.exists():
         print(err(f"IPSW not found: {ipsw_path}"))
@@ -458,6 +517,10 @@ if __name__ == "__main__":
     import sys
     args = sys.argv[1:]
 
+    if "--force" in args:
+        FORCE = True
+        args = [a for a in args if a != "--force"]
+
     if "--dry-run" in args or "--check" in args or "--check-only" in args:
         DRY_RUN = True
         args = [a for a in args if a not in ("--dry-run", "--check", "--check-only")]
@@ -470,6 +533,7 @@ if __name__ == "__main__":
         print(f"  Usage: {C.FROST}python3 cfw_builder.py <ipsw_path> <offsets.yaml> [--dry-run|--check-only] [--quiet]{C.NC}")
         print(f"  Flags: --check-only    Validate patches without extracting IPSW")
         print(f"         --quiet         Suppress per-patch output")
+        print(f"         --force         Build even when preflight fails (NOT recommended)")
         sys.exit(1)
 
     ipsw = Path(args[0])

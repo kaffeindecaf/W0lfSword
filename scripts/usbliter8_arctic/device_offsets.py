@@ -57,7 +57,12 @@ def _has_offset_value(d: dict) -> bool:
 
 
 def _extract_section_offsets(data: dict, section: str) -> list[dict[str, Any]]:
-    """Walk a patches section (supports dict, list, and nested dicts like daemons)."""
+    """Walk a patches section (supports dict, list, and nested dicts like daemons).
+
+    Entries marked `pending: true` are excluded — they are placeholders whose
+    offsets have not been discovered for this device yet, so they must not
+    count as valid or invalid.
+    """
     items = []
     patches_data = data.get("patches", {})
     if not isinstance(patches_data, dict):
@@ -66,21 +71,21 @@ def _extract_section_offsets(data: dict, section: str) -> list[dict[str, Any]]:
 
     if isinstance(section_data, list):
         for entry in section_data:
-            if _has_offset_value(entry):
+            if _has_offset_value(entry) and not entry.get("pending"):
                 items.append({"name": entry.get("name", f"{section}[]"), "offset": entry["offset"], "value": entry["value"]})
 
     elif isinstance(section_data, dict):
         for name, entry in section_data.items():
-            if _has_offset_value(entry):
+            if _has_offset_value(entry) and not entry.get("pending"):
                 items.append({"name": f"{section}.{name}", "offset": entry["offset"], "value": entry["value"]})
-            elif isinstance(entry, dict):
+            elif isinstance(entry, dict) and not entry.get("pending"):
                 # walk one level deeper (e.g. daemons.coreauthd.anti_sep_crash)
                 for sub_name, sub_entry in entry.items():
-                    if _has_offset_value(sub_entry):
+                    if _has_offset_value(sub_entry) and not sub_entry.get("pending"):
                         items.append({"name": f"{section}.{name}.{sub_name}", "offset": sub_entry["offset"], "value": sub_entry["value"]})
-                    elif isinstance(sub_entry, dict):
+                    elif isinstance(sub_entry, dict) and not sub_entry.get("pending"):
                         for sub2_name, sub2_entry in sub_entry.items():
-                            if _has_offset_value(sub2_entry):
+                            if _has_offset_value(sub2_entry) and not sub2_entry.get("pending"):
                                 items.append({"name": f"{section}.{name}.{sub_name}.{sub2_name}", "offset": sub2_entry["offset"], "value": sub2_entry["value"]})
 
     return items
@@ -137,20 +142,72 @@ def validate_offsets(filepath: Path) -> tuple[int, int, list[str]]:
     kernel_patches = patches_data.get("kernel", []) if isinstance(patches_data, dict) else []
     if isinstance(kernel_patches, list):
         for entry in kernel_patches:
-            if isinstance(entry, dict):
-                off = entry.get("offset", SENTINEL)
-                val = entry.get("value", "")
-                name = entry.get("name", "kernel[]")
-                if not _is_valid_offset(off):
-                    failed += 1
-                    errors.append(f"[{model}/{ios}] {name}: offset {_fmt_offset(off)} is not valid")
-                elif not _is_valid_patch_value(val):
-                    failed += 1
-                    errors.append(f"[{model}/{ios}] {name}: patch value '{val}' is not valid")
-                else:
-                    passed += 1
+            if not isinstance(entry, dict) or entry.get("pending"):
+                continue
+            off = entry.get("offset", SENTINEL)
+            val = entry.get("value", "")
+            name = entry.get("name", "kernel[]")
+            if not _is_valid_offset(off):
+                failed += 1
+                errors.append(f"[{model}/{ios}] {name}: offset {_fmt_offset(off)} is not valid")
+            elif not _is_valid_patch_value(val):
+                failed += 1
+                errors.append(f"[{model}/{ios}] {name}: patch value '{val}' is not valid")
+            else:
+                passed += 1
 
     return passed, failed, errors
+
+
+class _HexIntDumper(yaml.SafeDumper):
+    """SafeDumper that renders ints as 0x-hex (offsets are the domain convention;
+    0x-prefixed scalars still round-trip as ints on load)."""
+
+
+def _hex_int_representer(dumper: yaml.SafeDumper, value: int):
+    if isinstance(value, bool):
+        return dumper.represent_bool(value)
+    return dumper.represent_scalar("tag:yaml.org,2002:int", hex(value))
+
+
+_HexIntDumper.add_representer(int, _hex_int_representer)
+
+
+def dump_profile_yaml(profile: dict, path: Path) -> None:
+    """Write a profile YAML with hex offsets, preserving key order."""
+    with open(path, "w") as f:
+        yaml.dump(profile, f, Dumper=_HexIntDumper,
+                  default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def pending_entries(filepath: Path) -> int:
+    """Count entries marked `pending: true` (offsets not discovered for this device).
+
+    Pending profiles must not be flashed: the entry offsets are sentinels.
+    """
+    try:
+        with open(filepath) as f:
+            data = yaml.safe_load(f)
+    except (yaml.YAMLError, OSError):
+        return 0
+    if not isinstance(data, dict):
+        return 0
+    patches_data = data.get("patches", {})
+    if not isinstance(patches_data, dict):
+        return 0
+    count = 0
+    for section, section_data in patches_data.items():
+        if isinstance(section_data, list):
+            count += sum(1 for e in section_data if isinstance(e, dict) and e.get("pending"))
+        elif isinstance(section_data, dict):
+            for entry in section_data.values():
+                if isinstance(entry, dict) and entry.get("pending"):
+                    count += 1
+                elif isinstance(entry, dict):
+                    for sub in entry.values():
+                        if isinstance(sub, dict) and sub.get("pending"):
+                            count += 1
+    return count
 
 
 def load_offset_file(filepath: Path) -> dict[str, Any] | None:
@@ -171,10 +228,13 @@ def list_offset_files() -> list[dict[str, Any]]:
         if f.name in ("sources.yaml", "template.yaml"):
             continue
         passed, failed, _ = validate_offsets(f)
+        pending = pending_entries(f)
         data: dict[str, Any] = {}
         if failed == 0:
             with open(f) as fh:
                 data = yaml.safe_load(fh) or {}
+        status = "ready" if failed == 0 and pending == 0 else (
+            "pending" if failed == 0 else "incomplete")
         results.append({
             "file": f.name,
             "model": data.get("model", "?"),
@@ -183,7 +243,8 @@ def list_offset_files() -> list[dict[str, Any]]:
             "soc": data.get("soc", "?"),
             "passed": passed,
             "failed": failed,
-            "status": "ready" if failed == 0 else "incomplete",
+            "pending": pending,
+            "status": status,
         })
     return results
 
@@ -224,6 +285,13 @@ def set_active_device(filepath: Path) -> bool:
             print(f"    {C.RED}{e}{C.NC}")
         return False
 
+    pending = pending_entries(filepath)
+    if pending > 0:
+        print(warn(f"Offset file has {pending} pending offset(s) — not ready to flash:"))
+        print(f"    {C.DIM}Pending entries carry sentinel offsets for this device.{C.NC}")
+        print(f"    {C.DIM}Discover them with: python3 profile_gen.py propagate <base> <model> --comp-dir DIR{C.NC}")
+        return False
+
     config_dir = Path(__file__).parent
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "active_device.yaml"
@@ -262,10 +330,14 @@ if __name__ == "__main__":
         sys.exit(0)
 
     cmd = sys.argv[1]
+    as_json = "--json" in sys.argv
 
     if cmd == "list":
         files = list_offset_files()
-        if not files:
+        if as_json:
+            import json as _json
+            print(_json.dumps({"profiles": files}, indent=2))
+        elif not files:
             print(info("No offset files found"))
         else:
             print(section("Offset Files"))
@@ -282,7 +354,11 @@ if __name__ == "__main__":
             print(err(f"File not found: {target}"))
             sys.exit(1)
         passed, failed, errors = validate_offsets(target)
-        if failed == 0:
+        if as_json:
+            import json as _json
+            print(_json.dumps({"file": str(target), "passed": passed, "failed": failed,
+                               "errors": errors, "pending": pending_entries(target)}, indent=2))
+        elif failed == 0:
             print(ok(f"All {passed} patches valid"))
         else:
             print(err(f"{passed} passed, {failed} failed:"))

@@ -27,8 +27,20 @@ from fingerprint import MatchResult, migrate_site
 SCRIPT_DIR = Path(__file__).parent
 OFFSETS_DIR = SCRIPT_DIR / "offsets"
 
-CANONICAL_PATH = Path(os.environ.get("UL8_OFFSETS_YAML",
-                                     Path.home() / ".config/opencode/skills/master-router/offsets.yaml"))
+def _resolve_canonical_path() -> Path:
+    """Canonical checkm8 DB: env override, then the user's dotfiles copy, then
+    the in-repo snapshot (offsets/canonical.yaml) so the cross-check works
+    without any local dotfile layout."""
+    env = os.environ.get("UL8_OFFSETS_YAML")
+    if env:
+        return Path(env)
+    user_copy = Path.home() / ".config/opencode/skills/master-router/offsets.yaml"
+    if user_copy.exists():
+        return user_copy
+    return SCRIPT_DIR / "offsets" / "canonical.yaml"
+
+
+CANONICAL_PATH = _resolve_canonical_path()
 
 # canonical checkm8 block key -> (profile section, entry name)
 CHECKM8_KEY_MAP = {
@@ -370,8 +382,24 @@ def check_canonical(base_profile: dict, target_profile: dict,
 def format_report(base_path: Path, target_path: Path,
                   all_results: dict[str, list[MatchResult]],
                   conflicts: list[str] | None = None) -> str:
+    high = sum(1 for results in all_results.values() for r in results
+               if r.target_offset is not None and r.confidence >= 0.90)
+    total = sum(len(results) for results in all_results.values())
+    below = total - high
+    failed = sum(1 for results in all_results.values() for r in results
+                 if r.target_offset is None)
+    n_conflicts = len(conflicts or [])
+    if below or failed or n_conflicts:
+        verdict = (f"REVIEW REQUIRED: {below} entr{'y' if below == 1 else 'ies'} below 0.90"
+                   f", {failed} unresolved, {n_conflicts} canonical conflict(s)")
+    else:
+        verdict = (f"READY: {high}/{total} entries at HIGH confidence, "
+                   f"0 unresolved, 0 canonical conflicts — safe to write with --auto")
+
     lines = [
         "# Offset Migration Report",
+        "",
+        f"**VERDICT: {verdict}**",
         "",
         f"Base:   `{base_path}`",
         f"Target: `{target_path}`",
@@ -415,7 +443,8 @@ def format_report(base_path: Path, target_path: Path,
 
 def run_migration(base_path: Path, target_path: Path, comp_dir: Path | None = None,
                   fetch: bool = False, auto: bool = False,
-                  report_path: Path | None = None) -> dict[str, list[MatchResult]]:
+                  report_path: Path | None = None,
+                  min_confidence: float = 0.90) -> dict[str, list[MatchResult]]:
     base_profile = _load_yaml(base_path)
     target_profile = _load_yaml(target_path) if target_path.exists() else {
         "patches": {}, "device": base_profile.get("device"),
@@ -464,11 +493,12 @@ def run_migration(base_path: Path, target_path: Path, comp_dir: Path | None = No
         print(report)
 
     if auto and target_path.exists():
-        apply_offsets(target_path, all_results, base_profile)
+        apply_offsets(target_path, all_results, base_profile, min_confidence=min_confidence)
     elif not auto and target_path.exists() and all_results:
         ans = input(prompt("Apply migrated offsets to the target profile? [y/N]: ") or "n")
         if ans.lower() in ("y", "yes"):
-            apply_offsets(target_path, all_results, base_profile)
+            apply_offsets(target_path, all_results, base_profile,
+                          min_confidence=min_confidence)
 
     return all_results
 
@@ -504,7 +534,7 @@ def _find_entry(entries, name: str) -> dict | None:
 
 
 def apply_offsets(target_path: Path, all_results: dict[str, list[MatchResult]],
-                  base_profile: dict | None = None):
+                  base_profile: dict | None = None, min_confidence: float = 0.90):
     """Write migrated offsets into the target profile (with metadata).
 
     Upserts: entries missing from the target profile (e.g. a fresh template
@@ -514,6 +544,7 @@ def apply_offsets(target_path: Path, all_results: dict[str, list[MatchResult]],
     profile = _load_yaml(target_path)
     patches = profile.setdefault("patches", {})
     base_sections = (base_profile or {}).get("patches", {})
+    skipped_low: list[str] = []
 
     for section, results in all_results.items():
         entries = patches.get(section)
@@ -525,6 +556,9 @@ def apply_offsets(target_path: Path, all_results: dict[str, list[MatchResult]],
 
         for r in results:
             if r.target_offset is None:
+                continue
+            if r.confidence < min_confidence:
+                skipped_low.append(f"{r.name} (conf {r.confidence:.2f})")
                 continue
             entry_name = r.name.split(".", 1)[-1]
             entry = _find_entry(entries, entry_name)
@@ -542,12 +576,16 @@ def apply_offsets(target_path: Path, all_results: dict[str, list[MatchResult]],
                     entries[entry_name] = entry
             _update_entry(entry, r)
 
-    with open(target_path, "w") as f:
-        yaml.dump(profile, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    from device_offsets import dump_profile_yaml, validate_offsets
+    if skipped_low:
+        print(warn(f"{len(skipped_low)} entry/entries below the {min_confidence:.2f} "
+                   f"confidence floor were NOT written:"))
+        for name in skipped_low[:10]:
+            print(f"    {C.AMB}{name}{C.NC}")
+        print(f"  {C.DIM}review them and write manually, or migrate with --force-low "
+              f"to accept the risk{C.NC}")
+    dump_profile_yaml(profile, target_path)
     print(ok(f"Offsets written to {target_path}"))
-
-    # 2.10: post-write validation
-    from device_offsets import validate_offsets
     passed, failed, errors = validate_offsets(target_path)
     if failed == 0:
         print(ok(f"Post-write validation: {passed} patches valid"))
@@ -567,6 +605,8 @@ def cli_main(args: list[str]):
     p.add_argument("--fetch", action="store_true", help="Run work-dir get_fw.py to fetch components")
     p.add_argument("--auto", action="store_true", help="Write migrated offsets into the target profile")
     p.add_argument("--report", type=Path, default=None, help="Write report to file")
+    p.add_argument("--force-low", dest="force_low", action="store_true",
+                   help="write entries below the 0.90 confidence floor too (NOT recommended)")
     a = p.parse_args(args)
 
     base_path = Path(a.base)
@@ -593,8 +633,12 @@ def cli_main(args: list[str]):
                 yaml.dump(profile, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
             print(ok(f"Created target skeleton: {target_path.name}"))
 
+    if a.force_low:
+        print(warn("--force-low: writing entries below 0.90 — a wrong offset rated HIGH "
+                   "is a brick risk, review the report first"))
     run_migration(base_path, target_path, comp_dir=a.comp_dir, fetch=a.fetch,
-                  auto=a.auto, report_path=a.report)
+                  auto=a.auto, report_path=a.report,
+                  min_confidence=0.0 if a.force_low else 0.90)
 
 
 if __name__ == "__main__":

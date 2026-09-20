@@ -8,9 +8,9 @@ EXPLOIT_METHOD="auto"
 # ...Filza000), so a profile may pin one instead of relying on detection.
 PROFILE_TARGET=""
 # ╔══════════════════════════════════════════════════════════════╗
-# ║                      W0lfSword v$VERSION                      ║
-# ║  iOS Kernel Exploit Toolkit  -  Interactive Exploit Menu       ║
-# ║  Made by kaffeindecaf  -  github.com/kaffeindecaf             ║
+# ║                      W0lfSword v$VERSION                     ║
+# ║  iOS Kernel Exploit Toolkit  -  Interactive Exploit Menu     ║
+# ║  Made by kaffeindecaf  -  github.com/kaffeindecaf            ║
 # ╚══════════════════════════════════════════════════════════════╝
 #
 # Credits:
@@ -4784,13 +4784,15 @@ run_usbliter8() {
         hint "Runs on Linux (tested); macOS works if pyusb + tools install cleanly."
         return 1
     fi
-    disclaimer <<EOF
+    if ! $JSON_MODE; then
+        disclaimer <<EOF
 In plain English: usbliter8-arctic is a TETHERED jailbreak toolkit for
 A12/A13 devices (iPhone XS  -  iPhone 11 era). It uses an RP2350 board to
 exploit SecureROM, enters PWN DFU, and boots custom firmware. The device
 won't boot on its own afterwards  -  the board must be reapplied every cold
 boot. Flashing CFW erases all data. Guided setup: run option 1 in the TUI.
 EOF
+    fi
     python3 "$ul8" "$@"
 }
 
@@ -7420,6 +7422,18 @@ main() {
         local def_ip; def_ip=$(python3 -c "import json; print(json.load(open('$DATA_DIR/profiles/default.json')).get('device_ip',''))" 2>/dev/null || echo "")
         [ -n "$def_ip" ] && echo "$def_ip" > "$DATA_DIR/active_device"
         echo -e "  ${C_DIM}Auto-loaded profile 'default'${NC}"
+    fi
+
+    # usbliter8 profile verification and coverage never open USB, so those
+    # subcommands run without root; every other ul8 command still goes through
+    # the root gate in its dispatch branch below.
+    if [ "$cmd" = "usbliter8" ] || [ "$cmd" = "ul8" ]; then
+        UL8_READONLY=" preflight verify gaps coverage offsets audit explain version help -h --help "
+        if [ "$EUID" -ne 0 ] && [[ "$UL8_READONLY" == *" ${args[0]:-} "* ]]; then
+            shift
+            run_usbliter8 "$@"
+            return $?
+        fi
     fi
 
     # The case list mirrors W0LF_COMMANDS: every registry name + alias is a

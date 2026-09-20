@@ -1,0 +1,205 @@
+device: iPhone SE (2nd gen)
+model: iPhone12,8
+ios_version: 27.0b2
+build: 24A5370h
+soc: A13
+board: d79ap
+apticket: t8030
+verification: pending
+propagated_from: iPhone12,3_27.0b2.yaml
+propagated:
+  base: iPhone 11 Pro (iPhone12,3)
+  soc: A13
+  build: 24A5370h
+  shared_sections:
+  - kernel
+  - daemons
+  - restoreramdisk
+  - devicetree
+  - userland
+  pending_sections:
+  - ibss
+  - ibec
+  - txm
+  note: kernel/daemons/restoreramdisk offsets are SoC-shared for this build (kernelcache.release.<soc>);
+    iBSS/iBEC/TXM are device-specific bootloader binaries — discover them before flashing.
+patches:
+  kernel:
+  - name: USB Restricted Mode bypass
+    offset: 0x2894b68
+    va: 0xfffffff009898b68
+    value: 200080d2c0035fd6
+    desc: Patch isDeviceInRestoreMode → mov x0,#0; ret
+  - name: Sandbox file_check_mmap
+    offset: 0x2f774e0
+    value: 000080d2c0035fd6
+    desc: Allow /var/jb code execution
+  - name: Sandbox mount_check_mount
+    offset: 0x2f75640
+    value: 000080d2c0035fd6
+  - name: Sandbox remount
+    offset: 0x2f75474
+    value: 000080d2c0035fd6
+  - name: Sandbox umount
+    offset: 0x2f75110
+    value: 000080d2c0035fd6
+  - name: Sandbox vnode_check_rename
+    offset: 0x2f7019c
+    value: 000080d2c0035fd6
+  - name: AMFI trust everything
+    offset: 0x1f1ebe0
+    value: 200080d2c0035fd6
+    desc: Patch AMFIIsCDHashInTrustCache → mov x0,#1; ret
+  - name: APFS mount SSV bypass
+    offset: 0x303f49c
+    value: 1f2003d5
+    desc: nop _apfs_vfsop_mount seal check
+  - name: APFS seal_is_broken bypass
+    offset: 0x2fae32c
+    value: 1f2003d5
+    desc: nop _authapfs_seal_is_broken
+  - name: BSD init rootvp bypass
+    offset: 0x36c1f48
+    value: 1f2003d5
+    desc: nop _bsd_init rootvp check
+  - name: Proc check launch constraints
+    offset: 0x1f23808
+    value: 000080d2c0035fd6
+    desc: mov x0,#0; ret — disable launchd signing checks
+  - name: PE i_can_has_debugger
+    offset: 0x3a07368
+    value: 200080d2c0035fd6
+    desc: mov x0,#1; ret
+  - name: Post-validation bypass
+    offset: 0x1f2b368
+    value: 1f00006b
+  - name: Check dyld policy internal
+    offset: 0x1f2b8c8
+    value: '20008052'
+    desc: 'mov w0, #1'
+  - name: SEP panic check bypass
+    offset: 0x2170af4
+    value: 000080d2c0035fd6
+  - name: SEP didTimeout bypass
+    offset: 0x216d380
+    value: 000080d2c0035fd6
+  - name: AppleSEPKeyStore bypass
+    offset: 0x2126ce0
+    value: 000080d2c0035fd6
+  - name: Unencrypted data volume panic bypass
+    offset: 0x30408ac
+    value: 1f2003d5
+  daemons:
+    coreauthd:
+      anti_sep_crash:
+        offset: 0x95c0
+        value: 1f2003d5
+    ctkd:
+      anti_sep_crash_ret0:
+        offset: 0x1b38
+        value: 000080d2
+      anti_sep_crash_ret:
+        offset: 0x1b3c
+        value: c0035fd6
+    mobileactivationd:
+      should_hactivate:
+        offset: 0x2ebb14
+        value: '20008052'
+      get_activation_state_nop1:
+        offset: 0x327cb0
+        value: 1f2003d5
+      get_activation_state_adrp:
+        offset: 0x327d10
+        value: 000000b0
+      get_activation_state_add:
+        offset: 0x327d14
+        value: 00110091
+      get_activation_state_nop2:
+        offset: 0x327d18
+        value: 1f2003d5
+  restoreramdisk:
+    asr_sig_bypass:
+      offset: 0x24d34
+      value: 1f2003d5
+    fdr_force_succeed:
+      offset: 0x7e53c
+      value: 000080d2
+  devicetree:
+    remove_content_protect: true
+    add_no_effaceable_storage: true
+    add_boot_ios_diagnostics: true
+    ephemeral_storage: true
+  userland:
+    disable_screentime: true
+    disable_setup: true
+  ibss:
+    image4_validate_nop:
+      offset: 0xdeadbeef
+      value: 1f2003d5
+      pending: true
+    image4_validate_ret0:
+      offset: 0xdeadbeef
+      value: 000080d2
+      pending: true
+    boot_args_adrp:
+      offset: 0xdeadbeef
+      value: 420005b0
+      pending: true
+    boot_args_add:
+      offset: 0xdeadbeef
+      value: '42214091'
+      pending: true
+    boot_args_string:
+      offset: 0xdeadbeef
+      value: -v wdt=-1 rd=md0 -restore
+      pending: true
+  ibec:
+    keep_nonce_b:
+      offset: 0xdeadbeef
+      value: '28000014'
+      pending: true
+    image4_validate_nop:
+      offset: 0xdeadbeef
+      value: 1f2003d5
+      pending: true
+    image4_validate_ret0:
+      offset: 0xdeadbeef
+      value: 000080d2
+      pending: true
+    boot_args_adrp:
+      offset: 0xdeadbeef
+      value: 420005b0
+      pending: true
+    boot_args_add:
+      offset: 0xdeadbeef
+      value: '42214091'
+      pending: true
+    boot_args_string:
+      offset: 0xdeadbeef
+      value: -v wdt=-1 rd=md0 -restore
+      pending: true
+  txm:
+    query_module2:
+      offset: 0xdeadbeef
+      value: 000080d2
+      pending: true
+    query_module0:
+      offset: 0xdeadbeef
+      value: 000080d2
+      pending: true
+    query_module1:
+      offset: 0xdeadbeef
+      value: 000080d2
+      pending: true
+    validate_constraints_sig_nop1:
+      offset: 0xdeadbeef
+      value: 1f2003d5
+      pending: true
+    validate_constraints_sig_nop2:
+      offset: 0xdeadbeef
+      value: 1f2003d5
+      pending: true
+    allowed_before_secure_channel:
+      offset: 0xdeadbeef
+      value: 200080d2c0035fd6
+      pending: true

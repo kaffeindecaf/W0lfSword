@@ -4,4 +4,6 @@ __pycache__/
 session.log
 config.yaml
 firmware/
-
+research/
+checklist.md
+.usbliter8/

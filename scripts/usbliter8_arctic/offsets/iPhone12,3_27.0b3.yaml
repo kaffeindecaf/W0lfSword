@@ -19,7 +19,8 @@ patches:
     boot_args_string:      { offset: 0xD3960,  value: "-v wdt=-1 rd=md0 -restore" }
 
   ibec:
-    keep_nonce_b:          { offset: 0x36BD0,  value: "28000014" }
+    keep_nonce_b:          { offset: 0x36BD0,  value: "0a000014" }   # b #0x28 — original site is `tbnz w8,#1,#+0x28`; 0x14000028 (b #0xA0)
+    #                                                  #  landed in unrelated code
     image4_validate_nop:   { offset: 0x23EFC,  value: "1f2003d5" }
     image4_validate_ret0:  { offset: 0x23F00,  value: "000080d2" }
     boot_args_adrp:        { offset: 0x2B0F4,  value: "420005b0" }
@@ -54,7 +55,8 @@ patches:
 
     - name: "AMFI trust everything"
       offset: 0x1F1CCF8
-      value: "200080d2c0035fd6"
+      value: "5f2403d5200080d2430000b4600000f9c0035fd6"
+      desc: "BTI c; mov x0,#1; cbz x3,#8; str x0,[x3]; ret (20 B, upstream sequence)"
 
     - name: "APFS mount SSV bypass"
       offset: 0x303FCDC
@@ -70,19 +72,27 @@ patches:
 
     - name: "Proc check launch constraints"
       offset: 0x1F21920
-      value: "000080d2c0035fd6"
+      value: "00008052c0035fd6"
+      desc: "mov w0,#0; ret — disable launchd signing checks"
 
     - name: "PE i_can_has_debugger"
       offset: 0x3A05230
       value: "200080d2c0035fd6"
 
     - name: "Post-validation bypass"
-      offset: 0x1F2B368
+      offset: 0x1F29480
       value: "1f00006b"
+      desc: "corrected from upstream work-27.0b3/make_cfw.py (b2 value 0x1F2B368 was carried over)"
 
     - name: "Check dyld policy internal"
-      offset: 0x1F2B8C8
+      offset: 0x1F299E0
       value: "20008052"
+      desc: "mov w0, #1 — corrected from upstream work-27.0b3/make_cfw.py (b2 value was carried over)"
+
+    - name: "Check dyld policy internal (site 2)"
+      offset: 0x1F299EC
+      value: "20008052"
+      desc: "mov w0, #1 — upstream patches two return paths"
 
     - name: "SEP panic check bypass"
       offset: 0x216FDE4
@@ -95,6 +105,15 @@ patches:
     - name: "AppleSEPKeyStore bypass"
       offset: 0x2126CE0
       value: "000080d2c0035fd6"
+
+    - name: "Kernel identity string 1"
+      offset: 0x3EEE4
+      value: "/PATCHED_ARM64_T8030"
+      desc: "rename /RELEASE_ARM64_T8030 → /PATCHED_ARM64_T8030 (upstream patches both sites)"
+
+    - name: "Kernel identity string 2"
+      offset: 0x3EF50
+      value: "/PATCHED_ARM64_T8030"
 
     - name: "Unencrypted data volume panic bypass"
       offset: 0x30410EC
@@ -112,8 +131,8 @@ patches:
 
   txm:
     query_module2:                  { offset: 0x39FA4,  value: "000080d2" }
-    query_module0:                  { offset: 0x39CB0,  value: "000080d2" }
-    query_module1:                  { offset: 0x39E18,  value: "000080d2" }
+    query_module0:                  { offset: 0x39CA8,  value: "000080d2" }   # corrected from upstream work-27.0b3/make_cfw.py
+    query_module1:                  { offset: 0x39E10,  value: "000080d2" }   # corrected from upstream work-27.0b3/make_cfw.py
     validate_constraints_sig_nop1:  { offset: 0x3F510,  value: "1f2003d5" }
     validate_constraints_sig_nop2:  { offset: 0x3F518,  value: "1f2003d5" }
     allowed_before_secure_channel:  { offset: 0x2BCB4,  value: "200080d2c0035fd6" }

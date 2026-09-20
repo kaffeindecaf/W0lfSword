@@ -4,7 +4,7 @@
 
 device: "iPhone 11 Pro"
 model: "iPhone12,3"
-ios_version: "27.0"
+ios_version: "27.0b2"
 build: "24A5370h"
 soc: "A13"
 board: "d421ap"
@@ -19,7 +19,8 @@ patches:
     boot_args_string:      { offset: 0xD3850,  value: "-v wdt=-1 rd=md0 -restore" }
 
   ibec:
-    keep_nonce_b:          { offset: 0x36BD0,  value: "28000014" }          # b #0x28
+    keep_nonce_b:          { offset: 0x36BD0,  value: "0a000014" }   # b #0x28 — original site is `tbnz w8,#1,#+0x28`; 0x14000028 (b #0xA0)
+    #                                                  #  landed in unrelated code          # b #0x28
     image4_validate_nop:   { offset: 0x23DB0,  value: "1f2003d5" }          # nop
     image4_validate_ret0:  { offset: 0x23DB4,  value: "000080d2" }          # mov x0, #0
     boot_args_adrp:        { offset: 0x2AFBC,  value: "420005b0" }          # adrp x2, #0xa9000
@@ -56,8 +57,8 @@ patches:
 
     - name: "AMFI trust everything"
       offset: 0x1F1EBE0
-      value: "200080d2c0035fd6"
-      desc: "Patch AMFIIsCDHashInTrustCache → mov x0,#1; ret"
+      value: "5f2403d5200080d2430000b4600000f9c0035fd6"
+      desc: "Patch AMFIIsCDHashInTrustCache → BTI c; mov x0,#1; cbz x3,#8; str x0,[x3]; ret (20 B, upstream sequence)"
 
     - name: "APFS mount SSV bypass"
       offset: 0x303F49C
@@ -76,8 +77,8 @@ patches:
 
     - name: "Proc check launch constraints"
       offset: 0x1F23808
-      value: "000080d2c0035fd6"
-      desc: "mov x0,#0; ret — disable launchd signing checks"
+      value: "00008052c0035fd6"
+      desc: "mov w0,#0; ret — disable launchd signing checks"
 
     - name: "PE i_can_has_debugger"
       offset: 0x3A07368
@@ -93,6 +94,11 @@ patches:
       value: "20008052"
       desc: "mov w0, #1"
 
+    - name: "Check dyld policy internal (site 2)"
+      offset: 0x1F2B8D4
+      value: "20008052"
+      desc: "mov w0, #1 — upstream make_cfw.py patches two return paths"
+
     - name: "SEP panic check bypass"
       offset: 0x2170AF4
       value: "000080d2c0035fd6"
@@ -104,6 +110,15 @@ patches:
     - name: "AppleSEPKeyStore bypass"
       offset: 0x2126CE0
       value: "000080d2c0035fd6"
+
+    - name: "Kernel identity string 1"
+      offset: 0x3EDB3
+      value: "/PATCHED_ARM64_T8030"
+      desc: "rename /RELEASE_ARM64_T8030 → /PATCHED_ARM64_T8030 (upstream patches both sites)"
+
+    - name: "Kernel identity string 2"
+      offset: 0x3EE1E
+      value: "/PATCHED_ARM64_T8030"
 
     - name: "Unencrypted data volume panic bypass"
       offset: 0x30408AC

@@ -1,0 +1,264 @@
+device: iPhone 11
+model: iPhone12,1
+ios_version: 27.0b4
+build: 24A5390f
+soc: A13
+board: n104ap
+apticket: t8030
+verification: imported
+sources:
+  upstream: Xplo8E/Liter8
+  fixture_path: fixtures/24A5390f/n104ap
+  build: 24A5390f
+  board: n104ap
+  component_sha256:
+    asr: 8d0bb0cf174b4739045a85b14f5835598182f64cf3b67530bba8a4ac3d8a226f
+    coreauthd: 771030de3f404e212e3f17cbea3004ccf209d95378012de7ee595c3219ef9084
+    ctkd: 94bc04c3de081ed4325b21e8965d8eca490d6286dacb54856e5f2de6c15cefc1
+    iBEC diagnostic: 6cf70de60debc66dbd13b135935359254965a4e1d4eabb996ce59265f552ebf5
+    iBSS: 6cf70de60debc66dbd13b135935359254965a4e1d4eabb996ce59265f552ebf5
+    iBSS only: 6cf70de60debc66dbd13b135935359254965a4e1d4eabb996ce59265f552ebf5
+    kernelcache.release.iphone12b: 023cd1efa2e9bbb04e73dde6fa19c6f85eb58954848debff2931f92178347163
+    mobileactivationd: 1d7eab7f4e936e7c32f86803fdbb1e00be52a123e81498ff3d0dd304a2c81c14
+    restored_external: f54aaf9e75484177201281fd746d24f9bb4b057661e2fda77a7f051266e410f4
+    TXM: 75a6b02c1a2d0f43bfe85942b5c205e2e9afe692231de0d361dbc85d4fc63cf9
+  imported_entries: '41'
+patches:
+  ibss:
+    image4_validate_nop:
+      offset: 0x23728
+      value: 1f2003d5
+      source: liter8:ibss-validate-asn1:ibss.validate-asn1.branch
+    image4_validate_ret0:
+      offset: 0x2372c
+      value: 000080d2
+      source: liter8:ibss-validate-asn1:ibss.validate-asn1.result
+    boot_args_adrp:
+      offset: 0x2aa28
+      value: 220500d0
+      source: liter8:ibss-ramdisk:ibss.boot-args.adrp
+    boot_args_add:
+      offset: 0x2aa2c
+      value: 42c03891
+      source: liter8:ibss-ramdisk:ibss.boot-args.add
+    boot_args_string:
+      offset: 0xd0e30
+      value: -v wdt=-1 rd=md0 -restore
+      source: liter8:ibss-ramdisk:ibss.boot-args.string
+  ibec:
+    keep_nonce_b:
+      offset: 0xdeadbeef
+      value: '28000014'
+      pending: true
+    image4_validate_nop:
+      offset: 0xdeadbeef
+      value: 1f2003d5
+      pending: true
+    image4_validate_ret0:
+      offset: 0xdeadbeef
+      value: 000080d2
+      pending: true
+    boot_args_adrp:
+      offset: 0xdeadbeef
+      value: 420005b0
+      pending: true
+    boot_args_add:
+      offset: 0xdeadbeef
+      value: 422d4091
+      pending: true
+    boot_args_string:
+      offset: 0xdeadbeef
+      value: -v wdt=-1 rd=md0 -restore
+      pending: true
+  kernel:
+  - name: USB Restricted Mode bypass
+    offset: 0x28a5bdc
+    value: 200080d2c0035fd6
+    source: liter8:kernel-boot-policy:kernel.usb.restore-mode-result+kernel.usb.restore-mode-return
+    original: 7f2303d5ff4301d1
+  - name: Sandbox file_check_mmap
+    offset: 0x2f89fd8
+    value: 000080d2c0035fd6
+    source: liter8:kernel-sandbox:kernel.sandbox.file-check-mmap.result+kernel.sandbox.file-check-mmap.return
+    original: 7f2303d5fc6fbda9
+  - name: Sandbox mount_check_mount
+    offset: 0x2f8810c
+    value: 000080d2c0035fd6
+    source: liter8:kernel-sandbox:kernel.sandbox.mount-check-mount.result+kernel.sandbox.mount-check-mount.return
+    original: 7f2303d5fc6fbda9
+  - name: Sandbox remount
+    offset: 0x2f87f40
+    value: 000080d2c0035fd6
+    source: liter8:kernel-sandbox:kernel.sandbox.mount-check-remount.result+kernel.sandbox.mount-check-remount.return
+    original: 7f2303d5f85fbca9
+  - name: Sandbox umount
+    offset: 0x2f87bdc
+    value: 000080d2c0035fd6
+    source: liter8:kernel-sandbox:kernel.sandbox.mount-check-unmount.result+kernel.sandbox.mount-check-unmount.return
+    original: 7f2303d5fc6fbca9
+  - name: Sandbox vnode_check_rename
+    offset: 0x2f82c58
+    value: 000080d2c0035fd6
+    source: liter8:kernel-sandbox:kernel.sandbox.vnode-check-rename.result+kernel.sandbox.vnode-check-rename.return
+    original: 7f2303d5e923ba6d
+  - name: AMFI trust everything
+    offset: 0x1f2ffc8
+    value: 5f2403d5200080d2430000b4600000f9c0035fd6
+    desc: BTI c; mov x0,#1; cbz x3,#8; str x0,[x3]; ret (20 B, upstream sequence)
+    source: liter8:kernel-restore:kernel.amfi.trust-cache.0+kernel.amfi.trust-cache.1+kernel.amfi.trust-cache.2+kernel.amfi.trust-cache.3+kernel.amfi.trust-cache.4
+    original: 7f2303d5ffc300d1f44f01a9fd7b02a9fd830091
+  - name: APFS mount SSV bypass
+    offset: 0x3052800
+    value: 1f2003d5
+    source: liter8:kernel-restore:kernel.panic.root-snapshot
+    original: '28062837'
+  - name: APFS seal_is_broken bypass
+    offset: 0x2fc0cec
+    value: 1f2003d5
+    source: liter8:kernel-restore:kernel.panic.seal-broken
+    original: '60017037'
+  - name: BSD init rootvp bypass
+    offset: 0x36d5b48
+    value: 1f2003d5
+    source: liter8:kernel-restore:kernel.panic.rootvp-authentication
+    original: '00130035'
+  - name: Proc check launch constraints
+    offset: 0x1f34bf0
+    value: 00008052c0035fd6
+    desc: mov w0,#0; ret — disable launchd signing checks
+    source: liter8:kernel-restore:kernel.amfi.launch-constraints.result+kernel.amfi.launch-constraints.return
+    original: 7f2303d5ff0306d1
+  - name: PE i_can_has_debugger
+    offset: 0x3a1c748
+    value: 200080d2c0035fd6
+    source: liter8:kernel-restore:kernel.debugger.result+kernel.debugger.return
+    original: 4892fe90e00000b4
+  - name: Post-validation bypass
+    offset: 0x1f3c750
+    value: 1f00006b
+    desc: corrected from upstream work-27.0b3/make_cfw.py (b2 value 0x1F2B368 was
+      carried over)
+    source: liter8:kernel-restore:kernel.amfi.post-validation.compare
+    original: 1f080071
+  - name: Check dyld policy internal
+    offset: 0x1f3ccb0
+    value: '20008052'
+    desc: 'mov w0, #1 — corrected from upstream work-27.0b3/make_cfw.py (b2 value
+      was carried over)'
+    source: liter8:kernel-restore:kernel.amfi.dyld-policy.0
+    original: '70610094'
+  - name: Check dyld policy internal (site 2)
+    offset: 0x1f3ccbc
+    value: '20008052'
+    desc: 'mov w0, #1 — upstream patches two return paths'
+    source: liter8:kernel-restore:kernel.amfi.dyld-policy.1
+    original: 2bdfff97
+  - name: SEP panic check bypass
+    offset: 0x2185a00
+    value: 000080d2c0035fd6
+    source: liter8:kernel-sep:kernel.sep.panic-check.result+kernel.sep.panic-check.return
+    original: 7f2303d5f44fbea9
+  - name: SEP didTimeout bypass
+    offset: 0x2182208
+    value: 000080d2c0035fd6
+    source: liter8:kernel-sep:kernel.sep.did-timeout.result+kernel.sep.did-timeout.return
+    original: 7f2303d5ffc300d1
+  - name: AppleSEPKeyStore bypass
+    offset: 0xdeadbeef
+    value: 000080d2c0035fd6
+    pending: true
+  - name: Kernel identity string 1
+    offset: 0x3f2c4
+    value: /PATCHED_ARM64_T8030
+    desc: rename /RELEASE_ARM64_T8030 → /PATCHED_ARM64_T8030 (upstream patches both
+      sites)
+    source: liter8:kernel-restore:kernel.identity.0
+    original: 2f52454c454153455f41524d36345f5438303330
+  - name: Kernel identity string 2
+    offset: 0x3f330
+    value: /PATCHED_ARM64_T8030
+    source: liter8:kernel-restore:kernel.identity.1
+    original: 2f52454c454153455f41524d36345f5438303330
+  - name: Unencrypted data volume panic bypass
+    offset: 0x3053c10
+    value: 1f2003d5
+    source: liter8:kernel-restore:kernel.panic.unencrypted-data-volume
+    original: a8000037
+  devicetree:
+    remove_content_protect: true
+    add_no_effaceable_storage: true
+    add_boot_ios_diagnostics: true
+    ephemeral_storage: true
+  restoreramdisk:
+    asr_sig_bypass:
+      offset: 0x1f654
+      value: 1f2003d5
+      source: liter8:asr-signature:asr.signature-mismatch-branch
+    fdr_force_succeed:
+      offset: 0x7e558
+      value: 000080d2
+      source: liter8:restored-external-fdr:restored-external.fdr-result
+  txm:
+    query_module2:
+      offset: 0x3a124
+      value: 000080d2
+      source: liter8:txm-restore:txm.query-module.2
+    query_module0:
+      offset: 0x39e28
+      value: 000080d2
+      source: liter8:txm-restore:txm.query-module.0
+    query_module1:
+      offset: 0x39f90
+      value: 000080d2
+      source: liter8:txm-restore:txm.query-module.1
+    validate_constraints_sig_nop1:
+      offset: 0x3f690
+      value: 1f2003d5
+      source: liter8:txm-restore:txm.constraints.signature-type-range
+    validate_constraints_sig_nop2:
+      offset: 0x3f698
+      value: 1f2003d5
+      source: liter8:txm-restore:txm.constraints.signature-type-null
+    allowed_before_secure_channel:
+      offset: 0x2bcd4
+      value: 200080d2c0035fd6
+      source: liter8:txm-boot:txm.secure-channel.return-one+txm.secure-channel.return
+  daemons:
+    coreauthd:
+      anti_sep_crash:
+        offset: 0x95c0
+        value: 1f2003d5
+        source: liter8:coreauthd:coreauthd.dto-ratchet.start-controller
+    ctkd:
+      anti_sep_crash_ret0:
+        offset: 0x1b38
+        value: 000080d2
+        source: liter8:ctkd:ctkd.sep-key-server.return-nil
+      anti_sep_crash_ret:
+        offset: 0x1b3c
+        value: c0035fd6
+        source: liter8:ctkd:ctkd.sep-key-server.return
+    mobileactivationd:
+      should_hactivate:
+        offset: 0x2ec2d8
+        value: '20008052'
+        source: liter8:mobileactivationd:mobileactivationd.should-hactivate
+      get_activation_state_nop1:
+        offset: 0x329b60
+        value: 1f2003d5
+        source: liter8:mobileactivationd:mobileactivationd.activation-state.migration-gate
+      get_activation_state_adrp:
+        offset: 0x329bc0
+        value: 000600d0
+        source: liter8:mobileactivationd:mobileactivationd.activation-state.adrp
+      get_activation_state_add:
+        offset: 0x329bc4
+        value: 00a00a91
+        source: liter8:mobileactivationd:mobileactivationd.activation-state.add
+      get_activation_state_nop2:
+        offset: 0x329bc8
+        value: 1f2003d5
+        source: liter8:mobileactivationd:mobileactivationd.activation-state.dereference
+  userland:
+    disable_screentime: true
+    disable_setup: true

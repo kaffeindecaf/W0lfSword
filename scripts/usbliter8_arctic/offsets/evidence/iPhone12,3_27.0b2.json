@@ -1,0 +1,92 @@
+{
+  "profile": "iPhone12,3_27.0b2.yaml",
+  "model": "iPhone12,3",
+  "ios_version": "27.0b2",
+  "build": "24A5370h",
+  "recorded": "2026-09-20T20:11:30+00:00",
+  "tool": "preflight.py",
+  "components": {
+    "ibss": {
+      "size": 2842232,
+      "sha256": "685b99e3841724419e3cdf97447f071f9aac4dbbbf308f183981dca9cd96ddf0"
+    },
+    "ibec": {
+      "size": 2842232,
+      "sha256": "685b99e3841724419e3cdf97447f071f9aac4dbbbf308f183981dca9cd96ddf0"
+    },
+    "txm": {
+      "size": 540704,
+      "sha256": "5b6f7630873ed90af3bdedc347e6ccbb7cfe2cb354c74295e0f3fb0ba677404e"
+    }
+  },
+  "entries": {
+    "ibec.boot_args_add": {
+      "offset": 176064,
+      "original": "42341f91"
+    },
+    "ibec.boot_args_adrp": {
+      "offset": 176060,
+      "original": "820800d0"
+    },
+    "ibec.boot_args_string": {
+      "offset": 866384,
+      "original": "00000000000000000000000000000000000000000000000000"
+    },
+    "ibec.image4_validate_nop": {
+      "offset": 146864,
+      "original": "01070054"
+    },
+    "ibec.image4_validate_ret0": {
+      "offset": 146868,
+      "original": "e00314aa"
+    },
+    "ibec.keep_nonce_b": {
+      "offset": 224208,
+      "original": "48010837"
+    },
+    "ibss.boot_args_add": {
+      "offset": 176064,
+      "original": "42341f91"
+    },
+    "ibss.boot_args_adrp": {
+      "offset": 176060,
+      "original": "820800d0"
+    },
+    "ibss.boot_args_string": {
+      "offset": 866384,
+      "original": "00000000000000000000000000000000000000000000000000"
+    },
+    "ibss.image4_validate_nop": {
+      "offset": 146864,
+      "original": "01070054"
+    },
+    "ibss.image4_validate_ret0": {
+      "offset": 146868,
+      "original": "e00314aa"
+    },
+    "txm.allowed_before_secure_channel": {
+      "offset": 179380,
+      "original": "a90200b029c13691"
+    },
+    "txm.query_module0": {
+      "offset": 236720,
+      "original": "65faff97"
+    },
+    "txm.query_module1": {
+      "offset": 237080,
+      "original": "0bfaff97"
+    },
+    "txm.query_module2": {
+      "offset": 237484,
+      "original": "a6f9ff97"
+    },
+    "txm.validate_constraints_sig_nop1": {
+      "offset": 259428,
+      "original": "a3000054"
+    },
+    "txm.validate_constraints_sig_nop2": {
+      "offset": 259436,
+      "original": "690000b4"
+    }
+  }
+}

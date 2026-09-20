@@ -6,6 +6,7 @@ device restore, SSHRD/normal boot, post-exploit configuration.
 """
 
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -68,8 +69,12 @@ WOLF_ASCII_ART = r'''
 WOLF_GRADIENT = [C.ICE] * 6 + [C.FROST] * 7 + [C.WOLF] * 7 + [C.MOON] * 6
 
 
+def _wolf_art_lines() -> list[str]:
+    return [ln.rstrip() for ln in WOLF_ASCII_ART.strip("\n").splitlines()]
+
+
 def show_wolf():
-    lines = [ln.rstrip() for ln in WOLF_ASCII_ART.strip("\n").splitlines()]
+    lines = _wolf_art_lines()
     print()
     for i, art in enumerate(lines):
         if i == len(lines) - 1 and art.endswith("(by kaffein)"):
@@ -78,6 +83,56 @@ def show_wolf():
         color = WOLF_GRADIENT[min(i, len(WOLF_GRADIENT) - 1)]
         print(f"  {color}{art}{C.NC}")
     print()
+
+
+SCRAMBLE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+-=<>?/\\|"
+SCRAMBLE_SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+
+def wolf_scramble_frame(art: list[str], progress: int, rng: random.Random) -> list[str]:
+    """One scramble frame: each non-space char is settled (kept as-is) with
+    probability progress/100, otherwise replaced by a random char. Mirrors
+    W0lfSword's scramble_wolf frame logic."""
+    out = []
+    for line in art:
+        built = []
+        for ch in line:
+            if ch == " ":
+                built.append(" ")
+            elif rng.randint(0, 99) < progress:
+                built.append(ch)
+            else:
+                built.append(rng.choice(SCRAMBLE_CHARS))
+        out.append("".join(built))
+    return out
+
+
+def scramble_wolf(frames: int = 12, spinner: bool = True, pause: float = 0.05):
+    """Cmatrix-style scramble of the wolf art's own characters that settles
+    into the real art. Ported from W0lfSword's scramble_wolf (bash). Falls
+    back to a static wolf when stdout is not a terminal."""
+    if not sys.stdout.isatty():
+        show_wolf()
+        return
+    art = _wolf_art_lines()
+    rng = random.Random()
+    sys.stdout.write("\033[?25l")
+    sys.stdout.flush()
+    try:
+        for f in range(frames):
+            progress = int(f * 100 / frames)
+            sys.stdout.write("\033[H\033[2J")
+            if spinner:
+                sys.stdout.write(f"  {C.EYE}{SCRAMBLE_SPIN[f % len(SCRAMBLE_SPIN)]}{C.NC} {C.DIM}loading...{C.NC}\n")
+            for line in wolf_scramble_frame(art, progress, rng):
+                sys.stdout.write("  " + line + "\n")
+            sys.stdout.flush()
+            time.sleep(pause)
+    finally:
+        sys.stdout.write("\033[?25h")
+        sys.stdout.flush()
+    sys.stdout.write("\033[H\033[2J")
+    show_wolf()
 
 
 def show_banner():
@@ -146,7 +201,7 @@ def menu():
     while True:
         clear()
         if first_run:
-            show_wolf()
+            scramble_wolf()
             first_run = False
         show_banner()
         show_device_status()
@@ -266,11 +321,42 @@ def menu_configure():
 
     print(f"  {C.EYE}[f]{C.NC} Find online offset sources for a device model")
     print(f"  {C.EYE}[v]{C.NC} Validate a custom offset file")
+    print(f"  {C.EYE}[a]{C.NC} Audit a profile against an upstream make_cfw.py script")
+    print(f"  {C.EYE}[r]{C.NC} Fetch IPSW components over HTTP range (no full download)")
+    print(f"  {C.EYE}[p]{C.NC} Preflight: verify a profile against the real components")
+    print(f"  {C.EYE}[g]{C.NC} Gap matrix: which sections still need offsets")
     print()
 
-    choice = input(prompt("Select device [#], find [f], validate [v], or [b]ack: ") or "").strip().lower()
+    choice = input(prompt("Select device [#], find [f], validate [v], audit [a], fetch [r], "
+                          "preflight [p], gaps [g], or [b]ack: ") or "").strip().lower()
 
-    if choice == "f":
+    if choice == "p":
+        path = input(prompt("Profile YAML (blank = active device): ")).strip()
+        argv = [path] if path else []
+        record = input(prompt("Record verified bytes as evidence? [y/N]: ")).strip().lower()
+        if record in ("y", "yes"):
+            argv.append("--record")
+        import preflight
+        preflight.main(argv or None)
+    elif choice == "g":
+        import profile_gen
+        profile_gen.cmd_gaps()
+    elif choice == "a":
+        script = input(prompt("Path to upstream make_cfw.py: ")).strip()
+        profile = input(prompt("Path to profile YAML: ")).strip()
+        if script and profile:
+            import subprocess
+            subprocess.run([sys.executable, str(PROJECT_ROOT / "source_audit.py"),
+                            "script", script, profile])
+    elif choice == "r":
+        url = input(prompt("IPSW url (Apple CDN): ")).strip()
+        model = input(prompt("Device model (e.g. iPhone12,1): ")).strip()
+        if url and model:
+            import subprocess
+            cmd = [sys.executable, str(PROJECT_ROOT / "fetch_components.py"),
+                   "--url", url, "--device", model, "--extract-payload"]
+            subprocess.run(cmd)
+    elif choice == "f":
         model = input(prompt("Enter device model (e.g. iPhone12,1): ")).strip()
         if model:
             sources = find_online_sources(model)
@@ -304,6 +390,31 @@ def menu_configure():
             offset_path = OFFSETS_DIR / f["file"]
             if set_active_device(offset_path):
                 pass
+
+
+def _run_build_gate(offset_path) -> bool:
+    """Verify the profile before a build; ask before overriding a block."""
+    from device_offsets import pending_entries, validate_offsets
+    import preflight
+    report = preflight.run_preflight(offset_path)
+    if report.verdict == "ok":
+        print(ok(f"preflight: {report.count('match', 'plausible')} sites verified"))
+        return True
+
+    print()
+    preflight.print_report(report, verbose=False)
+    if report.verdict == "blocked":
+        ans = input(prompt("preflight BLOCKED this build — build anyway? [y/N]: ") or "n")
+        if ans.lower() not in ("y", "yes"):
+            return False
+        import cfw_builder
+        cfw_builder.FORCE = True
+        return True
+    if pending_entries(offset_path) > 0:
+        ans = input(prompt("profile has pending offsets — build anyway? [y/N]: ") or "n")
+        return ans.lower() in ("y", "yes")
+    _ = validate_offsets
+    return True
 
 
 def menu_build():
@@ -477,9 +588,12 @@ if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="usbliter8-arctic — iOS exploit hub")
     p.add_argument("--dry-run", action="store_true", help="Simulate without modifying files")
-    p.add_argument("command", nargs="?", default="menu", help="Subcommand: menu, pwn, offsets, build, flash, boot, sshrd, net, vnc, explain")
-
-    args = p.parse_args()
+    p.add_argument("command", nargs="?", default="menu",
+                   help="Subcommand: menu, pwn, offsets, coverage, gaps, preflight, "
+                        "audit, fetch, migrate, build, flash, boot, sshrd, net, vnc, explain")
+    p.add_argument("profile", nargs="?", default="", help="profile path for preflight/audit")
+    # flags for the wrapped tool (--json, --fetch, --record, ...) pass through
+    args, extra = p.parse_known_args()
 
     if args.dry_run:
         import cfw_builder, boot_chain
@@ -498,5 +612,28 @@ if __name__ == "__main__":
     elif args.command == "explain":
         from boot_chain import explain_usbliter8
         explain_usbliter8()
+    elif args.command == "coverage":
+        import profile_gen
+        profile_gen.cmd_coverage(json_out="--json" in extra)
+    elif args.command == "gaps":
+        import profile_gen
+        profile_gen.cmd_gaps(json_out="--json" in extra)
+    elif args.command in ("preflight", "verify"):
+        import preflight
+        argv = ([args.profile] if args.profile else []) + extra
+        raise SystemExit(preflight.main(argv or None))
+    elif args.command == "fetch":
+        import fetch_components
+        raise SystemExit(fetch_components.main(extra))
+    elif args.command == "audit":
+        argv = ([args.profile] if args.profile else []) + extra
+        if not argv:
+            print(err("usage: main.py audit <make_cfw.py> <profile.yaml>"))
+            raise SystemExit(2)
+        import source_audit
+        raise SystemExit(source_audit.main(argv))
+    elif args.command == "migrate":
+        import migrate
+        migrate.cli_main(([args.profile] if args.profile else []) + extra)
     else:
         menu()

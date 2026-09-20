@@ -231,14 +231,21 @@ def show_troubleshooting():
         print()
 
 
+class QuitSetup(Exception):
+    """Raised when the user asks to exit the guided setup."""
+
+
 def _ask(prompt_text: str, default: str = "", valid: tuple = None, retries: int = 3) -> str:
-    """Input with validation and retries. Never crashes on EOF/Ctrl-C."""
+    """Input with validation and retries. 'quit' or Ctrl-C exits the setup."""
     for attempt in range(retries):
         try:
             ans = input(prompt(prompt_text) or default).strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
-            return default
+            raise QuitSetup
+        if ans in ("quit", "q"):
+            print()
+            raise QuitSetup
         if valid is None or ans in valid or ans == default:
             return ans
         print(warn(f"Invalid choice '{ans}' — try again ({retries - attempt - 1} left)"))
@@ -326,10 +333,23 @@ def _test_pwn(attempts: int = 3, timeout: int = 60) -> bool:
 
 def guided_setup():
     """Guided, beginner-friendly setup walkthrough with checks and retries."""
+    try:
+        _guided_setup_impl()
+    except QuitSetup:
+        print(info("Setup cancelled — returning to menu"))
+    except KeyboardInterrupt:
+        print()
+        print(info("Setup cancelled (Ctrl+C) — returning to menu"))
+    finally:
+        print()
+
+
+def _guided_setup_impl():
     print(header("Guided Setup — usbliter8-arctic"))
     print()
     print(f"  {C.AMB}★ Recommended for beginners{C.NC} — hardware, firmware and first PWN, step by step")
     print(f"  {C.DIM}Resumable: re-run anytime. Progress is saved to config.yaml{C.NC}")
+    print(f"  {C.DIM}Type 'quit' at any prompt to exit safely.{C.NC}")
     print()
 
     # Step 0 — dependencies

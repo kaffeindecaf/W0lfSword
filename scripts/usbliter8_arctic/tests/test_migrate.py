@@ -238,8 +238,17 @@ def b2b3_profiles():
             _load_profile("iPhone12,3_27.0b3.yaml"))
 
 
+def _payload_bytes(value) -> bytes:
+    """Kernel entries carry either hex bytes or an ASCII payload (the kernel
+    identity strings upstream rewrites to /PATCHED_ARM64_T8030)."""
+    try:
+        return bytes.fromhex(str(value))
+    except ValueError:
+        return str(value).encode()
+
+
 def _kernel_entries(profile: dict) -> list[tuple[str, int, bytes]]:
-    return [(e["name"], e["offset"], bytes.fromhex(e["value"]))
+    return [(e["name"], e["offset"], _payload_bytes(e["value"]))
             for e in profile["patches"]["kernel"]]
 
 
@@ -255,7 +264,7 @@ def _make_kernel_component(entries: list[tuple[str, int, bytes]]) -> bytes:
 
 
 def test_milestone_kernel(b2b3_profiles, kernel_pair):
-    """2.2 acceptance: >=15/18 kernel entries correct at HIGH, zero wrong-HIGH."""
+    """2.2 acceptance: >=15 kernel entries correct at HIGH, zero wrong-HIGH."""
     b2, b3 = b2b3_profiles
     base_data, target_data = kernel_pair
     oracle = {e["name"]: e["offset"] for e in b3["patches"]["kernel"]}
@@ -279,7 +288,7 @@ def kernel_pair(b2b3_profiles):
 
 
 def _dict_entries(profile: dict, section: str) -> dict[str, tuple[int, bytes]]:
-    return {k: (v["offset"], bytes.fromhex(v["value"]))
+    return {k: (v["offset"], _payload_bytes(v["value"]))
             for k, v in profile["patches"][section].items()}
 
 
@@ -378,7 +387,7 @@ def test_ground_truth_full_profile(b2b3_profiles, ibss_pair, ibec_pair, kernel_p
                 f"{r.name}: got 0x{r.target_offset:X}, want 0x{o[entry_name]['offset']:X}")
             assert r.confidence >= 0.90, f"{r.name}: conf {r.confidence} too low"
             total += 1
-    assert total == 37  # 5 ibss + 6 ibec + 18 kernel + 6 txm + 2 ramdisk
+    assert total == 40  # 5 ibss + 6 ibec + 21 kernel + 6 txm + 2 ramdisk
 
 
 # ── 2.6: canonical offsets.yaml cross-check ─────────────────────────
@@ -392,8 +401,8 @@ constants:
       ibss_image4_validate: "0x23EFC"      # actually b3's value (mislabeled key)
       ibss_boot_args_ptr: "0x2B0F4"        # actually b3's value
       ibss_boot_args_string: "0xD3960"     # actually b3's value
-      txm_queryModule0: "0x39ca8"          # matches neither profile
-      txm_queryModule1: "0x39e10"          # matches neither profile
+      txm_queryModule0: "0x39cff"          # matches neither profile
+      txm_queryModule1: "0x39e1f"          # matches neither profile
       txm_queryModule2: "0x39fa4"          # actually b3's value
       txm_constraints_sig: "0x3f510"       # actually b3's value
       txm_allowedBeforeSecure: "0x2bcb4"   # agrees everywhere
@@ -415,8 +424,12 @@ def _canonical_results(b2b3_profiles, ibss_pair, ibec_pair):
 
 def test_canonical_crosscheck_flags_conflicts(b2b3_profiles, ibss_pair, ibec_pair,
                                               tmp_path, monkeypatch):
-    """Synthetic bad canonical DB: mislabeled version keys + off-by-8 values
-    must be flagged; agreeing entries must not (2.6 machinery)."""
+    """Synthetic bad canonical DB: mislabeled version keys + values matching
+    neither profile must be flagged; agreeing entries must not (2.6 machinery).
+
+    The real b3 queryModule0/1 values (0x39CA8 / 0x39E10, from upstream
+    work-27.0b3/make_cfw.py) belong to the target build, so this fixture uses
+    off-by-more values to keep exercising the MATCHES NEITHER branch."""
     import migrate
     bad = tmp_path / "offsets_bad.yaml"
     bad.write_text(BAD_CANONICAL_YAML)

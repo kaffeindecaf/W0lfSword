@@ -2,18 +2,45 @@
 # These can be searched with: python3 device_offsets.py --find-online <model>
 
 repos:
-  - name: "wh1te4ever/usbliter8-fun (iOS 27.0b2/b3)"
+  - name: "wh1te4ever/usbliter8-fun (iOS 27.0b1-b3)"
     url: "https://github.com/wh1te4ever/usbliter8-fun"
-    devices: ["iPhone12,3"]
+    devices: ["iPhone12,3", "iPhone12,5"]
+    ios_versions: ["27.0b1", "27.0b2", "27.0b3"]
+    commit: "81645292f6359462c006c9d0f2c8cb0d0c9e5b08 (pinned 2026-07-27)"
+    notes: "make_cfw.py / get_boot.py / get_rd.py hold the literal patch sites for iPhone 11 Pro (d421ap, kernelcache.release.iphone12) and are the source of the iPhone12,3 profiles. Diff them with: python3 source_audit.py script <make_cfw.py> <profile.yaml>. Kernel offsets are per kernelcache component, NOT per SoC — see kernel_components below."
+
+  - name: "34306/usbliter8-fun (mirror + extras)"
+    url: "https://github.com/34306/usbliter8-fun"
+    devices: ["iPhone12,3", "iPhone12,5"]
     ios_versions: ["27.0b2", "27.0b3"]
-    notes: "Original CFW scripts + known-good kernel/iBoot/DT offsets for iPhone 11 Pro"
+    commit: "9b8cc520c136631a55267e6d64658c3bd515f188 (pinned 2026-07-26)"
+    notes: "Same patch sites as wh1te4ever's work dirs (independent re-upload) plus patches/ and ramdisk/net helpers. Second opinion when a script site and a profile disagree."
+
+  - name: "Xplo8E/Liter8 (fixture oracles per build+board)"
+    url: "https://github.com/Xplo8E/Liter8"
+    devices: ["iPhone12,1"]
+    ios_versions: ["27.0b4", "27.0"]
+    commit: "213366fc6fdfcfa46874b9500bca0d42e68eae6d (pinned 2026-09-14)"
+    notes: "fixtures/<build>/<board>/*.json record offset + originalBytes + replacementBytes + component sha256 for every patch it resolved. Import: python3 liter8_import.py --fixtures <clone>/fixtures --build 24A435 --board n104ap --model iPhone12,1 --ios 27.0 --verify-components research/extracted/<dir>. Upstream verified 24A5390f and 24A435 end-to-end on iPhone 11 (n104ap)."
+
+  - name: "blacktop/ipsw-diffs (per-build kernel/kext diffs)"
+    url: "https://github.com/blacktop/ipsw-diffs"
+    devices: []
+    ios_versions: ["12.5", "15.x", "16.x", "17.x", "18.x", "26.x", "27.x"]
+    notes: "Pre-computed `ipsw diff` output per build pair (KEXTS/*.md, IBOOT/, MACHOS/, SANDBOX/). Tells you which kext moved between two betas before you re-discover offsets. Evidence, not offset data — it carries no raw patch sites. W0lfSword's scripts/offsets_drift.py reads the same repo."
+
+  - name: "blacktop/ipsw (IPSW toolkit)"
+    url: "https://github.com/blacktop/ipsw"
+    devices: []
+    ios_versions: []
+    notes: "Extraction, diffing and decryption of IPSWs/components; use it when a wiki IV+key exists and the kernelcache payload is needed for offset discovery."
 
   - name: "W0lfSword offsets.m (kernel struct offsets A10-A18)"
     url: "https://github.com/kaffeindecaf/W0lfSword/blob/main/kexploit/offsets.m"
     devices: ["iPhone11,2", "iPhone11,4", "iPhone11,6", "iPhone11,8",
               "iPhone12,1", "iPhone12,3", "iPhone12,5", "iPhone12,8"]
     ios_versions: ["17.0", "17.4", "18.0", "18.4", "18.6", "26.0"]
-    notes: "Thread/proc/vnode struct offsets for DarkSword exploit. Check per-SoC blocks for A12/A13"
+    notes: "Thread/proc/vnode struct offsets for the DarkSword exploit — kernel R/W domain, not boot-chain patch sites, so no arctic profile entry maps to it. Also the origin of this repo's ranged IPSW fetcher (scripts/kczip.py -> kczip.py + fetch_components.py) and of the ipsw-diffs drift workflow."
 
   - name: "rav000/usbliter8 (re-uploaded source)"
     url: "https://github.com/rav000/usbliter8"
@@ -39,8 +66,24 @@ repos:
     ios_versions: []
     notes: "Community firmware binaries for 6 RP2350 board variants. Use these — no compilation needed"
 
+# Board -> kernel cache component. Kernel patch offsets live inside that binary
+# and are NOT interchangeable between boards: verified 2026-09-20 from the
+# shipped 27.0 (24A437) IPSW entry names. fetch_components.py uses this mapping
+# to pick the right kernelcache, and profile_gen.py propagate refuses to copy
+# kernel offsets between boards with different components.
+kernel_components:
+  iPhone12,1: "kernelcache.release.iphone12b"
+  iPhone12,3: "kernelcache.release.iphone12"
+  iPhone12,5: "kernelcache.release.iphone12"
+  iPhone12,8: "kernelcache.release.iphone12c"
+  iPad12,1:   "kernelcache.release.ipad12p"
+  iPad12,2:   "kernelcache.release.ipad12p"
+
 device_database:
   # ── A13 devices (T8030) ──
+  # NOTE: every A13 board has its own kernelcache component, but the A13
+  # phones have NO checkm8-style bootrom bug — offsets here are iBSS/iBEC/TXM/
+  # kernelcache patch sites, not bootrom values.
   - model: "iPhone12,1"
     name: "iPhone 11"
     soc: "A13"
@@ -84,6 +127,8 @@ device_database:
     ipsu_pattern: "iPad12,2_"
 
   # ── A12 devices (T8020) ──
+  # iOS 27 dropped the A12 iPhones: iPhone XS/XS Max/XR have no 27.x IPSW
+  # (checked against ipsw.me on 2026-09-20), so A12 profiles are 26.x and older.
   - model: "iPhone11,2"
     name: "iPhone XS"
     soc: "A12"
