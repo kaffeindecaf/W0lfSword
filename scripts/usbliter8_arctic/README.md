@@ -2,7 +2,7 @@
 
 > The easy way to run the usbliter8 tethered jailbreak. A TUI hub that walks you through the whole chain: wire up an RP2350 board, flash the exploit firmware, build a custom firmware for your A12/A13 iPhone or iPad, restore it, and boot. Offsets are managed as validated YAML profiles, and a fingerprint engine migrates them between iOS betas automatically.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-258%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-300%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 ## Quick start
 
@@ -12,10 +12,12 @@
 git clone https://github.com/kaffeindecaf/usbliter8-arctic.git
 cd usbliter8-arctic
 
-sudo apt install python3-usb python3-yaml libusb-1.0-0
 chmod +x usbliter8 main.py
-sudo ./usbliter8
+sudo ./usbliter8          # the first check detects your OS and offers to install what is missing
 ```
+
+Nothing else to install by hand: see [Dependencies](#dependencies-detected-and-offered).
+If you prefer to do it yourself: `sudo apt install python3-usb python3-yaml libusb-1.0-0`.
 
 > New to usbliter8? Start with `1` (Guided Setup). It walks you through hardware, firmware flashing and your first PWN with built-in checks and retries.
 
@@ -25,11 +27,11 @@ sudo ./usbliter8
 git clone https://github.com/kaffeindecaf/usbliter8-arctic.git
 cd usbliter8-arctic
 
-brew install libusb
-python3 -m pip install --user pyusb pyyaml
 chmod +x usbliter8 main.py
-./usbliter8
+./usbliter8               # detects macOS, checks the packages, offers to install them
 ```
+
+By hand: `brew install libusb` and `python3 -m pip install --user pyusb pyyaml`.
 
 > The bundled tools in `tools/` are macOS Mach-O binaries, so macOS runs them natively. No sudo needed.
 
@@ -39,9 +41,10 @@ chmod +x usbliter8 main.py
 git clone https://github.com/kaffeindecaf/usbliter8-arctic.git
 cd usbliter8-arctic
 
-py -m pip install pyusb pyyaml pyimg4 libusb-package
-py main.py
+py main.py                # detects Windows, checks the packages, offers to install them
 ```
+
+By hand: `py -m pip install pyusb pyyaml pyimg4 libusb-package`.
 
 > **libusb**: `libusb-package` (installed above) supplies the DLL, so Zadig is only
 > needed when Windows still refuses the device: bind the WinUSB driver to the
@@ -186,10 +189,59 @@ For boards without a built-in USB-A host port (Pico 2, RP2350-Zero, Tiny2350), c
 >
 > ⚠️ **VBUS is 5V**: never solder it to the 3V3 pin or you will destroy the board.
 
+## Dependencies: detected and offered
+
+Every entry point (`usbliter8`, `ul8.py`, `main.py`, `cfw_builder.py`, `preflight.py`, ...)
+runs the same check before it does anything:
+
+1. **detects the OS**: name, distro, arch, Python version, whether you are in a venv,
+   root or not, which package manager exists, and whether the terminal can be asked questions
+2. **checks the packages the thing you asked for actually needs** (a profile edit does not
+   need the USB stack, a build does not need the test runner)
+3. **lists what is missing and why**, then asks `install 2 package(s) now? [Y/n]`
+4. **installs with the right command for your OS**: pip (or `uv pip` when the interpreter has
+   no pip) for Python packages, the detected system manager for libusb
+5. **re-checks** and either continues or prints the exact command to run instead
+
+```bash
+python3 ul8.py deps              # report, then offer to install (the `deps` command)
+python3 deps.py                  # same thing directly
+python3 deps.py --check          # report only, never install
+python3 deps.py --json           # machine-readable (used by the health check)
+python3 deps.py --feature build  # one feature: profiles, usb, build, fetch, migrate, security, tests
+python3 deps.py --install --yes  # unattended install (CI, scripted setup)
+```
+
+What it will never do:
+
+- install anything without a `y`: without a terminal (piped output, CI) it only reports what to run
+- pick a package manager for you behind your back: the command is printed before it runs
+- touch the system Python on PEP 668 distros silently. Debian 12+, Ubuntu 24+ and Parrot
+  refuse `pip install`; that is detected up front and the pip command gets
+  `--break-system-packages` (printed, so you can also run it yourself)
+- treat a declined install as a crash: you continue, and the step that really needs the
+  package fails with its own message
+
+| Platform | Python packages | USB backend |
+|---|---|---|
+| Linux (apt/pacman/dnf/zypper) | `python -m pip install --user <pkg>` (or the distro package) | `libusb-1.0-0`, and root for raw USB access |
+| macOS | `python -m pip install --user <pkg>` | `brew install libusb` (the bundled `tools/` are native here) |
+| Windows | `py -m pip install <pkg>` | `libusb-package` supplies the DLL; Zadig only if Windows still refuses the device |
+
+Environment variables for scripted installs:
+
+| Variable | Effect |
+|---|---|
+| `UL8_NO_DEPS=1` | skip the check entirely (nothing printed, nothing installed) |
+| `UL8_AUTO_INSTALL=1` | install missing packages without asking |
+| `UL8_DEBUG=1` | print tracebacks instead of the one-line error |
+
+`--no-deps` does the same as `UL8_NO_DEPS=1` for one run: `python3 ul8.py preflight <profile> --no-deps`.
+
 ## Prerequisites
 
 - **RP2350 board** (NOT RP2040, A13 requires RP2350): Waveshare RP2350-USB-A (recommended, no soldering) · Raspberry Pi Pico 2 · Waveshare RP2350-Zero · Pimoroni Tiny2350
-- `pyusb` + `pyyaml` for USB and profiles, `pyimg4` for IPSW components on Linux/Windows (the bundled `tools/` are macOS Mach-O)
+- Dependencies: `pyusb` + `pyyaml` for USB and profiles, `pyimg4` for IPSW components on Linux/Windows (the bundled `tools/` are macOS Mach-O). You do not have to install these by hand: every entry point checks them first and offers to install what is missing (see [Dependencies](#dependencies-detected-and-offered))
 - Lightning-to-USB-A cable + a compatible A12/A13 device
 - Python 3.9+ (Linux/macOS/Windows)
 - Binary tools in `tools/` are macOS Mach-O; the interactive menu guides tool handling, and `deps.py` falls back to tools on your PATH
@@ -511,6 +563,10 @@ usbliter8-arctic/
 | `cannot unwrap <component>: ... pip install pyimg4` | component is lzfse-compressed and no decoder is installed |
 | `every module parses` fails in CI | run `python3 -m compileall -q .` locally; a module that tests never import can still be broken |
 | a run ended with exit `3` | an unexpected exception: `python3 ul8.py logs --level ERROR` has the traceback, `UL8_DEBUG=1` prints it directly |
+| `no pip and no uv in this python - cannot install for you` | the interpreter has neither. `python3 -m ensurepip --upgrade`, or use a venv (`python3 -m venv .venv`) |
+| pip refused with `externally-managed-environment` | PEP 668 distro. The check adds `--break-system-packages` when not in a venv, or use a venv |
+| `deps` says a package is missing but `pip list` shows it | a different interpreter: the line above the packages prints which Python is in use (`system` vs `venv`) |
+| `deps` reports `libusb-1.0 missing` on Linux | install it (`sudo apt install libusb-1.0-0`) and run `sudo ldconfig` |
 | a prompt vanished or said "input ended" | stdin is not a terminal (piped/CI). Prompts that could erase the device stop instead of assuming an answer |
 | offsets look "unchanged" but the device panics | kernel offsets are per `kernelcache.release.*` component; check `python3 profile_gen.py gaps` for a profile whose kernel section came from another board |
 

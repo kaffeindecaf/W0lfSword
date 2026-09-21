@@ -59,10 +59,15 @@ SESSION_LOG="$DATA_DIR/session.log"
 log_script() { echo "[$(date '+%H:%M:%S')] $*" >> "$SESSION_LOG"; }
 
 cleanup() {
-    tput cnorm 2>/dev/null || true
-    stty echo 2>/dev/null || true
-    echo -e "\033[?25h"
-    log_script "session ended (exit=$?)"
+    local rc=$?
+    # never write escape codes into piped output: --json must stay parseable
+    if [ -t 1 ]; then
+        tput cnorm 2>/dev/null || true
+        stty echo 2>/dev/null || true
+        echo -e "\033[?25h"
+    fi
+    log_script "session ended (exit=$rc)"
+    return $rc
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
@@ -149,7 +154,7 @@ py_profile()     { $PY profile_gen.py "$@"; }
 py_pwn()         { $PY pwn_utils.py "$@"; }
 py_health()      { $PY -c "from hardware_guide import run_health_check; run_health_check()"; }
 py_explain()     { $PY -c "from boot_chain import explain_usbliter8; explain_usbliter8()"; }
-py_deps()        { $PY deps.py; }
+py_deps()        { $PY deps.py "$@"; }
 
 # ── Commands ───────────────────────────────────────────────────
 cmd_menu() { py_menu menu; }
@@ -193,7 +198,7 @@ cmd_pwn() {
 }
 
 cmd_health() { py_health; }
-cmd_deps()   { py_deps; }
+cmd_deps()   { py_deps "${@}"; }
 
 cmd_offsets() {
     case "${1:-list}" in
@@ -428,7 +433,7 @@ main() {
         postboot)              cmd_postboot ;;
         pwn)                   cmd_pwn "${args[@]}" ;;
         health|doctor)         cmd_health ;;
-        deps|deps-install)     cmd_deps ;;
+        deps|deps-install)     cmd_deps "${args[@]}" ;;
         offsets)               cmd_offsets "${args[@]}" ;;
         coverage)              cmd_coverage "${args[@]}" ;;
         gaps)                  cmd_gaps "${args[@]}" ;;

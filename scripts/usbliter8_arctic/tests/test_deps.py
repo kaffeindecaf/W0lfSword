@@ -364,3 +364,28 @@ def test_ensurepip_hint_when_no_installer(monkeypatch):
     monkeypatch.setattr(deps, "uv_available", lambda: False)
     cmd = deps.install_command(deps.packages_for("profiles"))
     assert "ensurepip" in " ".join(cmd)
+
+
+def test_unknown_feature_is_rejected(capsys):
+    assert deps.unknown_features(("build", "bogus")) == ["bogus"]
+    assert deps.doctor(["--feature", "bogus"]) == 2
+    out = capsys.readouterr().out
+    assert "unknown feature" in out and "known features" in out
+
+
+def test_unknown_feature_is_ignored_by_ensure_but_logged(monkeypatch):
+    monkeypatch.setattr(deps, "is_installed", lambda pkg: True)
+    monkeypatch.setattr(deps, "libusb_ok", lambda: True)
+    logged = []
+    monkeypatch.setattr(deps.log_utils, "log_warn",
+                        lambda message, **kw: logged.append(message))
+
+    assert deps.ensure(("bogus",)) is True           # nothing to gate on
+    assert any("unknown feature" in message for message in logged)
+
+
+def test_feature_names_are_all_documented():
+    for feature, description in deps.FEATURES.items():
+        assert description, feature
+    used = {f for pkg in deps.PACKAGES for f in pkg.features}
+    assert used <= set(deps.FEATURES)               # no package claims a phantom feature

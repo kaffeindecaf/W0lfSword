@@ -276,6 +276,12 @@ def _windows_libusb_paths() -> list[str]:
     return candidates
 
 
+def unknown_features(features: tuple[str, ...] | list[str] | str) -> list[str]:
+    """Feature names that do not exist: a typo must not silently check nothing."""
+    wanted = (features,) if isinstance(features, str) else tuple(features)
+    return [name for name in wanted if name not in FEATURES]
+
+
 def packages_for(features: tuple[str, ...] | list[str] | str) -> list[Package]:
     """The packages a set of features wants, deduplicated and ordered."""
     wanted = (features,) if isinstance(features, str) else tuple(features)
@@ -439,6 +445,12 @@ def ensure(features: tuple[str, ...] | list[str] | str,
     if os.environ.get("UL8_NO_DEPS") in ("1", "true", "yes") or not wanted:
         return True
 
+    unknown = unknown_features(wanted)
+    if unknown:
+        log_utils.log_warn(f"unknown feature(s) ignored: {', '.join(unknown)} "
+                           f"(known: {', '.join(FEATURES)})", module="deps")
+        wanted = tuple(name for name in wanted if name not in unknown)
+
     missing = missing_for(wanted)
     libusb_missing = "usb" in wanted and not libusb_ok()
     if not missing and not libusb_missing:
@@ -554,6 +566,12 @@ def doctor(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
     features = tuple(args.feature) if args.feature else ()
+
+    unknown = unknown_features(features)
+    if unknown:
+        print(err(f"unknown feature(s): {', '.join(unknown)}"))
+        print(f"  {C.DIM}known features: {', '.join(FEATURES)}{C.NC}")
+        return 2
 
     if args.json:
         print(json.dumps(status(features), indent=2))
