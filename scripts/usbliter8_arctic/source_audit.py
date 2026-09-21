@@ -49,6 +49,13 @@ COMPONENT_SECTION = {
     "TXM": "txm",
     "kcache.raw": "kernel",
     "kernelcache.release.iphone12b": "kernel",
+    "kernelcache.release.iphone12": "kernel",
+    "kernelcache.release.iphone12c": "kernel",
+    "kernelcache.release.iphone11": "kernel",
+    "kernelcache.release.iphone11b": "kernel",
+    "kernelcache.release.ipad11": "kernel",
+    "kernelcache.release.ipad11b": "kernel",
+    "kernelcache.release.ipad12p": "kernel",
     "restored_external": "restoreramdisk",
     "asr": "restoreramdisk",
 }

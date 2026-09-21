@@ -2,7 +2,7 @@
 
 > The easy way to run the usbliter8 tethered jailbreak. A TUI hub that walks you through the whole chain: wire up an RP2350 board, flash the exploit firmware, build a custom firmware for your A12/A13 iPhone or iPad, restore it, and boot. Offsets are managed as validated YAML profiles, and a fingerprint engine migrates them between iOS betas automatically.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-99%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-129%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 ## Quick start
 
@@ -92,19 +92,48 @@ The original flow (rav000's RP2350 firmware + wh1te4ever's scripts) is raw scrip
 
 ## Supported devices
 
-| Device | Chip | Board | Kernel cache |
-|---|---|---|---|
-| iPhone XS / XS Max (incl. CN) | A12 | d321ap / d331ap / d331pap | 26.x only |
-| iPhone XR | A12 | n841ap | 26.x only |
-| iPhone 11 | A13 | n104ap | kernelcache.release.iphone12b |
-| iPhone 11 Pro / Pro Max | A13 | d421ap / d431ap | kernelcache.release.iphone12 |
-| iPhone SE (2nd gen) | A13 | d79ap | kernelcache.release.iphone12c |
-| iPad mini 5 (WiFi / Cell) | A12 | j211ap / j212ap | 26.x only |
-| iPad Air 3 (WiFi / Cell) | A12 | j213ap / j214ap | 26.x only |
-| iPad 8 (WiFi / Cell) | A12 | j171ap / j172ap | 26.x only |
-| iPad 9 (WiFi / Cell) | A13 | j181ap / j182ap | kernelcache.release.ipad12p |
+| Device | Chip | Board | iBSS / iBEC | Kernel cache |
+|---|---|---|---|---|
+| iPhone XS / XS Max (incl. CN) | A12 | d321ap / d331ap / d331pap | d321 / d331 / d331p | 26.x only |
+| iPhone XR | A12 | n841ap | n841 | 26.x only |
+| iPhone 11 | A13 | n104ap | n104 | kernelcache.release.iphone12b |
+| iPhone 11 Pro / Pro Max | A13 | d421ap / d431ap | d421 | kernelcache.release.iphone12 |
+| iPhone SE (2nd gen) | A13 | d79ap | d79 | kernelcache.release.iphone12c |
+| iPad mini 5 (WiFi / Cell) | A12 | j211ap / j212ap | **j210** | 26.x only |
+| iPad Air 3 (WiFi / Cell) | A12 | j213ap / j214ap | **j210** | 26.x only |
+| iPad 8 (WiFi / Cell) | A12 | j171ap / j172ap | **ipad11b** | 26.x only |
+| iPad 9 (WiFi / Cell) | A13 | j181ap / j182ap | **ipad12p** | kernelcache.release.ipad12p |
+
+> **Bootloader names are not board names.** Apple names iPad bootloaders after the
+> SoC family, not the board: an iPad 9 (`j181ap`) boots
+> `Firmware/dfu/iBSS.ipad12p.RELEASE.im4p`, an iPad mini 5 (`j211ap`) boots
+> `iBSS.j210...`, and the XS/XS Max IPSWs carry all three sibling images
+> (`d321` + `d331` + `d331p`). `components.py` holds the verified per-device
+> names and refuses to guess when several candidates match. Pass
+> `--force-component` to take the first candidate deliberately.
 
 > **Profile status**: verified offsets exist for iPhone 11 Pro (iPhone12,3) on 27.0b2/b3, and for iPhone 11 (iPhone12,1) on 27.0 (24A437) and 27.0b4 (24A5390f) imported from Liter8 fixtures. iPhone 11 Pro Max shares iPhone 11 Pro's kernel cache; iPhone 11 / SE 2 / iPad 9 have their own kernelcache binaries, so their kernel offsets must come from that component (the propagator refuses to copy across components). A12 devices top out at iOS 26 and need first-offset bootstrapping. Live status: `python3 profile_gen.py coverage`.
+
+### iPad 9 status
+
+iPad 9 (iPad12,1 / iPad12,2) is **not flashable yet**, and the reason is narrow:
+
+* iBSS / iBEC / TXM offsets for 27.0b2/b3 were discovered from the device's own
+  components (`profile_gen.py fill ... --comp-dir`, 15/17 entries at 0.95
+  confidence). The two remaining `boot_args_string` sites score below the 0.90
+  floor and stay pending.
+* The **kernel** section is blocked: iPad 9 boots `kernelcache.release.ipad12p`,
+  and no verified offsets exist for that component. Offsets cannot be copied
+  from an iPhone (different binary), and it cannot be derived here either: The
+  Apple Wiki publishes keys for RootFS, Cryptex and SEP only for iPad12,x, so
+  the kernelcache cannot be decrypted offline. The profiles carry a `blockers:`
+  entry saying exactly this, `device_offsets.py activate` prints it, and the
+  builder refuses those entries even under `--force`.
+* Making iPad 9 work needs one of: someone with an iPad 9 deriving the kernel
+  sites (that is how every other kernel key/offset set started), or a published
+  `ipad12p` kernelcache key.
+
+Run `python3 profile_gen.py gaps` to see the same picture per profile.
 
 > **Kernel offsets are per binary, not per SoC**: every A13 board ships a different `kernelcache.release.*`, verified 2026-09-20 against the shipped 27.0 (24A437) IPSWs. iOS 27 dropped the A12 iPhones entirely (no iPhone XS/XR 27.x IPSW exists).
 
@@ -192,6 +221,10 @@ python3 preflight.py offsets/iPhone12,1_27.0.yaml
 python3 preflight.py offsets/iPhone12,1_27.0.yaml --fetch --record
 python3 preflight.py offsets/iPhone12,3_27.0b3.yaml --components research/extracted/iPhone123_27.0b3_24A5380h --json
 
+# Complete the pending device sections of a profile from a verified base + components
+python3 profile_gen.py fill offsets/iPad12,1_27.0b2.yaml --from offsets/iPhone12,3_27.0b2.yaml \
+    --comp-dir /tmp/comps --sections ibss,ibec,txm
+
 # Which sections still need offsets, and which kernel sections came from the wrong board
 python3 profile_gen.py gaps
 python3 profile_gen.py coverage --json
@@ -220,6 +253,26 @@ Re-discovers patch offsets for a new beta automatically: AArch64 instructions ar
 - **Confidence**: 0.95 unique+class match · 0.90 unique string site · 0.60 ambiguous · 0.30 multi-hit / delta-inferred
 - **Output**: `migrate_report.md` (per-entry table, site hexdump, `REVIEW REQUIRED` + `CANONICAL CONFLICTS` sections); `--auto` writes the target profile with `migrated:` metadata + post-write validation
 - **Safety**: never trust anything below 0.90 without manual review; delta inference is LOW by design
+
+### Patch manifest, and what a build actually applied
+
+`cfw_builder.py` prints a per-section manifest at the end of every build:
+`patched` / `skipped` / `mismatch` / `failed`, with the component file each
+section was resolved to. Sections this path cannot apply are reported instead of
+disappearing quietly:
+
+* **DeviceTree** is patched in-tree by `dt_patch.py` (content-protect removal,
+  `no-effaceable-storage`, `boot-ios-diagnostics`, `ephemeral-storage`,
+  optional `system_rw`) driven by the profile's flags. The builder no longer
+  shells out to the upstream work dir's `patch_dt.py` / `set_ephemeral.py` and
+  no longer skips the DeviceTree when that directory is missing.
+* **RestoreRamdisk**: on iOS 26/27 IPSWs the ramdisk is a bare root-level `.dmg`
+  and the profile's offsets target `restored_external` / `asr` *inside* the
+  mounted image. This path cannot mount and re-sign it, so the build says so and
+  warns that asr/FDR checks may fail on restore (classic `.dmg.im4p` layouts are
+  still patched in place).
+* **Kernel entries marked `invalid_component`** (derived from another device's
+  kernelcache) are refused even under `--force`.
 
 ### Keeping offsets honest (`source_audit.py`, `fetch_components.py`, `liter8_import.py`)
 
@@ -282,7 +335,9 @@ usbliter8-arctic/
 ├── main.py / ul8.py      # TUI hub + standalone launcher
 ├── contribute.py         # offset contribution helper (new/status/pr)
 ├── boot_chain.py         # boot / restore / SSH / post-boot utilities
-├── cfw_builder.py        # CFW patching pipeline
+├── cfw_builder.py        # CFW patching pipeline (per-section patch manifest)
+├── components.py         # per-device IPSW component resolution (iBSS/iBEC/kernel/…)
+├── dt_patch.py           # native DeviceTree (FDT) patcher
 ├── pwn_utils.py          # USB detection + PWN verification
 ├── device_offsets.py     # YAML offset profile manager
 ├── profile_gen.py        # profile generator + migrate entrypoint

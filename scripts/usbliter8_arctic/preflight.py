@@ -436,12 +436,17 @@ def read_components_from_ipsw(ipsw: Path, profile: dict) -> dict[str, tuple[str,
     try:
         with zipfile.ZipFile(ipsw) as zf:
             names = zf.namelist()
-            board = str(DEVICE_DB.get(profile.get("model", ""), {}).get("board", ""))
-            short = board[:-2] if board.endswith("ap") else board
-            wanted = {"ibss": f"iBSS.{short}", "ibec": f"iBEC.{short}",
+            board = str(profile.get("board") or
+                        DEVICE_DB.get(profile.get("model", ""), {}).get("board", ""))
+            offsets = {"model": profile.get("model", ""), "board": board}
+            import components
+            stem = components.component_stem(offsets, "ibss")
+            wanted = {"ibss": f"iBSS.{stem}.RELEASE", "ibec": f"iBEC.{stem}.RELEASE",
                       "txm": "Firmware/txm", "devicetree": f"DeviceTree.{board}"}
             for section, needle in wanted.items():
                 for name in names:
+                    if "RESEARCH" in name:
+                        continue
                     if needle in name and name.endswith(".im4p"):
                         out[section] = (f"{ipsw.name}:{name}", zf.read(name))
                         break

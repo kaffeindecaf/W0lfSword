@@ -180,6 +180,25 @@ def dump_profile_yaml(profile: dict, path: Path) -> None:
                   default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
+def blocked_sections(filepath: Path) -> list[dict]:
+    """Sections a profile itself declares as blocked (wrong component, no data).
+
+    Used for kernel offsets that belong to a different kernelcache: the entries
+    look valid but cannot be applied, so they must count as unflashable.
+    """
+    try:
+        data = yaml.safe_load(Path(filepath).read_text())
+    except (yaml.YAMLError, OSError):
+        return []
+    blockers = (data or {}).get("blockers")
+    if isinstance(blockers, dict):
+        return [dict(reason=body, section=name) if isinstance(body, str)
+                else {"section": name, **body} for name, body in blockers.items()]
+    if isinstance(blockers, list):
+        return [b for b in blockers if isinstance(b, dict)]
+    return []
+
+
 def pending_entries(filepath: Path) -> int:
     """Count entries marked `pending: true` (offsets not discovered for this device).
 
@@ -285,11 +304,32 @@ def set_active_device(filepath: Path) -> bool:
             print(f"    {C.RED}{e}{C.NC}")
         return False
 
-    pending = pending_entries(filepath)
+    blockers = blocked_sections(filepath)
+    pending = pending_entries(filepath) + sum(int(b.get("entries", 0) or 0) for b in blockers)
     if pending > 0:
-        print(warn(f"Offset file has {pending} pending offset(s) — not ready to flash:"))
+        print(warn(f"Offset file has {pending} unresolved offset(s) — not ready to flash:"))
+        try:
+            import yaml as _yaml
+            _profile = _yaml.safe_load(Path(filepath).read_text()) or {}
+        except Exception:
+            _profile = {}
+        by_section: dict[str, int] = {}
+        for sec, body in (_profile.get("patches") or {}).items():
+            entries = body if isinstance(body, list) else list(body.values())
+            n = sum(1 for e in entries if isinstance(e, dict) and e.get("pending"))
+            if n:
+                by_section[sec] = n
+        for sec, n in by_section.items():
+            print(f"    {C.DIM}{sec}: {n}{C.NC}")
+        for blocker in blockers:
+            print(f"    {C.AMB}{blocker.get('section', '?')}: {blocker.get('reason', '')}{C.NC}")
         print(f"    {C.DIM}Pending entries carry sentinel offsets for this device.{C.NC}")
-        print(f"    {C.DIM}Discover them with: python3 profile_gen.py propagate <base> <model> --comp-dir DIR{C.NC}")
+        if by_section.get("kernel") or any(b.get("section") == "kernel" for b in blockers):
+            print(f"    {C.DIM}Kernel offsets are per component — they cannot be copied from a "
+                  f"device with a different kernelcache.{C.NC}")
+        else:
+            print(f"    {C.DIM}Discover them with: python3 profile_gen.py fill <profile> "
+                  f"--from <base.yaml> --comp-dir DIR{C.NC}")
         return False
 
     config_dir = Path(__file__).parent

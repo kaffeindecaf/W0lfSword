@@ -34,6 +34,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import components
 import kczip
 from colors import C, err, info, ok, section, warn
 from profile_gen import DEVICE_DB
@@ -124,25 +125,25 @@ def _short_board(board: str) -> str:
     return board[:-2] if board.endswith("ap") else board
 
 
-def patterns_for(component: str, board: str, kernel_name: str = "") -> list:
-    """Entry-name patterns for a component on a given board."""
-    short = _short_board(board)
-    if component == "ibss":
-        return [("iBSS." + short, ".im4p")]
-    if component == "ibec":
-        return [("iBEC." + short, ".im4p")]
-    if component == "txm":
-        return [("Firmware/txm", ".im4p"), ("TXM.", ".im4p")]
-    if component == "devicetree":
-        return [("DeviceTree." + board, ".im4p")]
-    if component == "kernelcache":
-        if kernel_name:
-            return [kernel_name]
-        return ["kernelcache.release."]
-    if component == "restoreramdisk":
-        # root-level restore ramdisk dmg, e.g. 094-13753-150.dmg
-        return [(".dmg",)]
-    raise ValueError("unknown component %r" % component)
+def patterns_for(component: str, board: str, kernel_name: str = "", model: str = "") -> list:
+    """Entry-name patterns for a component of one device.
+
+    The component name is per device, not derivable from the board (iPad 9's
+    iBSS is `iBSS.ipad12p.RELEASE.im4p`), so this defers to components.py. The
+    board argument is kept for callers that only have a board id.
+    """
+    offsets = {"model": model or _model_for_board(board), "board": board}
+    patterns = components.entry_patterns(offsets, component)
+    if kernel_name:
+        return [kernel_name]
+    return patterns
+
+
+def _model_for_board(board: str) -> str:
+    for model, info in DEVICE_DB.items():
+        if info.get("board") == board:
+            return model
+    return ""
 
 
 def _device_entry(model: str) -> dict:
@@ -166,9 +167,10 @@ def cmd_list(url: str, model: str, components: list[str], kernel_name: str) -> i
     print()
     found_any = False
     for comp in components:
-        hits = kczip.match_entries(entries, patterns_for(comp, dev["board"], kernel_name))
+        hits = kczip.match_entries(entries, patterns_for(comp, dev["board"], kernel_name,
+                                                        model))
         if not hits:
-            print(f"  {C.AMB}—{C.NC} {comp:<14} {C.DIM}no match{C.NC}")
+            print(f"  {C.AMB}—{C.NC} {comp:<14} {C.DIM}no match for {model}{C.NC}")
             continue
         found_any = True
         for e in hits[:6]:
@@ -183,8 +185,9 @@ def cmd_list(url: str, model: str, components: list[str], kernel_name: str) -> i
 def cmd_fetch(url: str, model: str, out_dir: Path, components: list[str],
               kernel_name: str, extract_payload: bool) -> int:
     dev = _device_entry(model)
-    entries = kczip.central_directory(url)
-    print(info(f"{len(entries)} entries in central directory"))
+    entries = [e for e in kczip.central_directory(url)
+               if "RESEARCH" not in e["name"]]
+    print(info(f"{len(entries)} entries in central directory (research images skipped)"))
 
     out_dir.mkdir(parents=True, exist_ok=True)
     provenance = [f"ipsw: {url}",
@@ -193,9 +196,10 @@ def cmd_fetch(url: str, model: str, out_dir: Path, components: list[str],
     failures = 0
 
     for comp in components:
-        hits = kczip.match_entries(entries, patterns_for(comp, dev["board"], kernel_name))
+        hits = kczip.match_entries(entries, patterns_for(comp, dev["board"], kernel_name,
+                                                        model))
         if not hits:
-            print(warn(f"{comp}: no matching entry — skipped"))
+            print(warn(f"{comp}: no matching entry for {model} ({dev['board']}) — skipped"))
             failures += 1
             continue
         if comp == "kernelcache" and len(hits) > 1 and not kernel_name:

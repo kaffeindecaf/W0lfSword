@@ -34,29 +34,45 @@ DEVICE_SECTIONS = ("ibss", "ibec", "txm")
 # Hard rule (OffsetMigrationChecklist.md): never trust anything below 0.90.
 PENDING_CONFIDENCE = 0.90
 
+# `ibss_component` is the name Apple uses inside `iBSS.<X>.RELEASE.im4p` /
+# `iBEC.<X>.RELEASE.im4p`. It is NOT always the board id: every iPad ships a
+# family name (iPad 9 = `ipad12p`, iPad 8 = `ipad11b`, iPad mini 5/Air 3 =
+# `j210`), and the iPhone11,x IPSWs carry all three XS/XS Max images at once.
+# Read them straight out of the shipped IPSWs (see fetch_components.py) instead
+# of deriving them from `board`, and never let a glob pick for you.
 DEVICE_DB = {
-    "iPhone11,2": {"name": "iPhone XS",           "soc": "A12", "board": "d321ap",  "apticket": "t8020"},
-    "iPhone11,4": {"name": "iPhone XS Max (CN)",   "soc": "A12", "board": "d331pap", "apticket": "t8020"},
-    "iPhone11,6": {"name": "iPhone XS Max",        "soc": "A12", "board": "d331ap",  "apticket": "t8020"},
-    "iPhone11,8": {"name": "iPhone XR",            "soc": "A12", "board": "n841ap",  "apticket": "t8020"},
+    "iPhone11,2": {"name": "iPhone XS",           "soc": "A12", "board": "d321ap",  "apticket": "t8020",
+                   "ibss_component": "d321",   "kernel_component": "kernelcache.release.iphone11"},
+    "iPhone11,4": {"name": "iPhone XS Max (CN)",   "soc": "A12", "board": "d331pap", "apticket": "t8020",
+                   "ibss_component": "d331p",  "kernel_component": "kernelcache.release.iphone11"},
+    "iPhone11,6": {"name": "iPhone XS Max",        "soc": "A12", "board": "d331ap",  "apticket": "t8020",
+                   "ibss_component": "d331",   "kernel_component": "kernelcache.release.iphone11"},
+    "iPhone11,8": {"name": "iPhone XR",            "soc": "A12", "board": "n841ap",  "apticket": "t8020",
+                   "ibss_component": "n841",   "kernel_component": "kernelcache.release.iphone11b"},
     "iPhone12,1": {"name": "iPhone 11",            "soc": "A13", "board": "n104ap",  "apticket": "t8030",
-                   "kernel_component": "kernelcache.release.iphone12b"},
+                   "ibss_component": "n104",   "kernel_component": "kernelcache.release.iphone12b"},
     "iPhone12,3": {"name": "iPhone 11 Pro",        "soc": "A13", "board": "d421ap",  "apticket": "t8030",
-                   "kernel_component": "kernelcache.release.iphone12"},
+                   "ibss_component": "d421",   "kernel_component": "kernelcache.release.iphone12"},
     "iPhone12,5": {"name": "iPhone 11 Pro Max",    "soc": "A13", "board": "d431ap",  "apticket": "t8030",
-                   "kernel_component": "kernelcache.release.iphone12"},
+                   "ibss_component": "d421",   "kernel_component": "kernelcache.release.iphone12"},
     "iPhone12,8": {"name": "iPhone SE (2nd gen)",  "soc": "A13", "board": "d79ap",   "apticket": "t8030",
-                   "kernel_component": "kernelcache.release.iphone12c"},
-    "iPad11,1":   {"name": "iPad mini 5 (WiFi)",   "soc": "A12", "board": "j211ap",  "apticket": "t8020"},
-    "iPad11,2":   {"name": "iPad mini 5 (Cell)",   "soc": "A12", "board": "j212ap",  "apticket": "t8020"},
-    "iPad11,3":   {"name": "iPad Air 3 (WiFi)",    "soc": "A12", "board": "j213ap",  "apticket": "t8020"},
-    "iPad11,4":   {"name": "iPad Air 3 (Cell)",    "soc": "A12", "board": "j214ap",  "apticket": "t8020"},
-    "iPad11,6":   {"name": "iPad 8 (WiFi)",        "soc": "A12", "board": "j171ap",  "apticket": "t8020"},
-    "iPad11,7":   {"name": "iPad 8 (Cell)",        "soc": "A12", "board": "j172ap",  "apticket": "t8020"},
+                   "ibss_component": "d79",    "kernel_component": "kernelcache.release.iphone12c"},
+    "iPad11,1":   {"name": "iPad mini 5 (WiFi)",   "soc": "A12", "board": "j211ap",  "apticket": "t8020",
+                   "ibss_component": "j210",   "kernel_component": "kernelcache.release.ipad11"},
+    "iPad11,2":   {"name": "iPad mini 5 (Cell)",   "soc": "A12", "board": "j212ap",  "apticket": "t8020",
+                   "ibss_component": "j210",   "kernel_component": "kernelcache.release.ipad11"},
+    "iPad11,3":   {"name": "iPad Air 3 (WiFi)",    "soc": "A12", "board": "j213ap",  "apticket": "t8020",
+                   "ibss_component": "j210",   "kernel_component": "kernelcache.release.ipad11"},
+    "iPad11,4":   {"name": "iPad Air 3 (Cell)",    "soc": "A12", "board": "j214ap",  "apticket": "t8020",
+                   "ibss_component": "j210",   "kernel_component": "kernelcache.release.ipad11"},
+    "iPad11,6":   {"name": "iPad 8 (WiFi)",        "soc": "A12", "board": "j171ap",  "apticket": "t8020",
+                   "ibss_component": "ipad11b", "kernel_component": "kernelcache.release.ipad11b"},
+    "iPad11,7":   {"name": "iPad 8 (Cell)",        "soc": "A12", "board": "j172ap",  "apticket": "t8020",
+                   "ibss_component": "ipad11b", "kernel_component": "kernelcache.release.ipad11b"},
     "iPad12,1":   {"name": "iPad 9 (WiFi)",        "soc": "A13", "board": "j181ap",  "apticket": "t8030",
-                   "kernel_component": "kernelcache.release.ipad12p"},
+                   "ibss_component": "ipad12p", "kernel_component": "kernelcache.release.ipad12p"},
     "iPad12,2":   {"name": "iPad 9 (Cell)",        "soc": "A13", "board": "j182ap",  "apticket": "t8030",
-                   "kernel_component": "kernelcache.release.ipad12p"},
+                   "ibss_component": "ipad12p", "kernel_component": "kernelcache.release.ipad12p"},
 }
 
 
@@ -267,6 +283,95 @@ def _discover_section(pending_section: Any, base_raw: bytes, target_raw: bytes,
             why = f"conf {r.confidence:.2f}" if r.target_offset is not None else "no hit"
             print(warn(f"    {sec}.{name}: {why} — left pending"))
     return filled
+
+
+def cmd_fill(args: list[str]):
+    """fill <profile.yaml> --from <base.yaml> --comp-dir DIR [--sections ibss,ibec,txm]
+
+    Completes the *pending* sections of an existing profile by fingerprinting a
+    verified base profile's patch sites into this device's own components. Used
+    for devices we have components for but no upstream offsets (e.g. iPad 9).
+    """
+    import migrate
+    from migrate import SECTION_TO_COMPONENT
+
+    if not args:
+        print(err("Usage: profile_gen.py fill <profile.yaml> --from <base.yaml> "
+                  "--comp-dir DIR [--sections ibss,ibec,txm] [--json]"))
+        return 1
+
+    profile_path = Path(args[0])
+    base_path, comp_dir, only = None, None, []
+    as_json = "--json" in args
+    rest = [a for a in args[1:] if a != "--json"]
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--from" and i + 1 < len(rest):
+            base_path = Path(rest[i + 1]); i += 2
+        elif rest[i] == "--comp-dir" and i + 1 < len(rest):
+            comp_dir = Path(rest[i + 1]); i += 2
+        elif rest[i] == "--sections" and i + 1 < len(rest):
+            only = [s.strip() for s in rest[i + 1].split(",") if s.strip()]; i += 2
+        else:
+            i += 1
+
+    if not profile_path.is_file():
+        print(err(f"No such profile: {profile_path}")); return 1
+    if base_path is None or comp_dir is None:
+        print(err("--from and --comp-dir are required")); return 1
+
+    profile = yaml.safe_load(profile_path.read_text())
+    base = yaml.safe_load(base_path.read_text())
+    model = profile.get("model", "?")
+
+    # sections that are still all-pending in the profile
+    pending_sections = []
+    for sec, body in (profile.get("patches") or {}).items():
+        if sec not in SECTION_TO_COMPONENT:
+            continue
+        entries = body if isinstance(body, list) else list(body.values())
+        if entries and all(isinstance(e, dict) and e.get("pending") for e in entries):
+            pending_sections.append(sec)
+    targets = only or pending_sections
+
+    section("Fill pending sections: %s" % model)
+    print(info(f"profile: {profile_path.name}   from: {base_path.name}   "
+               f"pending: {', '.join(pending_sections) or 'none'}"))
+
+    comps = migrate.load_components(comp_dir)
+    report: dict = {}
+    for sec in targets:
+        comp = SECTION_TO_COMPONENT.get(sec)
+        base_raw, target_raw = comps.base.get(comp), comps.target.get(comp)
+        if not isinstance(base_raw, bytes) or not isinstance(target_raw, bytes):
+            print(warn(f"    {sec}: components missing (base={bool(base_raw)}, "
+                       f"target={bool(target_raw)}) — skipped"))
+            report[sec] = {"filled": 0, "skipped": "components missing"}
+            continue
+        base_section = (base.get("patches") or {}).get(sec)
+        if base_section is None:
+            print(warn(f"    {sec}: base profile has no {sec} section — skipped"))
+            report[sec] = {"filled": 0, "skipped": "no base section"}
+            continue
+        print(f"    {C.DIM}{sec} ({comp}: base {len(base_raw)} B → target {len(target_raw)} B){C.NC}")
+        filled = _discover_section(profile["patches"][sec], base_raw, target_raw,
+                                   base_section, sec)
+        report[sec] = {"filled": filled,
+                       "total": len(base_section) if isinstance(base_section, (dict, list)) else 0}
+
+    # provenance on the profile itself
+    profile.setdefault("provenance", {})
+    profile["provenance"]["filled_from"] = base_path.name
+    profile["provenance"]["fill_method"] = "cross-device fingerprint (>=0.90)"
+    profile_path.write_text(yaml.safe_dump(profile, sort_keys=False, width=100))
+
+    total = sum(v.get("filled", 0) for v in report.values())
+    print()
+    print(ok(f"{total} offset(s) discovered and written to {profile_path}"))
+    if as_json:
+        print(json.dumps({"model": model, "profile": str(profile_path),
+                          "sections": report, "filled": total}, indent=2))
+    return 0
 
 
 def cmd_propagate(args: list[str]):
@@ -683,6 +788,8 @@ if __name__ == "__main__":
 
     if cmd == "create":
         cmd_create(args)
+    elif cmd == "fill":
+        sys.exit(cmd_fill(args))
     elif cmd == "propagate":
         cmd_propagate(args)
     elif cmd == "diff":

@@ -170,7 +170,7 @@ def test_gate_blocks_pending_profile(tmp_path, capsys):
     cfw_builder.FORCE = False
     assert cfw_builder._profile_gate(path) is False
     out = capsys.readouterr().out
-    assert "pending entry" in out
+    assert "unresolved entry" in out
 
 
 def test_gate_blocks_invalid_profile(tmp_path, capsys):
@@ -201,3 +201,54 @@ def test_gate_force_overrides(tmp_path):
         assert cfw_builder._profile_gate(path) is True
     finally:
         cfw_builder.FORCE = False
+
+
+# ── kernel entries from another device's kernelcache are never applied ──
+
+def test_invalid_component_kernel_entries_are_refused():
+    import cfw_builder
+
+    entries = [
+        {"name": "good", "offset": 0x100, "value": "1f2003d5"},
+        {"name": "stolen", "offset": 0x200, "value": "1f2003d5",
+         "invalid_component": True, "reason": "iphone12 != ipad12p"},
+    ]
+    ok_entries, invalid = cfw_builder.appliable_kernel_entries(entries)
+    assert [e["name"] for e in ok_entries] == ["good"]
+    assert [e["name"] for e in invalid] == ["stolen"]
+
+
+def test_appliable_kernel_entries_tolerates_junk():
+    import cfw_builder
+
+    ok_entries, invalid = cfw_builder.appliable_kernel_entries(
+        [None, "nope", {}, {"offset": 1}, {"name": "ok", "offset": 2, "value": "1f2003d5"}])
+    assert [e["name"] for e in ok_entries] == ["ok"]
+    assert invalid == []
+
+
+# ── a profile can declare a section blocked (wrong kernelcache component) ──
+
+def test_gate_refuses_a_blocked_section(tmp_path, capsys):
+    path = tmp_path / "iPad12,1_99.9.yaml"
+    profile = _profile({"kernel": [{"name": "USB Restricted Mode bypass",
+                                    "offset": 0x2894B68, "value": "200080d2c0035fd6"}]})
+    profile["blockers"] = {"kernel": {"entries": 1, "reason": "iphone12 != ipad12p"}}
+    path.write_text(yaml.safe_dump(profile))
+
+    cfw_builder.FORCE = False
+    assert cfw_builder._profile_gate(path) is False
+    assert "iphone12 != ipad12p" in capsys.readouterr().out
+
+
+def test_blocked_kernel_section_is_never_patched(monkeypatch):
+    """Even with --force, entries from another device's kernelcache are refused."""
+    called = []
+    monkeypatch.setattr(cfw_builder, "_extract_im4p_to_raw", lambda *a, **k: called.append(a) or True)
+
+    offsets = {"model": "iPad12,1",
+               "blockers": {"kernel": {"entries": 1, "reason": "iphone12 != ipad12p"}},
+               "patches": {"kernel": [{"name": "x", "offset": 0x100, "value": "1f2003d5"}]}}
+    assert cfw_builder.patch_kernel("/nonexistent", offsets, "/tmp") is True
+    assert called == [], "a blocked kernel section must not be extracted or patched"
+    assert ("kernel", "skipped") == (cfw_builder.MANIFEST[-1][0], cfw_builder.MANIFEST[-1][1])

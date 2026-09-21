@@ -5,7 +5,7 @@ build: 24A5370h
 soc: A13
 board: j181ap
 apticket: t8030
-verification: pending
+verification: partial (bootloaders verified, kernel blocked)
 propagated_from: iPhone12,3_27.0b2.yaml
 propagated:
   base: iPhone 11 Pro (iPhone12,3)
@@ -23,6 +23,8 @@ propagated:
   - txm
   note: kernel/daemons/restoreramdisk offsets are SoC-shared for this build (kernelcache.release.<soc>);
     iBSS/iBEC/TXM are device-specific bootloader binaries — discover them before flashing.
+  verified: iBSS/iBEC/TXM sites below were located in THIS device's own components by
+    cross-device fingerprinting (>= 0.90); the kernel section is blocked, see blockers.
 patches:
   kernel:
   - name: USB Restricted Mode bypass
@@ -134,72 +136,101 @@ patches:
     disable_setup: true
   ibss:
     image4_validate_nop:
-      offset: 0xdeadbeef
+      offset: 0x26444
       value: 1f2003d5
-      pending: true
+      method: cross-device
+      confidence: 0.95
     image4_validate_ret0:
-      offset: 0xdeadbeef
+      offset: 0x26448
       value: 000080d2
-      pending: true
+      method: cross-device
+      confidence: 0.95
     boot_args_adrp:
-      offset: 0xdeadbeef
-      value: 420005b0
-      pending: true
+      offset: 0x2d650
+      value: '62080090'
+      method: cross-device
+      confidence: 0.95
     boot_args_add:
-      offset: 0xdeadbeef
+      offset: 0x2d654
       value: '42214091'
-      pending: true
+      method: cross-device
+      confidence: 0.95
     boot_args_string:
       offset: 0xdeadbeef
       value: -v wdt=-1 rd=md0 -restore
       pending: true
   ibec:
     keep_nonce_b:
-      offset: 0xdeadbeef
+      offset: 0x39218
       value: '28000014'
-      pending: true
+      method: cross-device
+      confidence: 0.95
     image4_validate_nop:
-      offset: 0xdeadbeef
+      offset: 0x26444
       value: 1f2003d5
-      pending: true
+      method: cross-device
+      confidence: 0.95
     image4_validate_ret0:
-      offset: 0xdeadbeef
+      offset: 0x26448
       value: 000080d2
-      pending: true
+      method: cross-device
+      confidence: 0.95
     boot_args_adrp:
-      offset: 0xdeadbeef
-      value: 420005b0
-      pending: true
+      offset: 0x2d650
+      value: '62080090'
+      method: cross-device
+      confidence: 0.95
     boot_args_add:
-      offset: 0xdeadbeef
+      offset: 0x2d654
       value: '42214091'
-      pending: true
+      method: cross-device
+      confidence: 0.95
     boot_args_string:
       offset: 0xdeadbeef
       value: -v wdt=-1 rd=md0 -restore
       pending: true
   txm:
     query_module2:
-      offset: 0xdeadbeef
+      offset: 0x39fac
       value: 000080d2
-      pending: true
+      method: cross-device
+      confidence: 0.95
     query_module0:
-      offset: 0xdeadbeef
+      offset: 0x39cb0
       value: 000080d2
-      pending: true
+      method: cross-device
+      confidence: 0.95
     query_module1:
-      offset: 0xdeadbeef
+      offset: 0x39e18
       value: 000080d2
-      pending: true
+      method: cross-device
+      confidence: 0.95
     validate_constraints_sig_nop1:
-      offset: 0xdeadbeef
+      offset: 0x3f564
       value: 1f2003d5
-      pending: true
+      method: cross-device
+      confidence: 0.95
     validate_constraints_sig_nop2:
-      offset: 0xdeadbeef
+      offset: 0x3f56c
       value: 1f2003d5
-      pending: true
+      method: cross-device
+      confidence: 0.95
     allowed_before_secure_channel:
-      offset: 0xdeadbeef
+      offset: 0x2bcb4
       value: 200080d2c0035fd6
-      pending: true
+      method: cross-device
+      confidence: 0.95
+
+blockers:
+  kernel:
+    entries: 18
+    reason: >-
+      kernelcache offsets are per component: iPad 9 boots kernelcache.release.ipad12p, while these
+      values were copied from iPhone12,3 (kernelcache.release.iphone12). No verified ipad12p offsets
+      exist yet and the wiki publishes no kernelcache key for iPad12,x, so they cannot be derived
+      offline. The builder refuses this section until real ipad12p offsets are contributed.
+    needs: a contributor with an iPad 9 (derive/verify the 18 kernel sites), or a published ipad12p key
+pending:
+  - {section: ibss, entry: boot_args_string, reason: "fingerprint below the 0.90 confidence floor"}
+  - {section: ibec, entry: boot_args_string, reason: "fingerprint below the 0.90 confidence floor"}
+  - {section: restoreramdisk, entry: asr_sig_bypass/fdr_force_succeed, reason: "offsets target binaries inside the mounted dmg; this build path cannot mount + re-sign it"}

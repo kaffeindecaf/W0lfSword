@@ -16,12 +16,34 @@ from typing import Any
 
 import yaml
 
+import components
+import dt_patch
 from colors import C, ok, err, warn, info, stage, section
 
 TOOLS_DIR = Path(__file__).parent / "tools"
 DRY_RUN = False
 VERBOSE = True
 FORCE = False          # --force: build despite failed preflight / pending entries
+FORCE_COMPONENT = False  # --force-component: take the first component when several match
+# per-section outcome of this build, printed at the end so a user can see what
+# was actually patched and what was skipped (and why)
+MANIFEST: list[tuple[str, str, str]] = []
+
+
+def _note(section: str, status: str, detail: str = "") -> None:
+    MANIFEST.append((section, status, detail))
+
+
+def blocked_sections(offsets: dict) -> list[dict]:
+    """Sections this profile declares as blocked (see device_offsets.blocked_sections)."""
+    from device_offsets import blocked_sections as _blocked
+    blockers = offsets.get("blockers")
+    if isinstance(blockers, dict):
+        out = []
+        for name, body in blockers.items():
+            out.append({"section": name, **(body if isinstance(body, dict) else {"reason": body})})
+        return out
+    return [b for b in blockers or [] if isinstance(b, dict)]
 
 
 def _tool(name: str) -> str:
@@ -111,26 +133,29 @@ def _apply_dict_patches(fp, patches: dict, section_name: str) -> int:
 
 
 def patch_ibss(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> bool:
-    """Patch iBSS: unwrap, apply ibss patches, rewrap."""
+    """Patch iBSS: resolve the device's iBSS, apply the ibss patches, rewrap."""
     print(stage("1/6", "Patching iBSS"))
     ibss_patches = offsets.get("patches", {}).get("ibss", {})
 
-    board = _board_short(offsets)
-    src = Path(ipsw_dir) / "Firmware" / "dfu" / f"iBSS.{board}.RELEASE.im4p"
-    if not src.exists():
-        candidates = list((Path(ipsw_dir) / "Firmware" / "dfu").glob("iBSS.*.RELEASE.im4p"))
-        if not candidates:
-            print(err(f"iBSS not found: {src}"))
-            return False
-        src = candidates[0]
+    src, candidates, reason = components.find_component(ipsw_dir, "ibss", offsets,
+                                                       force=FORCE_COMPONENT)
+    if src is None:
+        print(err(f"iBSS not found for {offsets.get('model', '?')}: {reason}"))
+        _note("ibss", "failed", reason)
+        return False
+    if reason == "forced":
+        print(warn(f"iBSS: several candidates, using {src.name}"))
+    print(f"    {C.DIM}component: {src.name} ({components.component_stem(offsets, 'ibss')}){C.NC}")
 
     raw = Path(work_dir) / "iBSS.raw"
     if not _extract_im4p_to_raw(src, raw):
         print(err("Failed to extract iBSS"))
+        _note("ibss", "failed", "extract")
         return False
 
     with open(raw, "r+b") as fp:
-        _apply_dict_patches(fp, ibss_patches, "ibss")
+        count = _apply_dict_patches(fp, ibss_patches, "ibss")
+    _note("ibss", "patched", f"{count} entries → {src.name}")
 
     if DRY_RUN:
         return True
@@ -140,32 +165,33 @@ def patch_ibss(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> boo
 
 
 def patch_ibec(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> bool:
-    """Patch iBEC: unwrap, apply ibec patches, rewrap."""
+    """Patch iBEC: resolve the device's iBEC, apply the ibec patches, rewrap."""
     print(stage("2/6", "Patching iBEC"))
     ibec_patches = offsets.get("patches", {}).get("ibec", {})
 
-    board = _board_short(offsets)
     cfw_dir = Path(ipsw_dir).parent / "CFW" / "Firmware" / "dfu"
-    src = cfw_dir / f"iBEC.{board}.RELEASE.im4p"
-    if not src.exists():
-        # fallback: try in ipsw dir
-        src = Path(ipsw_dir) / "Firmware" / "dfu" / f"iBEC.{board}.RELEASE.im4p"
-    if not src.exists():
-        candidates = list((Path(ipsw_dir) / "Firmware" / "dfu").glob("iBEC.*.RELEASE.im4p"))
-        if candidates:
-            src = candidates[0]
-
-    if not src.exists():
-        print(err(f"iBEC not found: {src}"))
+    search_roots = [Path(ipsw_dir)] + ([Path(ipsw_dir).parent / "CFW"] if cfw_dir.exists() else [])
+    src = None
+    reason = "no iBEC component found"
+    for root in search_roots:
+        src, _candidates, reason = components.find_component(root, "ibec", offsets,
+                                                            force=FORCE_COMPONENT)
+        if src is not None:
+            break
+    if src is None:
+        print(err(f"iBEC not found for {offsets.get('model', '?')}: {reason}"))
+        _note("ibec", "failed", reason)
         return False
 
     raw = Path(work_dir) / "iBEC.raw"
     if not _extract_im4p_to_raw(src, raw):
         print(err("Failed to extract iBEC"))
+        _note("ibec", "failed", "extract")
         return False
 
     with open(raw, "r+b") as fp:
-        _apply_dict_patches(fp, ibec_patches, "ibec")
+        count = _apply_dict_patches(fp, ibec_patches, "ibec")
+    _note("ibec", "patched", f"{count} entries → {src.name}")
 
     if DRY_RUN:
         return True
@@ -176,44 +202,35 @@ def patch_ibec(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> boo
 
 
 def patch_devicetree(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> bool:
-    """Patch DeviceTree: unwrap, remove content-protect, add flags, rewrap."""
+    """Patch DeviceTree with the native FDT patcher (dt_patch.py)."""
     print(stage("3/6", "Patching DeviceTree"))
-    dt_patches = offsets.get("patches", {}).get("devicetree", {})
+    dt_flags = offsets.get("patches", {}).get("devicetree", {}) or {}
 
-    board = _board_config(offsets)
-    src = Path(ipsw_dir) / "Firmware" / "all_flash" / f"DeviceTree.{board}.im4p"
-    if not src.exists():
-        candidates = list((Path(ipsw_dir) / "Firmware" / "all_flash").glob("DeviceTree.*.im4p"))
-        if not candidates:
-            print(err(f"DeviceTree not found: {src}"))
-            return False
-        src = candidates[0]
+    src, _candidates, reason = components.find_component(ipsw_dir, "devicetree", offsets,
+                                                        force=FORCE_COMPONENT)
+    if src is None:
+        print(err(f"DeviceTree not found for {offsets.get('model', '?')}: {reason}"))
+        _note("devicetree", "failed", reason)
+        return False
 
     raw = Path(work_dir) / "DeviceTree.raw"
     if not _extract_im4p_to_raw(src, raw):
         print(err("Failed to extract DeviceTree"))
+        _note("devicetree", "failed", "extract")
         return False
 
-    # DeviceTree patching is structural (not simple hex patches).
-    # For now, shell out to the existing dt_patch.py scripts.
-    # In a future version, we'll implement native DeviceTree manipulation.
-    dt_scripts_dir = Path(__file__).parent.parent / "referenceforAI" / "usbliter8-fun2" / "work-27.0b2"
-    if not dt_scripts_dir.exists():
-        dt_scripts_dir = Path.home() / "Desktop" / "W0lfSword" / "referenceforAI" / "usbliter8-fun2" / "work-27.0b2"
-        if not dt_scripts_dir.exists():
-            dt_scripts_dir = Path.home() / "Desktop" / "W0lfSword" / "referenceforAI" / "projects" / "usbliter8-fun2" / "work-27.0b2"
-    scripts = [
-        "set_ephemeral.py" if dt_patches.get("ephemeral_storage") else None,
-        "set_system_rw.py",
-    ]
-
-    for script in scripts:
-        if script:
-            script_path = dt_scripts_dir / script
-            if script_path.exists():
-                _run(["python3", str(script_path), str(raw)], check=False)
-            else:
-                print(warn(f"DT script not found: {script_path}"))
+    data = Path(raw).read_bytes()
+    patched, report = dt_patch.apply_profile_flags(data, dt_flags)
+    for op, status in report:
+        color = C.GRN if status in ("removed", "updated", "added", "unchanged") else C.AMB
+        print(f"    {color}{status:<10}{C.NC} {op}")
+    Path(raw).write_bytes(patched)
+    failed = [f"{op}={status}" for op, status in report
+              if status.startswith("node-not-found")]
+    _note("devicetree", "patched" if not failed else "partial",
+          ", ".join(f"{op}: {status}" for op, status in report) or "no flags set")
+    if failed:
+        print(warn(f"DeviceTree: {', '.join(failed)}"))
 
     if DRY_RUN:
         return True
@@ -222,39 +239,71 @@ def patch_devicetree(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) 
     return _wrap_raw_to_im4p(raw, dest, "dtre")
 
 
+def appliable_kernel_entries(kernel_patches: list) -> tuple[list, list]:
+    """Split kernel entries into (appliable, refused).
+
+    Entries marked `invalid_component` were derived from another device's
+    kernelcache (e.g. iPhone offsets in an iPad profile); applying them would
+    patch unrelated code, so they are refused even with --force.
+    """
+    ok, invalid = [], []
+    for entry in kernel_patches or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("invalid_component"):
+            invalid.append(entry)
+        elif "offset" in entry and "value" in entry:
+            ok.append(entry)
+        # entries without offset/value cannot be applied; validate_offsets reports them
+    return ok, invalid
+
+
 def patch_kernel(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> bool:
-    """Patch kernelcache: apply hex patches from the kernel section."""
+    """Patch kernelcache: resolve the device's own kernelcache, apply patches."""
     print(stage("4/6", "Patching Kernel"))
     kernel_patches = offsets.get("patches", {}).get("kernel", [])
 
-    src = None
-    for pattern in ["kernelcache.release.iphone12", "kernelcache.release.iphone11"]:
-        for root, _, files in os.walk(ipsw_dir):
-            for f in files:
-                if pattern in f and f.endswith(".im4p"):
-                    src = Path(root) / f
-                    break
-            if src:
-                break
-        if src:
-            break
-
-    if not src:
-        kc_paths = list(Path(ipsw_dir).rglob("kernelcache.release.*"))
-        if kc_paths:
-            src = kc_paths[0]
-        else:
-            print(warn("Kernelcache not found — skipping kernel patches"))
-            return True
+    src, candidates, reason = components.find_component(ipsw_dir, "kernelcache", offsets,
+                                                       force=FORCE_COMPONENT)
+    if src is None:
+        print(warn(f"Kernelcache not found for {offsets.get('model', '?')}: {reason}"))
+        _note("kernel", "skipped", reason)
+        return True
+    expected = components.component_stem(offsets, "kernelcache")
+    if reason == "forced" and expected:
+        print(warn(f"kernelcache: using {src.name}, profile expects {expected}"))
+    if expected and expected not in src.name:
+        print(warn(f"kernelcache {src.name} does not match this device's component "
+                   f"({expected}) — kernel offsets are per component"))
+        _note("kernel", "mismatch", f"{src.name} != {expected}")
+    print(f"    {C.DIM}component: {src.name}{C.NC}")
 
     raw = Path(work_dir) / "kernelcache.raw"
     if not _extract_im4p_to_raw(src, raw):
-        print(err("Failed to extract kernelcache"))
+        print(err("Failed to extract kernelcache (decryption needs the wiki IV+key)"))
+        _note("kernel", "failed", "extract")
         return False
 
+    blocked = blocked_sections(offsets)
+    if blocked:
+        print(err(f"kernel section is BLOCKED for {offsets.get('model', '?')} — refusing to patch"))
+        for entry in blocked:
+            print(f"    {C.DIM}{entry.get('reason', '').strip()}{C.NC}")
+        _note("kernel", "skipped", f"blocked: {blocked[0].get('reason', '').strip()[:120]}")
+        return True
+
     count = 0
+    _appliable, invalid = appliable_kernel_entries(kernel_patches)
+    if invalid:
+        print(err(f"kernel: {len(invalid)} entry/entries belong to a different "
+                  f"kernelcache component — refusing to apply them"))
+        print(f"    {C.DIM}{invalid[0].get('reason', '')}{C.NC}")
+        _note("kernel", "skipped",
+              f"{len(invalid)} invalid-component entries (not applied)")
     with open(raw, "r+b") as fp:
         for entry in kernel_patches:
+            if isinstance(entry, dict) and entry.get("invalid_component"):
+                continue
             if isinstance(entry, dict) and "offset" in entry and "value" in entry:
                 off = entry["offset"]
                 val = entry["value"]
@@ -274,6 +323,7 @@ def patch_kernel(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> b
                     print(err(f"Invalid hex for {name}: {val}"))
 
     print(ok(f"Kernel: {count} patches applied"))
+    _note("kernel", "patched", f"{count} entries → {src.name}")
 
     if DRY_RUN:
         return True
@@ -282,40 +332,58 @@ def patch_kernel(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> b
 
 
 def patch_restoreramdisk(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> bool:
-    """Patch RestoreRamdisk components."""
+    """Patch RestoreRamdisk components.
+
+    On iOS 26/27 IPSWs the restore ramdisk is a plain root-level `<build>.dmg`
+    and the offsets in a profile target `restored_external` and `asr` *inside*
+    the mounted image. That needs mounting + re-signing (hdiutil/ldid), which
+    this pure-Python path does not do, so the section is reported as skipped
+    instead of silently "succeeding".
+    """
     print(stage("5/6", "Patching RestoreRamdisk"))
     rd_patches = offsets.get("patches", {}).get("restoreramdisk", {})
 
     if not rd_patches:
         print(warn("No restoreramdisk patches defined — skipping"))
+        _note("restoreramdisk", "skipped", "no patches in profile")
         return True
 
-    rd_dir = Path(ipsw_dir) / "Firmware" / "all_flash"
-    ramdisk_files = list(rd_dir.glob("*RestoreRamdisk*"))
-    if not ramdisk_files:
-        ramdisk_files = list(rd_dir.glob("*restoreramdisk*")) + list(rd_dir.glob("*ramdisk*"))
-
-    if not ramdisk_files:
-        print(warn("RestoreRamdisk not found — skipping"))
+    src, candidates, reason = components.find_component(ipsw_dir, "restoreramdisk", offsets)
+    if src is None:
+        print(warn(f"RestoreRamdisk not found ({reason}) — skipping"))
+        _note("restoreramdisk", "skipped", reason)
         return True
 
-    ramdisk_path = ramdisk_files[0]
+    if reason == "modern-dmg-layout":
+        print(warn(f"RestoreRamdisk is {src.name} (a plain dmg, not an im4p)"))
+        print(f"    {C.DIM}the profile targets restored_external/asr inside the mounted image;"
+              f" this build path cannot mount + re-sign it{C.NC}")
+        print(f"    {C.DIM}the CFW will be built WITHOUT {len(rd_patches)} ramdisk patch(es) —"
+              f" expect asr/FDR checks to fail on restore{C.NC}")
+        _note("restoreramdisk", "skipped",
+              f"{src.name}: needs mount+resign ({len(rd_patches)} patches not applied)")
+        return True
+
     raw = Path(work_dir) / "RestoreRamdisk.raw"
-    if not _extract_im4p_to_raw(ramdisk_path, raw):
+    if not _extract_im4p_to_raw(src, raw):
         print(err("Failed to extract RestoreRamdisk — cannot patch im4p at raw offsets"))
+        _note("restoreramdisk", "failed", "extract")
         return False
 
     with open(raw, "r+b") as fp:
         applied = _apply_dict_patches(fp, rd_patches, "restoreramdisk")
 
     if DRY_RUN:
+        _note("restoreramdisk", "patched", f"{applied} entries → {src.name}")
         return True
 
-    if not _wrap_raw_to_im4p(raw, ramdisk_path, "rdsk"):
+    if not _wrap_raw_to_im4p(raw, src, "rdsk"):
         print(err("Failed to rewrap RestoreRamdisk"))
+        _note("restoreramdisk", "failed", "rewrap")
         return False
 
     print(ok(f"RestoreRamdisk: {applied} patches applied and re-wrapped into IPSW"))
+    _note("restoreramdisk", "patched", f"{applied} entries → {src.name}")
     return True
 
 
@@ -374,7 +442,7 @@ def patch_userland(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) ->
     return True
 
 
-def _profile_gate(offsets_path: Path) -> bool:
+def _profile_gate(offsets_path: Path, source: Path | None = None) -> bool:
     """Refuse to patch with an invalid, pending or unverified profile.
 
     This is the C1.3 gate: the patch manifest is compared against the profile
@@ -384,7 +452,9 @@ def _profile_gate(offsets_path: Path) -> bool:
     from device_offsets import pending_entries, validate_offsets
 
     passed, failed, errors = validate_offsets(offsets_path)
-    pend = pending_entries(offsets_path)
+    profile_data = yaml.safe_load(offsets_path.read_text()) or {}
+    blocked_list = blocked_sections(profile_data)
+    pend = pending_entries(offsets_path) + sum(int(b.get("entries", 0) or 0) for b in blocked_list)
 
     blocked = False
     if failed:
@@ -393,13 +463,21 @@ def _profile_gate(offsets_path: Path) -> bool:
             print(f"    {C.RED}{e}{C.NC}")
         blocked = True
     if pend:
-        print(warn(f"profile has {pend} pending entry/entries (sentinel offsets) — "
-                   f"not flashable"))
+        print(warn(f"profile has {pend} unresolved entry/entries (pending sentinels or "
+                   f"blocked sections) — not flashable"))
         blocked = True
+    for blocker in blocked_list:
+        print(warn(f"{blocker.get('section', '?')} section blocked: "
+                   f"{str(blocker.get('reason', '')).strip()[:160]}"))
 
     try:
         import preflight
-        report = preflight.run_preflight(offsets_path)
+        # verify against the exact bytes being built from, when we have them
+        src = Path(source) if source else None
+        report = preflight.run_preflight(
+            offsets_path,
+            ipsw=src if src and src.is_file() else None,
+            components=src if src and src.is_dir() else None)
     except Exception as exc:                                  # noqa: BLE001
         print(info(f"preflight unavailable ({exc}) — offsets not verified"))
         return not blocked or FORCE
@@ -424,6 +502,19 @@ def _profile_gate(offsets_path: Path) -> bool:
     return True
 
 
+def _print_manifest() -> None:
+    """Per-section patch manifest: what this build actually wrote."""
+    if not MANIFEST:
+        return
+    print()
+    print(section("Patch manifest"))
+    for section, status, detail in MANIFEST:
+        color = {"patched": C.GRN, "skipped": C.AMB, "mismatch": C.RED,
+                 "failed": C.RED, "partial": C.AMB}.get(status, C.DIM)
+        print(f"  {color}{status:<9}{C.NC} {section:<15} {C.DIM}{detail}{C.NC}")
+    print()
+
+
 def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
     """Full CFW build pipeline."""
     if DRY_RUN:
@@ -433,6 +524,7 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
         print(f"  {C.AMB}{'=' * 56}{C.NC}")
         print()
 
+    MANIFEST.clear()
     with open(offsets_path) as f:
         offsets = yaml.safe_load(f)
 
@@ -443,7 +535,7 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
     print(section(f"Target: {device} ({model}) — iOS {ios}"))
     print()
 
-    if not _profile_gate(offsets_path):
+    if not _profile_gate(offsets_path, ipsw_path):
         return False
 
     if not ipsw_path.exists():
@@ -461,17 +553,51 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
 
         # Simulate all patch steps
         print(section("Patch Simulation"))
+        if ipsw_path.is_dir():
+            for kind in ("ibss", "ibec", "devicetree", "kernelcache", "restoreramdisk"):
+                path, _cands, _reason = components.find_component(ipsw_path, kind, offsets)
+                stem = components.component_stem(offsets, kind)
+                label = f"{C.DIM}{kind}{C.NC}"
+                if path is not None:
+                    print(f"    {C.GRN}✓{C.NC} {label}: {path.name}")
+                elif stem:
+                    print(f"    {C.AMB}—{C.NC} {label}: not found (expected {stem})")
+        rd_reason = ""
+        if ipsw_path.is_dir():
+            _rd, _cands, rd_reason = components.find_component(ipsw_path, "restoreramdisk",
+                                                            offsets)
+        blocked_names = {b.get("section") for b in blocked_sections(offsets)}
+        skipped = 0
         for section_name in ["ibss", "ibec", "devicetree", "kernel", "restoreramdisk", "daemons"]:
             section_data = offsets.get("patches", {}).get(section_name, {})
             if section_name == "kernel" and isinstance(section_data, list):
                 for entry in section_data:
-                    if isinstance(entry, dict):
-                        print(f"    {C.DIM}[dry-run]{C.NC} {entry.get('name', '?')} @ 0x{entry.get('offset', 0):X} → {entry.get('value', '?')}")
+                    if not isinstance(entry, dict):
+                        continue
+                    if entry.get("invalid_component") or section_name in blocked_names:
+                        skipped += 1
+                        continue
+                    print(f"    {C.DIM}[dry-run]{C.NC} {entry.get('name', '?')} @ 0x{entry.get('offset', 0):X} → {entry.get('value', '?')}")
             elif isinstance(section_data, dict):
                 for name, entry in section_data.items():
                     if isinstance(entry, dict) and "offset" in entry:
+                        if entry.get("pending"):
+                            skipped += 1
+                            continue
+                        if section_name == "restoreramdisk" and rd_reason == "modern-dmg-layout":
+                            skipped += 1
+                            continue
                         print(f"    {C.DIM}[dry-run]{C.NC} {section_name}.{name} @ 0x{entry['offset']:X}")
         print()
+        if skipped:
+            print(warn(f"{skipped} entry/entries would be SKIPPED (pending, invalid for "
+                       f"this device's component, or not appliable by this build path)"))
+        if blocked_names:
+            print(warn(f"blocked section(s): {', '.join(sorted(n for n in blocked_names if n))} "
+                       f"(see the profile's blockers:)"))
+        if rd_reason == "modern-dmg-layout":
+            print(warn("restore ramdisk is a bare .dmg: those offsets target "
+                       "restored_external/asr inside the mounted image"))
         print(ok("Dry-run complete — all patches validated"))
         shutil.rmtree(work_dir)
         return True
@@ -497,12 +623,22 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
+    _print_manifest()
+
     if ok_patch:
+        blocked = [m for m in MANIFEST if m[1] in ("skipped", "mismatch", "failed")]
         print()
         print(f"  {C.GRN}{'═' * 56}{C.NC}")
-        print(f"  {C.GRN}  Custom firmware built successfully!{C.NC}")
+        if blocked:
+            print(f"  {C.AMB}  Custom firmware built, {len(blocked)} section(s) NOT fully applied{C.NC}")
+        else:
+            print(f"  {C.GRN}  Custom firmware built successfully!{C.NC}")
         print(f"  {C.GRN}  Patched IPSW at: {ipsw_dir}{C.NC}")
         print(f"  {C.GRN}{'═' * 56}{C.NC}")
+        if blocked:
+            print()
+            print(warn("Do not restore this build blindly: the sections above were skipped "
+                       "or mismatched."))
         print()
         return True
     else:
@@ -521,6 +657,10 @@ if __name__ == "__main__":
         FORCE = True
         args = [a for a in args if a != "--force"]
 
+    if "--force-component" in args:
+        FORCE_COMPONENT = True
+        args = [a for a in args if a != "--force-component"]
+
     if "--dry-run" in args or "--check" in args or "--check-only" in args:
         DRY_RUN = True
         args = [a for a in args if a not in ("--dry-run", "--check", "--check-only")]
@@ -534,6 +674,7 @@ if __name__ == "__main__":
         print(f"  Flags: --check-only    Validate patches without extracting IPSW")
         print(f"         --quiet         Suppress per-patch output")
         print(f"         --force         Build even when preflight fails (NOT recommended)")
+        print(f"         --force-component  Use the first component when several match")
         sys.exit(1)
 
     ipsw = Path(args[0])
