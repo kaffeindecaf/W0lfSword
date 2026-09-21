@@ -26,6 +26,8 @@ Usage:
 Nothing is written: the audit is evidence for a human decision.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import struct

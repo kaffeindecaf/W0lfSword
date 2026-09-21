@@ -4,6 +4,8 @@ Loads YAML offset files, validates patches, finds online sources,
 and manages the active device configuration.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
@@ -406,6 +408,9 @@ if __name__ == "__main__":
             print(err(f"{passed} passed, {failed} failed:"))
             for e in errors:
                 print(f"    {C.RED}{e}{C.NC}")
+        # exit code so scripts and CI can gate on the result (--json included)
+        if failed:
+            sys.exit(1)
 
     elif cmd == "find":
         model = sys.argv[2] if len(sys.argv) > 2 else ""

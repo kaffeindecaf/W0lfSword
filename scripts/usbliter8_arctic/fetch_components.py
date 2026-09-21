@@ -25,6 +25,8 @@ Notes:
   - --extract-payload shells out to pyimg4 when it is installed.
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json

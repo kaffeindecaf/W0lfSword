@@ -4,6 +4,8 @@ Handles: normal boot, SSHRD boot, device restore, USB networking,
 and VNC remote control setup.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import time

@@ -27,6 +27,8 @@ Usage:
       --verify-components research/extracted/iPhone121_27.0_24A437 [--write]
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys

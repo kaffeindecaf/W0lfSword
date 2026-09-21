@@ -26,6 +26,8 @@ Environment:
     UL8_NO_LOG     set to 1 to disable writing entirely
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import threading

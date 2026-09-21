@@ -3,6 +3,8 @@ canonical snapshot, the migration report verdict/confidence floor, and the
 cfw_builder profile gate.
 """
 
+from __future__ import annotations
+
 import json
 import subprocess
 import sys

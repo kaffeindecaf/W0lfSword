@@ -2,7 +2,7 @@
 
 > The easy way to run the usbliter8 tethered jailbreak. A TUI hub that walks you through the whole chain: wire up an RP2350 board, flash the exploit firmware, build a custom firmware for your A12/A13 iPhone or iPad, restore it, and boot. Offsets are managed as validated YAML profiles, and a fingerprint engine migrates them between iOS betas automatically.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-154%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-190%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 ## Quick start
 
@@ -343,6 +343,60 @@ UL8_NO_LOG=1                  python3 ul8.py build … # no file at all
 Logging never breaks a run: an unwritable path prints one stderr note and
 disables itself. Test runs never touch the repo log.
 
+## Repo safety
+
+The repo is public and its output is flashed onto real hardware, so two classes
+of accident are guarded mechanically: leaking something personal, and shipping
+offset data that no longer matches the evidence it was recorded against.
+
+```bash
+python3 safety_check.py            # the same gate CI runs
+python3 safety_check.py --strict   # warnings (badge drift, docs style) fail too
+python3 safety_check.py --json     # machine-readable
+```
+
+`safety_check.py` fails on: private keys / tokens / UDIDs in tracked files,
+machine-local home paths, tracked generated files (`usbliter8.log`, `session.log`,
+`research/`, `firmware/`, `config.yaml`, `checklist.md`), offset profiles that do
+not validate or whose file name disagrees with `model` + `ios_version`, a profile
+claiming to be verified while it still has pending entries or blockers, and
+`offsets/evidence/*.json` whose recorded offsets no longer match the profile.
+It warns (with `--strict`: fails) on the README test badge drifting from the
+collected test count and em dashes in the docs. Append `# safety-allow: <reason>`
+to a line you deliberately want to keep.
+
+CI (`.github/workflows/tests.yml`) runs `compileall`, `safety_check.py`, every
+profile through `device_offsets.py validate` and the test suite on 3.13, plus the
+suite on 3.9. Both versions pass locally.
+
+### Branch ruleset
+
+`protect-main` (GitHub -> Settings -> Rules -> Rulesets) applies to the default
+branch:
+
+| rule | effect |
+|---|---|
+| `deletion` | `main` cannot be deleted |
+| `non_fast_forward` | no force-push over `main` history |
+| `pull_request` | changes reach `main` through a PR (0 required approvals, so solo work is not blocked) |
+| `required_status_checks` | the `tests` job must pass, on an up-to-date branch |
+
+The repository admin role can bypass, which is why a direct push prints
+`Bypassed rule violations ...` and still goes through. To make the rules hard for
+everyone, remove the bypass actor:
+
+```bash
+gh api -X PUT repos/kaffeindecaf/usbliter8-arctic/rulesets/<id> --input - <<'JSON'
+{"bypass_actors": []}
+JSON
+```
+
+A second ruleset, `keep-working-branches`, protects `feat/*` from accidental
+deletion (force-push stays allowed there, since `--amend` + `--force-with-lease`
+is a normal part of the workflow).
+
+Security reports: see [SECURITY.md](SECURITY.md) (private reporting, not issues).
+
 ## Contributing offsets
 
 Found offsets for a device/iOS combo that isn't covered yet? The `contribute` flow handles the whole thing:
@@ -389,10 +443,12 @@ usbliter8-arctic/
 ├── fetch_components.py   # ranged IPSW component fetcher + IPSW url resolution
 ├── preflight.py          # verify a profile against the real component bytes
 ├── kczip.py              # zip64 range reader (ported from W0lfSword)
+├── safety_check.py       # pre-push/CI gate: leaks, machine paths, profile/evidence drift
 ├── hardware_guide.py     # guided setup, health check, firmware flashing
 ├── deps.py               # dependency checker & installer
 ├── log_utils.py          # usbliter8.log: errors, warnings, tracebacks, `ul8.py logs`
 ├── colors.py
+├── .github/workflows/    # CI: compileall + safety check + profiles + tests (3.13 and 3.9)
 ├── offsets/              # device offset profiles (+ template, sources, canonical.yaml)
 │   └── evidence/         # preflight-recorded original bytes per profile (self-verifying)
 ├── tools/                # binary utilities (img4, img4tool, usbliter8ctl, …)

@@ -11,6 +11,8 @@ Usage:
   python3 profile_gen.py diff base.yaml updated.yaml
 """
 
+from __future__ import annotations
+
 import copy
 import json
 import sys

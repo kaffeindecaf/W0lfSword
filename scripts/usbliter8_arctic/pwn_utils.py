@@ -5,6 +5,8 @@ verifies PWN DFU mode via USB serial number check, handles retries,
 and polls for device state changes.
 """
 
+from __future__ import annotations
+
 import sys
 import time
 import subprocess

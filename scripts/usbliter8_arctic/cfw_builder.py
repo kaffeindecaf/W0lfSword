@@ -6,6 +6,8 @@ DeviceTree, kernel, RestoreRamdisk, and userland binaries.
 Supports --dry-run for validation without writing.
 """
 
+from __future__ import annotations
+
 import os
 import shutil
 import struct
