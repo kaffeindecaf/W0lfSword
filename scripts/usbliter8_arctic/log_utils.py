@@ -74,8 +74,13 @@ _LEVEL_COLORS = {
 }
 
 
-class CleanExit(Exception):
-    """Raised to stop with a message and an exit code instead of a traceback."""
+class CleanExit(BaseException):
+    """Raised to stop with a message and an exit code instead of a traceback.
+
+    Deliberately a BaseException, like SystemExit/KeyboardInterrupt: a broad
+    `except Exception` around a prompt must not be able to swallow an "input
+    ended, stop before doing something destructive" signal.
+    """
 
     def __init__(self, code: int = EXIT_ERROR, message: str = ""):
         super().__init__(message)

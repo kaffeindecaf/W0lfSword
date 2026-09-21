@@ -204,3 +204,32 @@ def test_modules_using_log_utils_import_it_at_module_level():
         if not re.search(r"^import log_utils$", text, re.M):
             offenders.append(path.name)
     assert not offenders, f"missing module-level `import log_utils`: {offenders}"
+
+
+def test_clean_exit_cannot_be_swallowed_by_a_broad_handler():
+    """CleanExit is a BaseException on purpose: `except Exception` around a prompt
+    must not turn "input ended, stop" into a silent continue."""
+    def swallower():
+        try:
+            raise log_utils.CleanExit(log_utils.EXIT_BLOCKED, "stop")
+        except Exception:                                    # noqa: BLE001
+            return "swallowed"
+        return "survived"
+
+    assert log_utils.guard(swallower) == log_utils.EXIT_BLOCKED
+
+
+def test_flash_prompt_stops_with_closed_stdin(tmp_path):
+    """The device-erasing path must refuse to guess when it has no terminal."""
+    import os
+    import subprocess
+
+    env = dict(os.environ, UL8_LOG_FILE=str(tmp_path / "flash.log"))
+    result = subprocess.run([sys.executable, "main.py", "flash"],
+                            cwd=Path(__file__).parent.parent, capture_output=True,
+                            text=True, env=env, stdin=subprocess.DEVNULL, timeout=180)
+    assert result.returncode == log_utils.EXIT_ERROR
+    combined = result.stdout + result.stderr
+    assert "input ended" in combined
+    assert "needs a terminal" in combined
+    assert "erases the device" not in combined.lower() or "THIS ERASES" in combined
