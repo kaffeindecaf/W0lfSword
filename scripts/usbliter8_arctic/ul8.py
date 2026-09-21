@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from colors import err, info
+
 import log_utils
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -39,9 +40,15 @@ def _cli() -> int:
              "logs, version",
     )
     p.add_argument("profile", nargs="?", default="", help="profile for preflight")
+    p.add_argument("--no-deps", action="store_true",
+                   help="skip the dependency check (nothing is installed)")
     # parse_known_args: flags meant for the wrapped tool (--json, --fetch, --record)
     # must pass through instead of being rejected by this parser.
     args, extra = p.parse_known_args()
+
+    if not args.no_deps:
+        import deps
+        deps.ensure_for_command(args.command, quiet="--json" in extra)
 
     if args.dry_run:
         import cfw_builder

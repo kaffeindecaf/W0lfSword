@@ -275,6 +275,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import deps
+    deps.ensure(("profiles", "fetch"))          # offer to install what is missing
+
     args = parse_args(argv if argv is not None else sys.argv[1:])
     _device_entry(args.device)          # validates the model, exits on an unknown one
     comps = [c.strip() for c in args.entries.split(",") if c.strip()]

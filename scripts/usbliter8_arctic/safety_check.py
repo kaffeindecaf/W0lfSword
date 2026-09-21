@@ -305,6 +305,9 @@ def check_docs_style(files: list[str]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import deps
+    deps.ensure(("security",))          # offer to install what is missing
+
     ap = argparse.ArgumentParser(description="safety check for the usbliter8-arctic repo")
     ap.add_argument("--json", action="store_true", help="machine-readable result")
     ap.add_argument("--quiet", action="store_true", help="only print problems")

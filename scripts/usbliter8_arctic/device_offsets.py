@@ -443,4 +443,7 @@ if __name__ == "__main__":
     import log_utils
 
     log_utils.install()          # usbliter8.log + clean exits
+
+    import deps
+    deps.ensure(("profiles",))          # offer to install what is missing
     sys.exit(log_utils.guard(_cli))

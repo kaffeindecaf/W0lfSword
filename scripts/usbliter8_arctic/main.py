@@ -160,6 +160,24 @@ def show_device_status():
     print()
 
 
+def show_system_status():
+    """One compact line: where we are running and what is missing."""
+    import deps
+
+    plat = deps.platform_info()
+    where = f"{plat['os']}"
+    if plat["distro"]:
+        where = plat["distro"].split("(")[0].strip() or plat["os"]
+    missing = deps.missing_summary(("usb", "profiles", "build", "migrate"))
+    if missing:
+        line = (f"  {C.AMB}⚠{C.NC} {C.DIM}{where} · python {plat['python']} · "
+                f"missing: {', '.join(missing)}{C.NC}")
+    else:
+        line = (f"  {C.GRN}✓{C.NC} {C.DIM}{where} · python {plat['python']} · "
+                f"dependencies ok{C.NC}")
+    print(line)
+
+
 def show_board_status():
     """Display RP2350 board and firmware status."""
     from hardware_guide import _load_config, check_firmware
@@ -205,6 +223,7 @@ def menu():
             scramble_wolf()
             first_run = False
         show_banner()
+        show_system_status()
         show_device_status()
         show_board_status()
 
@@ -606,8 +625,14 @@ def _cli() -> int:
                         "audit, fetch, migrate, build, flash, boot, sshrd, net, vnc, "
                         "ssh, postboot, explain, version, logs")
     p.add_argument("profile", nargs="?", default="", help="profile path for preflight/audit")
+    p.add_argument("--no-deps", action="store_true",
+                   help="skip the dependency check (nothing is installed)")
     # flags for the wrapped tool (--json, --fetch, --record, ...) pass through
     args, extra = p.parse_known_args()
+
+    if not args.no_deps and os.environ.get("UL8_NO_DEPS") not in ("1", "true", "yes"):
+        import deps
+        deps.ensure_for_command(args.command, quiet="--json" in extra)
 
     if args.dry_run:
         import cfw_builder, boot_chain

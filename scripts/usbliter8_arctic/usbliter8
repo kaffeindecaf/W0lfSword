@@ -1,0 +1,448 @@
+#!/bin/bash
+VERSION="0.2.0"
+# ╔══════════════════════════════════════════════════════════════╗
+# ║                    usbliter8-arctic v$VERSION                   ║
+# ║  Tethered iOS 27 jailbreak toolkit - A12/A13 + RP2350         ║
+# ║  Made by kaffeindecaf - github.com/kaffeindecaf/usbliter8-arctic ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# Credits:
+#   Arctic wolf ASCII art - original artist unknown, adapted
+#   usbliter8 exploit - rav000 (RP2350 firmware)
+#   CFW scripts - wh1te4ever/usbliter8-fun
+#   Style - W0lfSword (kaffeindecaf)
+
+set -uo pipefail
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_DIR" || { echo "cannot cd to $PROJECT_DIR" >&2; exit 1; }
+
+PY="python3"
+[ -n "${PYTHON:-}" ] && PY="$PYTHON"
+
+# ── Colors (W0lfSword palette) ─────────────────────────────────
+# CRITICAL: these are literal backslash sequences, NOT real ESC.
+# Use them ONLY in printf FORMAT strings or `echo -e` args.
+C_WOLF='\033[38;5;153m'
+C_ICE='\033[38;5;195m'
+C_FROST='\033[38;5;117m'
+C_SNOW='\033[38;5;255m'
+C_GREY='\033[38;5;245m'
+C_DIM='\033[38;5;240m'
+C_EYE='\033[1;38;5;39m'
+C_RED='\033[0;31m'
+C_GRN='\033[0;32m'
+C_AMB='\033[1;33m'
+NC='\033[0m'
+B='\033[1m'
+
+# ── Sudo check ─────────────────────────────────────────────────
+# USB access needs root on Linux (libusb). macOS/Windows do not.
+# Read-only commands (help, version, offsets list, coverage,
+# contribute status/pr, explain) skip the warning.
+# deps is deliberately absent: a dependency check must work as a normal user
+ROOT_NEEDED_COMMANDS="guided setup hw flash pwn health doctor"
+FIRST_ARG="${1:-menu}"
+if [ "$(uname -s)" = "Linux" ] && [ "$EUID" -ne 0 ]; then
+    case " $ROOT_NEEDED_COMMANDS " in
+        *" $FIRST_ARG "*)
+            echo -e "  ${C_AMB}⚠  Not running as root${NC}"
+            echo -e "  ${C_DIM}  USB access needs root on Linux. Re-run with:${NC}  ${C_EYE}sudo ./usbliter8 $FIRST_ARG${NC}"
+            echo ""
+            ;;
+    esac
+fi
+
+# ── Session log + exit trap ────────────────────────────────────
+DATA_DIR="$PROJECT_DIR/.usbliter8"
+mkdir -p "$DATA_DIR"
+SESSION_LOG="$DATA_DIR/session.log"
+log_script() { echo "[$(date '+%H:%M:%S')] $*" >> "$SESSION_LOG"; }
+
+cleanup() {
+    tput cnorm 2>/dev/null || true
+    stty echo 2>/dev/null || true
+    echo -e "\033[?25h"
+    log_script "session ended (exit=$?)"
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+
+# ── Helpers ────────────────────────────────────────────────────
+ok()   { printf "  ${C_GRN}✓${NC} %s\n" "$1"; }
+err()  { printf "  ${C_RED}✗${NC} %s\n" "$1"; }
+warn() { printf "  ${C_AMB}⚠${NC} %s\n" "$1"; }
+hint() { printf "  ${C_DIM}  → %s${NC}\n" "$1"; }
+section() { printf "\n  ${C_FROST}${B}%s${NC}\n  ${C_DIM}%s${NC}\n" "$1" "$(printf '%*s' "${#1}" '' | tr ' ' '─')"; }
+
+menu_opt() {
+    local n="$1" name="${2:-}" desc="${3:-}" tag="${4:-}"
+    printf "  ${C_EYE}${B}%2s.${NC} ${C_SNOW}%-13s${NC} ${C_DIM}%s${NC} " "$n" "$name" "$desc"
+    if [ -n "$tag" ]; then echo -e "$tag"; else echo ""; fi
+}
+
+stage() { printf "  ${C_EYE}[%s]${NC} %s\n" "$1" "$2"; }
+
+confirm() {
+    local ans
+    printf "  ${C_FROST}%s [y/N]: ${NC}" "$1"
+    read -r ans
+    case "$ans" in y|Y|yes|YES) return 0;; *) return 1;; esac
+}
+
+# ── ASCII art ──────────────────────────────────────────────────
+show_wolf() {
+    echo -e "${C_WOLF}"
+    cat << 'WOLF'
+                              __
+                            .d$$b
+                          .' TO$;\
+                         /  : TP._;
+                        / _.;  :Tb|
+                       /   /   ;j$j
+                   _.-"       d$$$$
+                 .' ..       d$$$$;
+                /  /P'      d$$$$P. |\
+               /   "      .d$$$P' |\^"l
+             .'           `T$P^"""""  :
+         ._.'      _.'                ;
+      `-. -".-'-' ._.       _.-"    .-"
+    `.-" _____  ._              .-"
+   -(.g$$$$$$$b.              .'
+     ""^^T$$$P^)            .(:
+       _/  -"  /.'         /:/;
+    ._.'-'`-'  ")/         /;/;
+ `-. -"..--""   " /         /  ;
+.-" ..--""        -'          :
+..--""--.-"         (\      .-(\
+  ..--""              `-\(\\/;`
+    _.                      :
+                            ;`-
+                           :\
+                           ;
+WOLF
+    echo -e "${NC}"
+}
+
+show_header() {
+    echo ""
+    echo -e "  ${C_DIM}╔══════════════════════════════════════════════════════╗${NC}"
+    echo -e "  ${C_DIM}║${NC}  ${C_SNOW}${B}usbliter8-arctic v${VERSION}${NC}  ${C_WOLF}A12/A13 tethered JB${NC}       ${C_DIM}║${NC}"
+    echo -e "  ${C_DIM}╚══════════════════════════════════════════════════════╝${NC}"
+}
+
+# ── Python call sites ──────────────────────────────────────────
+# --dry-run is stripped from argv in main() and sets DRY_RUN=true;
+# it is forwarded to the Python layer so builds/restores simulate.
+DRY_RUN=false
+py_menu() {
+    if $DRY_RUN; then $PY ul8.py --dry-run "$@"; else $PY main.py "$@"; fi
+}
+py_sub() {
+    if $DRY_RUN; then
+        $PY -c "import cfw_builder, boot_chain; cfw_builder.DRY_RUN = boot_chain.DRY_RUN = True; from main import $1; $1()"
+    else
+        $PY -c "from main import $1; $1()"
+    fi
+}
+py_offsets()     { $PY device_offsets.py "$@"; }
+py_profile()     { $PY profile_gen.py "$@"; }
+py_pwn()         { $PY pwn_utils.py "$@"; }
+py_health()      { $PY -c "from hardware_guide import run_health_check; run_health_check()"; }
+py_explain()     { $PY -c "from boot_chain import explain_usbliter8; explain_usbliter8()"; }
+py_deps()        { $PY deps.py; }
+
+# ── Commands ───────────────────────────────────────────────────
+cmd_menu() { py_menu menu; }
+
+cmd_guided() {
+    section "Guided Setup"
+    echo -e "  ${C_DIM}Board picker · wiring diagrams · firmware flash · first PWN${NC}"
+    if [ "$(uname -s)" = "Linux" ] && [ "$EUID" -ne 0 ]; then
+        warn "USB access needs root on Linux"
+        hint "Re-run: sudo ./usbliter8 guided"
+        return 1
+    fi
+    $PY hardware_guide.py
+}
+
+cmd_config() { py_sub menu_configure; }
+cmd_build()  { py_sub menu_build; }
+
+cmd_flash() {
+    section "Flash Custom Firmware"
+    echo -e "  ${C_RED}${B}⚠  THIS ERASES THE DEVICE COMPLETELY${NC}"
+    if ! confirm "Continue?"; then
+        ok "aborted"
+        return 0
+    fi
+    py_sub menu_flash
+}
+
+cmd_sshrd()   { py_sub menu_sshrd; }
+cmd_boot()    { py_sub menu_normal_boot; }
+cmd_postboot(){ py_sub menu_postboot; }
+
+cmd_pwn() {
+    case "${1:-scan}" in
+        scan|status) py_pwn scan ;;
+        check)       py_pwn check ;;
+        wait)        py_pwn wait "${2:-30}" ;;
+        wait_dfu)    py_pwn wait_dfu "${2:-30}" ;;
+        *) py_pwn scan ;;
+    esac
+}
+
+cmd_health() { py_health; }
+cmd_deps()   { py_deps; }
+
+cmd_offsets() {
+    case "${1:-list}" in
+        list)     py_offsets list ;;
+        validate) py_offsets validate "${2:-}" ;;
+        find)     py_offsets find "${2:-}" ;;
+        activate) py_offsets activate "${2:-}" ;;
+        *) py_offsets list ;;
+    esac
+}
+
+cmd_coverage() { py_profile coverage "$@"; }
+cmd_gaps()     { py_profile gaps "$@"; }
+cmd_preflight(){ $PY preflight.py "$@"; }
+cmd_audit()    { $PY source_audit.py "$@"; }
+cmd_fetch()    { $PY fetch_components.py "$@"; }
+cmd_migrate()  { py_profile migrate "${@}"; }
+cmd_propagate(){ py_profile propagate "${@}"; }
+cmd_explain()  { py_explain; }
+
+# ── Contribute: add offsets + submit a profile ─────────────────
+cmd_contribute() {
+    local action="${1:-}"
+    shift 2>/dev/null || true
+    case "$action" in
+        "")        contribute_wizard ;;
+        new)       $PY contribute.py new "$@" ;;
+        status|list) $PY contribute.py status ;;
+        check)     py_offsets validate "$1" ;;
+        pr)        $PY contribute.py pr "$1" ;;
+        *) err "Unknown: $action"; contribute_usage ;;
+    esac
+}
+
+contribute_usage() {
+    echo -e "  ${C_FROST}usbliter8 contribute${NC} - add new offsets to the project"
+    echo -e "    ${C_EYE}(no args)${NC}  guided wizard: pick device → iOS → create → edit → PR"
+    echo -e "    ${C_EYE}new${NC} <model> <ios> [build]   create a profile from the template"
+    echo -e "    ${C_EYE}status${NC}                      list profiles + validation status"
+    echo -e "    ${C_EYE}check${NC} <file>                validate an offset YAML"
+    echo -e "    ${C_EYE}pr${NC} <file>                   generate a PR description + git commands"
+}
+
+contribute_wizard() {
+    section "Offset Contribution Wizard"
+    echo -e "  ${C_DIM}This walks you through adding offsets for a device/iOS combo${NC}"
+    echo -e "  ${C_DIM}and prepares everything needed for a pull request.${NC}"
+    echo ""
+
+    # 1. pick a device from the database
+    echo -e "  ${C_SNOW}Known devices:${NC}"
+    $PY profile_gen.py list 2>/dev/null | sed 's/^/    /'
+    echo ""
+    printf "  ${C_FROST}Device model (e.g. iPhone12,3): ${NC}"
+    local model
+    read -r model || return 1
+    [ -z "$model" ] && { err "no model given"; return 1; }
+
+    # 2. iOS version
+    printf "  ${C_FROST}iOS version (e.g. 27.0b4): ${NC}"
+    local ios
+    read -r ios || return 1
+    [ -z "$ios" ] && { err "no iOS version given"; return 1; }
+
+    local profile="offsets/${model}_${ios}.yaml"
+    if [ -f "$profile" ]; then
+        warn "profile already exists: $profile"
+        if ! confirm "Re-create it?"; then
+            echo -e "  ${C_DIM}  Opening existing profile for editing instead${NC}"
+        else
+            $PY contribute.py new "$model" "$ios" || return 1
+        fi
+    else
+        $PY contribute.py new "$model" "$ios" || return 1
+    fi
+
+    echo ""
+    # 3. edit sentinels
+    if confirm "Open $profile in your editor to fill the sentinels?"; then
+        local editor="${EDITOR:-${VISUAL:-nano}}"
+        $editor "$profile"
+    fi
+
+    echo ""
+    # 4. validate
+    py_offsets validate "$profile" || true
+
+    echo ""
+    # 5. PR prep — only when the profile is actually fillable
+    if [ -f "$profile" ] && ! grep -q "DEADBEEF" "$profile" 2>/dev/null; then
+        if confirm "Generate a PR description + git commands for this profile?"; then
+            $PY contribute.py pr "$profile"
+        fi
+    else
+        echo -e "  ${C_DIM}Profile still has DEADBEEF sentinels to fill (see above).${NC}"
+        echo -e "  ${C_DIM}Fill them in, then run:${NC} ${C_FROST}./usbliter8 contribute pr $profile${NC}"
+    fi
+    log_script "contribute: $model $ios -> $profile"
+}
+
+# ── Version / help ─────────────────────────────────────────────
+cmd_version() {
+    echo -e "${C_WOLF}usbliter8-arctic v${VERSION}${NC} — Tethered iOS 27 jailbreak toolkit (A12/A13)"
+    echo -e "${C_DIM}github.com/kaffeindecaf/usbliter8-arctic${NC}"
+}
+
+cmd_help() {
+    echo -e "  ${C_FROST}${B}usbliter8-arctic commands${NC}"
+    echo ""
+    echo -e "  ${C_EYE}menu${NC}           interactive TUI hub"
+    echo -e "  ${C_EYE}guided${NC}         guided hardware setup (board, firmware, first PWN)"
+    echo -e "  ${C_EYE}config${NC}         configure device model / iOS offset profile"
+    echo -e "  ${C_EYE}build${NC}          build custom firmware (IPSW + offsets)"
+    echo -e "  ${C_EYE}flash${NC}          restore CFW (erases device)"
+    echo -e "  ${C_EYE}sshrd${NC}          boot SSHRD ramdisk"
+    echo -e "  ${C_EYE}boot${NC}           normal boot with patches"
+    echo -e "  ${C_EYE}postboot${NC}       post-boot setup (USB net, VNC, SSH)"
+    echo -e "  ${C_EYE}pwn${NC}            check / wait for PWN DFU"
+    echo -e "  ${C_EYE}health${NC}         health check (board, tools, firmware, USB)"
+    echo -e "  ${C_EYE}deps${NC}           check dependencies and offer to install what is missing"
+    echo -e "  ${C_EYE}offsets${NC}        list / validate / find / activate offset profiles"
+    echo -e "  ${C_EYE}coverage${NC}       per-device profile status table"
+    echo -e "  ${C_EYE}gaps${NC}           which profile sections still need offsets"
+    echo -e "  ${C_EYE}preflight${NC}      verify a profile against the real component bytes"
+    echo -e "  ${C_EYE}fetch${NC}          range-fetch IPSW components (no 6GB download)"
+    echo -e "  ${C_EYE}audit${NC}          diff a profile against an upstream make_cfw.py"
+    echo -e "  ${C_EYE}migrate${NC}        beta-to-beta offset migration"
+    echo -e "  ${C_EYE}propagate${NC}      same-SoC profile propagation"
+    echo -e "  ${C_EYE}contribute${NC}     add new offsets + prepare a pull request"
+    echo -e "  ${C_EYE}explain${NC}        what can you do with usbliter8?"
+    echo -e "  ${C_EYE}version${NC}        show version"
+    echo -e "  ${C_EYE}help${NC}           this list"
+    echo ""
+    echo -e "  ${C_DIM}Run bare for the interactive menu. Add --dry-run to build/flash/guided${NC}"
+    echo -e "  ${C_DIM}to simulate without touching files.${NC}"
+}
+
+# ── Interactive menu ───────────────────────────────────────────
+run_menu() {
+    local choice
+    while true; do
+        clear 2>/dev/null || true
+        show_wolf
+        show_header
+        echo ""
+        echo -e "  ${C_GREY}── main menu ──────────────────────────────────────────────${NC}"
+        menu_opt 1 "Guided Setup"   "wiring · flash firmware · first PWN"   "${C_AMB}[root]${NC}"
+        menu_opt 2 "Configure"      "device model / iOS offset profile"
+        menu_opt 3 "Build CFW"      "IPSW + offsets → custom firmware"
+        menu_opt 4 "Flash"          "restore CFW"                          "${C_RED}[erases device]${NC}"
+        menu_opt 5 "SSHRD Boot"     "ramdisk · mount · edit filesystem"
+        menu_opt 6 "Normal Boot"    "boot with patches"
+        menu_opt 7 "Post-Boot"      "USB network · VNC · SSH"
+        echo -e "  ${C_GREY}── research ──────────────────────────────────────────────${NC}"
+        menu_opt 8 "PWN Status"     "DFU / PWND check · wait"
+        menu_opt 9 "Health Check"   "board · tools · firmware · USB"
+        menu_opt o "Offsets"        "list / validate / find profiles"
+        menu_opt c "Coverage"       "per-device profile status"
+        menu_opt m "Migrate"        "beta-to-beta offset migration"
+        menu_opt p "Propagate"      "same-SoC profile propagation"
+        menu_opt t "Contribute"     "add new offsets · prepare a PR"
+        echo -e "  ${C_GREY}── system ────────────────────────────────────────────────${NC}"
+        menu_opt i "Dependencies"   "install pyusb · pyyaml · libusb"
+        menu_opt e "Explain"        "what can you do?"
+        menu_opt q "Quit"
+        echo ""
+        echo -e "  ${C_GREY}── shortcuts ──────────────────────────────────────────────${NC}"
+        printf "  ${C_FROST}h${NC} guided  ${C_FROST}c${NC} config  ${C_FROST}b${NC} build  ${C_FROST}f${NC} flash  ${C_FROST}p${NC} pwn  ${C_FROST}x${NC} health\n"
+        printf "  ${C_FROST}o${NC} offsets  ${C_FROST}m${NC} migrate  ${C_FROST}t${NC} contribute  ${C_FROST}e${NC} explain  ${C_FROST}q${NC} quit\n"
+        echo -e "  ${C_DIM}  ${C_AMB}[root]${C_DIM} = needs sudo on Linux (USB access) · ${C_RED}[erases device]${C_DIM} = data loss${NC}"
+        echo ""
+        printf "  ${C_FROST}${B}usbliter8 ▸${NC} "
+        read -r choice || break
+        choice="${choice:- }"
+        case "$choice" in
+            1|h|hw|guided)      cmd_guided ;;
+            2|c|config)         cmd_config ;;
+            3|b|build)          cmd_build ;;
+            4|f|flash)          cmd_flash ;;
+            5|s|sshrd)          cmd_sshrd ;;
+            6|n|boot)           cmd_boot ;;
+            7|postboot)         cmd_postboot ;;
+            8|p|pwn)            cmd_pwn scan ;;
+            9|x|health)         cmd_health ;;
+            o|offsets)          cmd_offsets list ;;
+            c|coverage)         cmd_coverage ;;
+            m|migrate)          printf "  ${C_DIM}Usage: migrate <base.yaml> <target.yaml|iOS> [--comp-dir DIR] [--auto]${NC}\n"; cmd_migrate ;;
+            p|propagate)        printf "  ${C_DIM}Usage: propagate <base.yaml> <Model> [--comp-dir DIR] [--force]${NC}\n"; cmd_propagate ;;
+            t|contribute)       cmd_contribute ;;
+            i|deps)             cmd_deps ;;
+            e|explain)          cmd_explain ;;
+            q|quit|exit)        echo -e "  ${C_DIM}~ back to reality ~${NC}"; break ;;
+            *) warn "Unknown: $choice — try 1-9, o/c/m/p/t/i/e, or q" ;;
+        esac
+        echo ""
+        printf "  ${C_DIM}── Press Enter to continue ──${NC}"
+        read -r _ || break
+    done
+}
+
+# ── Main dispatch ──────────────────────────────────────────────
+main() {
+    local cmd="${1:-}"
+    shift 2>/dev/null || true
+    local args=()
+
+    # strip --dry-run anywhere in argv; set the global flag
+    for _a in "$@"; do
+        if [ "$_a" = "--dry-run" ]; then DRY_RUN=true; else args+=("$_a"); fi
+    done
+    if [ "$cmd" = "--dry-run" ]; then
+        DRY_RUN=true
+        cmd="${1:-menu}"
+        shift 2>/dev/null || true
+        args=()
+        for _a in "$@"; do
+            [ "$_a" = "--dry-run" ] || args+=("$_a")
+        done
+    fi
+
+    log_script "session start (cmd=${cmd:-menu}, dry_run=$DRY_RUN)"
+
+    case "$cmd" in
+        "")                    run_menu ;;
+        menu)                  cmd_menu ;;
+        guided|setup|hw)       cmd_guided ;;
+        config)                cmd_config ;;
+        build)                 cmd_build ;;
+        flash)                 cmd_flash ;;
+        sshrd)                 cmd_sshrd ;;
+        boot|normal)           cmd_boot ;;
+        postboot)              cmd_postboot ;;
+        pwn)                   cmd_pwn "${args[@]}" ;;
+        health|doctor)         cmd_health ;;
+        deps|deps-install)     cmd_deps ;;
+        offsets)               cmd_offsets "${args[@]}" ;;
+        coverage)              cmd_coverage "${args[@]}" ;;
+        gaps)                  cmd_gaps "${args[@]}" ;;
+        preflight|verify)      cmd_preflight "${args[@]}" ;;
+        audit)                 cmd_audit "${args[@]}" ;;
+        fetch|components)      cmd_fetch "${args[@]}" ;;
+        migrate)               cmd_migrate "${args[@]}" ;;
+        propagate)             cmd_propagate "${args[@]}" ;;
+        contribute|contrib)    cmd_contribute "${args[@]}" ;;
+        explain)               cmd_explain ;;
+        version|--version|-V)  cmd_version ;;
+        help|h|--help|-h)      cmd_help ;;
+        *) err "Unknown: $cmd"; echo -e "  ${C_DIM}Run ${C_FROST}./usbliter8${C_DIM} for the interactive menu, or ${C_FROST}./usbliter8 help${C_DIM} for commands${NC}"; exit 1 ;;
+    esac
+}
+
+main "$@"

@@ -2,7 +2,7 @@
 
 import random
 
-from main import SCRAMBLE_CHARS, WOLF_ASCII_ART, _wolf_art_lines, wolf_scramble_frame
+from main import SCRAMBLE_CHARS, _wolf_art_lines, wolf_scramble_frame
 
 
 def test_art_lines_are_stripped_and_nonempty():

@@ -233,3 +233,14 @@ def test_flash_prompt_stops_with_closed_stdin(tmp_path):
     assert "input ended" in combined
     assert "needs a terminal" in combined
     assert "erases the device" not in combined.lower() or "THIS ERASES" in combined
+
+
+def test_missing_input_is_a_normal_failure_not_a_verification_refusal(tmp_path):
+    """A missing file is exit 1; exit 2 is reserved for a refused build."""
+    import subprocess
+
+    proc = subprocess.run([sys.executable, "preflight.py", str(tmp_path / "nope.yaml")],
+                          capture_output=True, text=True, env={"UL8_NO_DEPS": "1",
+                                                               "PATH": "/usr/bin:/bin"})
+    assert proc.returncode == 1
+    assert "profile not found" in proc.stdout + proc.stderr
