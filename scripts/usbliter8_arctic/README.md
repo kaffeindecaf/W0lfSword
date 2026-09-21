@@ -2,7 +2,7 @@
 
 The usbliter8 tethered jailbreak, wrapped in something you can actually operate. One TUI walks the whole chain, offsets live in validated YAML profiles, and nothing gets flashed before the profile has been checked against the real firmware bytes.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-338%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-345%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 Upstream usbliter8 is a folder of shell scripts and offsets you edit by hand. One wrong number and the device panics on boot. This repo keeps the same exploit (rav000's RP2350 firmware) and rebuilds the parts that hurt:
 
@@ -266,33 +266,46 @@ Auditing the iPhone 11 Pro profiles against the upstream scripts and the real b2
 
 ## Sending data back
 
-When offsets actually get verified (guided setup finished, the device answers over SSH after a boot, or `preflight --record` wrote evidence) the toolkit asks one question:
+When a run produces something that belongs in the repo (a profile you filled in, or fresh evidence for one) the toolkit offers to open a **pull request** with it. The files go on a branch cut from `origin/main`, the PR carries the run's context, and nothing is in the repo until you review the diff and merge it:
 
 ```
   Send this back?
-    profile: iPhone12,1_27.0.yaml (45 entries, not committed yet)
-    device: iPhone 11 iPhone12,1 iOS 27.0 (24A437)
-    components: ibec, ibss, txm (sizes + sha256)
-    verification: review (16 match, 0 changed)
-    environment: Linux / python 3.13.5 / usbliter8 0.2.0-beta
-    log: last 25 warning/error line(s)
-    redacted: 5 identifier(s) (/home/<user>)
-    no UDID, serial, ECID, username, hostname or local path leaves the machine
+    These files are waiting in your tree. A pull request adds them to the repo,
+    and nothing lands until you merge it:
+      offsets/iPhone12,1_27.0b5.yaml  (new, 9214 bytes)
+      offsets/evidence/iPhone12,1_27.0b5.json  (new, 4180 bytes)
+      branch: offsets/iPhone12-1-27.0b5-24A5400a  ·  base: main
 
-  Send this to kaffeindecaf/usbliter8-arctic as an issue? [y/N/never]:
+    This is exactly what the pull request body would contain:
+      adds: offsets/iPhone12,1_27.0b5.yaml (new, 9214 bytes)
+      device: iPhone 11 iPhone12,1 iOS 27.0b5 (24A5400a)
+      components: ibec, ibss, txm (sizes + sha256)
+      verification: review (16 match, 0 changed)
+      environment: Linux / python 3.13.5 / usbliter8 0.2.0-beta
+      redacted: 3 identifier(s) (/home/<user>)
+
+  Open a pull request that adds these files? [y/N/never]:
 ```
 
-Nothing is sent without that yes. `never` is remembered, `./usbliter8 share on` turns it back on, and `UL8_NO_SHARE=1` skips it for one run. Without a terminal it does not prompt at all: it says which command would send it and moves on. Offsets are what make the next person's install work first try, so the bundle is the useful part: device and board, the profile and its entry count, component sha256 values, the verification counts, your OS and the toolkit version, and the recent warnings. Identifiers are replaced with `<redacted-*>` before anything is shown or sent.
+How it behaves:
 
-```bash
-./usbliter8 share status      # on or off, destination, what was sent last
-./usbliter8 share preview     # build the bundle, print exactly what would go
-./usbliter8 share send        # ask, then open the issue
-./usbliter8 share off         # never ask again
-python3 share.py preview --json   # the raw bundle, for scripting
+- a worker directory (git worktree) is used, so your checkout, your branch and any uncommitted work are untouched
+- only `offsets/` files are ever committed: the profile and its evidence. A dirty README or a source file in the same tree is never included
+- the branch is unique per device and build, so a second run does not fight the first; nothing is ever force-pushed and `main` is never written to directly
+- if your account cannot push to the repo, it forks it first and opens the PR from the fork
+- if there is nothing to add (you verified an existing profile, no new evidence), there is no PR to open, so it files an issue with the same context instead
+- if `gh` is missing or the push fails, nothing is lost: the bundle is written to `contribute/inbox/` with the exact commands to run by hand
+
+```
+  ./usbliter8 share status        # on or off, what it would send, push access
+  ./usbliter8 share preview       # the files, the branch and the bundle: exactly what would go
+  ./usbliter8 share send          # asks, then opens the pull request (or the issue)
+  ./usbliter8 share send --pr     # insist on a pull request
+  ./usbliter8 share send --issue  # insist on a report instead
+  ./usbliter8 share off           # never ask again
 ```
 
-It goes out as an issue on the project repo (via `gh`, if it is installed and logged in). Without `gh` the bundle lands in `contribute/inbox/` and you get the link to attach it to by hand. That is the same information as `./usbliter8 contribute pr`, just without needing a profile someone else can already build.
+Nothing is sent without the yes. `never` is remembered, `./usbliter8 share on` turns it back on, `UL8_NO_SHARE=1` skips it for one run, and without a terminal it does not prompt at all: it prints the command that would send it. This is the same data `./usbliter8 contribute pr` puts in a PR description, collected automatically from the run.
 
 ## CLI usage
 
@@ -304,7 +317,7 @@ python3 ul8.py menu                                   # the TUI (default with no
 python3 ul8.py logs --tail 20 --level ERROR           # what went wrong, from usbliter8.log
 python3 ul8.py logs --grep ipad12p --json             # machine-readable
 python3 ul8.py logs --summary                         # what recent runs cost, slowest steps
-python3 ul8.py share preview                          # what would be sent back, scrubbed
+python3 ul8.py share preview                          # the files, branch and bundle that would go back
 
 python3 device_offsets.py list                        # available offset profiles
 python3 device_offsets.py validate offsets/iPhone12,3_27.0b2.yaml
@@ -466,6 +479,7 @@ The wizard asks for the model and iOS version, creates the profile from the temp
 | `deps` says a package is missing but `pip list` shows it | different interpreter: the line above the packages says which Python is in use |
 | `deps` reports `libusb-1.0 missing` on Linux | install it (`sudo apt install libusb-1.0-0`) and run `sudo ldconfig` |
 | a prompt vanished or said "input ended" | stdin is not a terminal (piped or CI). Prompts that could erase the device stop instead of assuming an answer |
+| a PR was not opened ("fell back to an issue") | no push access (it forks first), `gh` not logged in, or a git error: the message says which, and the branch it wanted stays printed. The files are still in your tree |
 | a "Send this back?" prompt in a script or CI | it must not appear: `UL8_NO_SHARE=1` (or `share off`) disables it, and it never prompts without a terminal |
 | `logs --summary` shows a run with no summary | that run was killed, or it is the reader itself: the summary is written when the process exits |
 | offsets look unchanged but the device panics | kernel offsets are per `kernelcache.release.*` component. `python3 profile_gen.py gaps` shows a profile whose kernel section came from another board |

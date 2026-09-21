@@ -293,11 +293,14 @@ def scrub(value: T, counts: dict[str, int] | None = None) -> T:
     return text
 
 
-def summarize(bundle: dict, redactions: dict[str, int] | None = None) -> list[str]:
+def summarize(bundle: dict, redactions: dict[str, int] | None = None,
+              files: list[dict] | None = None) -> list[str]:
     """The 'this is exactly what would be sent' lines."""
     profile = bundle.get("profile") or {}
     device = bundle.get("device") or {}
     rows = []
+    for entry in files or []:
+        rows.append(f"adds: {entry['path']} ({entry['state']}, {entry['bytes']} bytes)")
     if profile:
         rows.append(f"profile: {profile.get('file')} "
                     f"({profile.get('entries', '?')} entries"
@@ -329,7 +332,162 @@ def summarize(bundle: dict, redactions: dict[str, int] | None = None) -> list[st
     return rows
 
 
-# ── sending ─────────────────────────────────────────────────────────
+# ── the files a pull request would add ──────────────────────────────
+
+ALLOWED_PREFIX = "offsets/"          # offset data only: nothing else may be committed
+
+
+def repo_files(profile_path: Path | None = None) -> list[dict]:
+    """Files under offsets/ that this run would add or update.
+
+    Only what git already sees in the working tree, restricted to `offsets/`:
+    the profile and its recorded evidence. That is exactly the content a pull
+    request is good at, and the reason a PR beats an issue when it exists.
+    """
+    path = profile_path or active_profile()
+    candidates: list[Path] = []
+    if path is not None:
+        candidates.append(path)
+        candidates.append(OFFSETS_DIR / "evidence" / f"{path.stem}.json")
+
+    try:
+        status = subprocess.run(["git", "status", "--porcelain", "--", *map(str, candidates)],
+                                cwd=ROOT, capture_output=True, text=True, timeout=30)
+        seen = {}
+        for line in status.stdout.splitlines():
+            code, _, rel = line[:2], line[2:], line[3:].strip()
+            if not rel.startswith(ALLOWED_PREFIX):
+                continue                       # never propose anything else
+            state = "new" if code.strip() == "??" else "modified"
+            seen[rel] = state
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    out: list[dict] = []
+    for rel, state in sorted(seen.items()):
+        full = ROOT / rel
+        out.append({"path": rel, "state": state,
+                    "bytes": full.stat().st_size if full.exists() else 0})
+    return out
+
+
+def pr_branch(device: dict) -> str:
+    """offsets/iPhone12-1-27.0b5-24A5400a: unique per device+build, readable."""
+    model = str(device.get("model") or "device").replace(",", "-")
+    ios = str(device.get("ios_version") or "ios").replace(",", "-")
+    build = str(device.get("build") or time.strftime("%Y%m%d"))
+    return f"offsets/{model}-{ios}-{build}"
+
+
+def writable_access() -> bool:
+    """Does this account have push access to the repo (else: fork first)?"""
+    if not gh_ready():
+        return False
+    try:
+        out = subprocess.run(["gh", "api", f"repos/{REPO}", "--jq", ".permissions.push"],
+                             capture_output=True, text=True, timeout=30)
+        return out.returncode == 0 and out.stdout.strip() == "true"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def gh_login() -> str:
+    try:
+        out = subprocess.run(["gh", "api", "user", "--jq", ".login"],
+                             capture_output=True, text=True, timeout=30)
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def pr_body(bundle: dict, files: list[dict]) -> tuple[str, str]:
+    """(title, body) for the pull request that adds the files."""
+    title, base = issue_body(bundle)
+    device = bundle.get("device") or {}
+    lines = [
+        f"Adds {len(files)} file(s) from a verified run on "
+        f"{device.get('device') or device.get('model') or 'a device'}:",
+        "",
+    ]
+    for entry in files:
+        lines.append(f"- `{entry['path']}` ({entry['state']}, "
+                     f"{entry['bytes']} bytes)")
+    lines += ["", "---", "", base]
+    return title, "\n".join(lines)
+
+
+def _run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 600,
+         check: bool = True) -> subprocess.CompletedProcess:
+    """Run a git/gh command, logging it. Raises RuntimeError on failure."""
+    log_utils.log_info(f"share: run {' '.join(cmd)}", module="share")
+    result = subprocess.run(cmd, cwd=cwd or ROOT, capture_output=True, text=True,
+                            timeout=timeout)
+    if check and result.returncode != 0:
+        raise RuntimeError(f"{cmd[0]} {' '.join(cmd[1:3])} failed: "
+                           f"{(result.stderr or result.stdout).strip()[:300]}")
+    return result
+
+
+def send_pr(files: list[dict], bundle: dict, *, dry_run: bool = False) -> str:
+    """Open a pull request that adds `files`. Returns its URL.
+
+    Uses a temporary worktree branched from origin/main, so the caller's
+    checkout, branch and uncommitted work are never touched. Only files under
+    offsets/ are copied in, and the branch is unique per device+build.
+    """
+    device = bundle.get("device") or {}
+    branch = pr_branch(device)
+    title, body = pr_body(bundle, files)
+    if dry_run:
+        return f"dry-run: would push {branch} and open a PR with {len(files)} file(s)"
+
+    worktree = Path(tempfile.mkdtemp(prefix="ul8-pr-")) / "repo"
+    body_file = worktree.parent / "pr-body.md"
+    body_file.write_text(body)
+    login = gh_login()
+    keep = False
+    try:
+        _run(["git", "fetch", "origin", "main", "--quiet"])
+        _run(["git", "worktree", "add", "--detach", str(worktree), "origin/main"])
+        _run(["git", "-C", str(worktree), "checkout", "-b", branch])
+
+        for entry in files:
+            source = ROOT / entry["path"]
+            target = worktree / entry["path"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+        _run(["git", "-C", str(worktree), "add", *[e["path"] for e in files]])
+        _run(["git", "-C", str(worktree), "commit",
+              "-m", f"offsets: add {device.get('model', 'device')} "
+                    f"{device.get('ios_version', '')} ({device.get('build', '')})".strip()])
+
+        if writable_access():
+            _run(["git", "-C", str(worktree), "push", "-u", "origin", branch])
+            head = branch
+        else:
+            if not login:
+                raise RuntimeError("cannot determine the GitHub account to fork to")
+            _run(["gh", "repo", "fork", REPO, "--clone=false", "--remote=false"])
+            fork_url = f"https://github.com/{login}/{REPO.split('/')[1]}.git"
+            _run(["git", "-C", str(worktree), "push", fork_url, f"HEAD:{branch}"])
+            head = f"{login}:{branch}"
+
+        result = _run(["gh", "pr", "create", "--repo", REPO, "--base", "main",
+                       "--head", head, "--title", title, "--body-file", str(body_file)])
+        url = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+        if not url:
+            raise RuntimeError("gh pr create returned no URL")
+        log_utils.log_info(f"share: opened {url}", module="share")
+        return url
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        keep = True                    # leave the worktree so the work is not lost
+        log_utils.log_warn(f"share: pull request not created: {exc}", module="share")
+        raise RuntimeError(f"{exc} | branch left at {worktree}") from exc
+    finally:
+        if not keep:
+            _run(["git", "worktree", "remove", "--force", str(worktree)], check=False)
+            shutil.rmtree(worktree.parent, ignore_errors=True)
+
 
 def gh_ready() -> bool:
     if not shutil.which("gh"):
@@ -369,8 +527,29 @@ def issue_body(bundle: dict) -> tuple[str, str]:
     return title[:250], "\n".join(lines) + "\n"
 
 
-def send(bundle: dict, *, dry_run: bool = False) -> str:
-    """Ship the bundle. Returns the destination (URL or file path)."""
+def send(bundle: dict, *, dry_run: bool = False, files: list[dict] | None = None,
+         prefer: str = "auto") -> str:
+    """Ship the work: a pull request when there are files, else an issue.
+
+    `prefer` picks explicitly: "auto" (default), "pr" or "issue".
+    """
+    files = repo_files() if files is None else files
+
+    if prefer == "pr" and not files:
+        print(info("no new profile or evidence to add, sending a report instead"))
+        log_utils.log_info("share: --pr requested with no files, using an issue", module="share")
+
+    if prefer != "issue" and files:
+        try:
+            url = send_pr(files, bundle, dry_run=dry_run)
+            _remember(url)
+            return url
+        except RuntimeError as exc:
+            log_utils.log_warn(f"share: falling back to an issue ({exc})", module="share")
+            print(warn(f"pull request not opened ({exc})"))
+            print(f"  {C.DIM}the files are unchanged in your tree; the report goes out "
+                  f"as an issue instead{C.NC}")
+
     title, body = issue_body(bundle)
     if dry_run:
         return f"dry-run: would open an issue '{title}' on {REPO}"
@@ -387,12 +566,8 @@ def send(bundle: dict, *, dry_run: bool = False) -> str:
             Path(body_file).unlink(missing_ok=True)
         if result.returncode == 0 and result.stdout.strip():
             url = result.stdout.strip().splitlines()[-1]
-            prefs_update = prefs()
-            prefs_update["last_sent"] = url
-            prefs_update["last_sent_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            PREF_FILE.parent.mkdir(parents=True, exist_ok=True)
-            PREF_FILE.write_text(json.dumps(prefs_update, indent=2, sort_keys=True) + "\n")
             log_utils.log_info(f"share: opened {url}", module="share")
+            _remember(url)
             return url
         log_utils.log_warn(f"share: gh issue create failed: "
                            f"{(result.stderr or result.stdout).strip()[:200]}", module="share")
@@ -410,8 +585,17 @@ def send(bundle: dict, *, dry_run: bool = False) -> str:
 
 # ── the prompt ──────────────────────────────────────────────────────
 
+def _remember(url: str) -> None:
+    """Record where the last submission went, so `share status` can show it."""
+    data = prefs()
+    data["last_sent"] = url
+    data["last_sent_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    PREF_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PREF_FILE.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
 def offer(trigger: str, *, profile_path: Path | None = None,
-          interactive: bool | None = None) -> bool:
+          interactive: bool | None = None, prefer: str = "auto") -> bool:
     """Ask once whether to send. Returns True when something was sent.
 
     Silent (False, no prompt) when the user said never, when the run opted out,
@@ -422,30 +606,42 @@ def offer(trigger: str, *, profile_path: Path | None = None,
         return False
 
     bundle = collect(trigger, profile_path=profile_path)
-    if not interesting(bundle):
+    files = [] if prefer == "issue" else repo_files(profile_path)
+    if not interesting(bundle) and not files:
         log_utils.log_debug(f"share: nothing new to report ({trigger})", module="share")
         return False
 
     if interactive is None:
         interactive = can_prompt()
     if not interactive:
-        print(info(f"nothing is sent without a yes: run `./usbliter8 contribute share send` "
-                   f"(or `python3 share.py send`) to report this device"))
+        how = "a pull request" if files else "an issue"
+        print(info(f"nothing is sent without a yes: run `./usbliter8 share send` "
+                   f"(or `python3 share.py send`) to open {how} for this device"))
         log_utils.log_info(f"share: skipped, not a terminal ({trigger})", module="share")
         return False
 
     counts: dict[str, int] = {}
     clean = scrub(bundle, counts)
+    branch = pr_branch(clean.get("device") or {})
     print()
     print(section("Send this back?"))
     print()
-    print(f"  {C.DIM}This device's data can make the next install work first try. "
-          f"Here is exactly what would go:{C.NC}")
-    for row in summarize(clean, counts):
+    if files:
+        print(f"  {C.DIM}These files are waiting in your tree. A pull request adds "
+              f"them to the repo, and nothing lands until you merge it:{C.NC}")
+        for entry in files:
+            print(f"    {C.SNOW}{entry['path']}{C.NC}  {C.DIM}({entry['state']}, "
+                  f"{entry['bytes']} bytes){C.NC}")
+        print(f"    {C.DIM}branch: {branch}  ·  base: main{C.NC}")
+        print()
+    print(f"  {C.DIM}This is exactly what the {('pull request body' if files else 'report')} "
+          f"would contain:{C.NC}")
+    for row in summarize(clean, counts, files):
         print(f"    {C.SNOW}{row}{C.NC}")
     print()
-    answer = log_utils.safe_input(
-        f"  Send this to {REPO} as an issue? [y/N/never]: ", eof_default="n").strip().lower()
+    question = (f"  Open a pull request that adds these files? [y/N/never]: " if files
+                else f"  Send this to {REPO} as an issue? [y/N/never]: ")
+    answer = log_utils.safe_input(question, eof_default="n").strip().lower()
 
     if answer in ("never", "no", "n" + "ever"):
         if answer == "never":
@@ -455,11 +651,14 @@ def offer(trigger: str, *, profile_path: Path | None = None,
         return False
 
     if answer in ("y", "yes"):
-        destination = send(clean)
+        destination = send(clean, files=files, prefer=prefer)
         if destination.startswith("http"):
-            print(ok(f"sent: {destination}"))
+            print(ok(f"{'pull request open' if '/pull/' in destination else 'issue open'}: "
+                     f"{destination}"))
+            if "/pull/" in destination:
+                print(f"  {C.DIM}merge it yourself when you are happy with the diff{C.NC}")
         else:
-            print(warn("gh is unavailable, the report is on disk instead:"))
+            print(warn("gh is unavailable, everything is on disk instead:"))
             print(f"  {destination}")
             print(f"  {C.DIM}attach it to a new issue: https://github.com/{REPO}/issues/new{C.NC}")
         return True
@@ -475,8 +674,17 @@ def cmd_status() -> int:
     print(section("Contribution sharing"))
     print()
     print(key_value("asks before sending", "yes" if enabled() else "off (never)"))
-    print(key_value("destination", f"{REPO} issues via gh"
-                    if gh_ready() else f"gh unavailable -> {INBOX}"))
+    files = repo_files()
+    if gh_ready():
+        destination = (f"{REPO} pull request (branch from origin/main)"
+                       if files else f"{REPO} issue (nothing to add right now)")
+    else:
+        destination = f"gh unavailable -> {INBOX}"
+    print(key_value("destination", destination))
+    if files:
+        for entry in files:
+            print(key_value("  would add", f"{entry['path']} ({entry['state']})"))
+    print(key_value("push access", "yes" if writable_access() else "no (fork first)"))
     last = prefs().get("last_sent", "")
     print(key_value("last sent", last or "nothing yet"))
     print(key_value("terminal", "interactive" if can_prompt() else "not interactive"))
@@ -488,13 +696,24 @@ def cmd_status() -> int:
 def cmd_preview(argv: list[str]) -> int:
     trigger = argv[0] if argv else "manual"
     bundle = collect(trigger)
+    files = repo_files()
     counts: dict[str, int] = {}
     clean = scrub(bundle, counts)
     print(section("What would be sent"))
     print()
-    if not interesting(bundle):
+    if not interesting(bundle) and not files:
         print(warn("nothing new for this device yet (no profile, components or verification)"))
-    for row in summarize(clean, counts):
+    if files:
+        print(f"  {C.SNOW}pull request{C.NC} {C.DIM}(branch {pr_branch(clean.get('device') or {})}, "
+              f"base main){C.NC}")
+        for entry in files:
+            print(f"    {entry['state']:<9} {entry['path']}  ({entry['bytes']} bytes)")
+        print()
+    else:
+        print(f"  {C.DIM}no files to add (an existing profile with no new evidence), "
+              f"so this would be an issue report{C.NC}")
+        print()
+    for row in summarize(clean, counts, files):
         print(f"  {row}")
     print()
     print(f"  {C.DIM}full bundle: python3 share.py preview --json{C.NC}")
@@ -526,7 +745,9 @@ def cli(argv: list[str] | None = None) -> int:
             return 0
         return cmd_preview(rest)
     if cmd in ("send", "share"):
-        return 0 if offer("manual", interactive=None) else log_utils.EXIT_OK
+        prefer = "issue" if "--issue" in rest else ("pr" if "--pr" in rest else "auto")
+        offer("manual", interactive=None, prefer=prefer)      # asks first, always
+        return log_utils.EXIT_OK
     if cmd in ("collect", "export"):
         counts: dict[str, int] = {}
         bundle = scrub(collect(rest[0] if rest else "manual"), counts)
