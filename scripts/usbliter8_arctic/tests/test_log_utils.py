@@ -275,3 +275,38 @@ def test_cli_forwarding_through_the_launchers(tmp_path):
     assert as_json.returncode == 0, as_json.stderr
     payload = json.loads(as_json.stdout)
     assert payload["levels"]["ERROR"] >= 1
+
+
+# ── helpers other modules import from log_utils ──
+
+def test_legacy_helpers_still_exist():
+    """hardware_guide.py imports check_command from here; a rewrite that drops
+    these breaks the health check at runtime, not at import."""
+    for name in ("retry", "timeout", "check_command", "check_tools", "require_tool",
+                 "status_summary", "LOG_FILE", "log_info", "log_warn", "log_error",
+                 "log_step"):
+        assert hasattr(log_utils, name), f"log_utils.{name} disappeared"
+
+
+def test_helpful_utilities_behave():
+    assert log_utils.check_command("python3") is True
+    assert log_utils.check_command("definitely-not-a-real-tool-xyz") is False
+    assert log_utils.check_tools(["python3"]) == {"python3": True}
+    with pytest.raises(FileNotFoundError):
+        log_utils.require_tool("definitely-not-a-real-tool-xyz")
+    assert "✓" in log_utils.status_summary({"tool": True})
+
+
+def test_retry_loops_then_succeeds(isolated_log):
+    attempts = {"n": 0}
+
+    @log_utils.retry(max_attempts=3, delay=0)
+    def flaky():
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise OSError("transient")
+        return "ok"
+
+    assert flaky() == "ok"
+    assert attempts["n"] == 3
+    assert "attempt 1/3 failed" in isolated_log.read_text()

@@ -312,6 +312,90 @@ def log_stats(path: Path | str | None = None) -> dict:
     return stats
 
 
+# ── small utilities other modules import from here ──────────────────
+
+# backward-compatible alias: the log used to be called session.log
+LOG_FILE = DEFAULT_LOG_FILE
+
+
+def retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0,
+          exceptions: tuple = (Exception,)):
+    """Decorator: retry a function with exponential backoff (logged on failure)."""
+    import functools
+    import time
+
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            current_delay = delay
+            last_exc = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as exc:                    # noqa: BLE001
+                    last_exc = exc
+                    if attempt < max_attempts:
+                        log_warn(f"{func.__name__} attempt {attempt}/{max_attempts} failed: {exc}")
+                        time.sleep(current_delay)
+                        current_delay *= backoff
+                    else:
+                        log_error(f"{func.__name__} failed after {max_attempts} attempts: {exc}")
+            raise last_exc
+        return wrapper
+    return decorator
+
+
+def timeout(seconds: int, msg: str = "Operation timed out"):
+    """Context manager that raises TimeoutError after `seconds` (SIGALRM)."""
+    import signal
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _ctx():
+        def _handler(signum, frame):
+            raise TimeoutError(msg)
+
+        old = signal.signal(signal.SIGALRM, _handler)
+        signal.alarm(seconds)
+        try:
+            yield
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
+
+    return _ctx()
+
+
+def check_command(name: str) -> bool:
+    """Check if a shell command exists in PATH."""
+    import shutil
+    return shutil.which(name) is not None
+
+
+def check_tools(required: list) -> dict:
+    """Check which tools from a list are available."""
+    return {tool: check_command(tool) for tool in required}
+
+
+def require_tool(name: str) -> str:
+    """Get a tool's path or raise if it is missing."""
+    import shutil
+    path = shutil.which(name)
+    if not path:
+        raise FileNotFoundError(f"Required tool not found: {name}")
+    return path
+
+
+def status_summary(results: dict) -> str:
+    """Colored OK/FAIL summary for a dict of check results."""
+    from colors import C
+    parts = []
+    for name, passed in results.items():
+        color = C.GRN if passed else C.RED
+        parts.append(f"  {color}{'✓' if passed else '✗'}{C.NC} {name}")
+    return "\n".join(parts)
+
+
 # ── `ul8.py logs` ───────────────────────────────────────────────────
 def main(argv: list[str] | None = None) -> int:
     """Print the log: `logs [--tail N] [--level ERROR] [--grep TEXT] [--clear] [--json]`."""
