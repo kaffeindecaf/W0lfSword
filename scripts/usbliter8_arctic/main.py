@@ -246,7 +246,8 @@ def menu():
         try:
             choice = log_utils.safe_input(f"  {C.FROST}{C.B}usbliter8 ▸{C.NC} ").strip().lower()
         except (EOFError, KeyboardInterrupt):
-            print(); break
+            print()
+            break
 
         print()
         choice = choice or " "

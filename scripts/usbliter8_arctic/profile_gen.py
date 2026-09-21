@@ -309,12 +309,16 @@ def cmd_fill(args: list[str]):
     rest = [a for a in args[1:] if a != "--json"]
     i = 0
     while i < len(rest):
-        if rest[i] == "--from" and i + 1 < len(rest):
-            base_path = Path(rest[i + 1]); i += 2
-        elif rest[i] == "--comp-dir" and i + 1 < len(rest):
-            comp_dir = Path(rest[i + 1]); i += 2
-        elif rest[i] == "--sections" and i + 1 < len(rest):
-            only = [s.strip() for s in rest[i + 1].split(",") if s.strip()]; i += 2
+        flag, value = rest[i], (rest[i + 1] if i + 1 < len(rest) else "")
+        if flag == "--from" and value:
+            base_path = Path(value)
+            i += 2
+        elif flag == "--comp-dir" and value:
+            comp_dir = Path(value)
+            i += 2
+        elif flag == "--sections" and value:
+            only = [s.strip() for s in value.split(",") if s.strip()]
+            i += 2
         else:
             i += 1
 
