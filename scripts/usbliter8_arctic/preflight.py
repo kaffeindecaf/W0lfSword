@@ -424,6 +424,20 @@ def run_preflight(profile_path: Path, *, components: Path | None = None,
 
     if record:
         write_evidence(profile_path, profile, report, raw_by_section)
+
+    try:
+        import log_utils
+        log_utils.log("ERROR" if report.verdict == "blocked"
+                      else "WARN" if report.verdict == "review" else "INFO",
+                      f"preflight {profile_path.name}: {report.verdict} "
+                      f"({report.count('match', 'plausible')} checked, "
+                      f"{report.count('fail')} bad, {report.pending} pending)", module="preflight")
+        for site in report.sites:
+            if site.severity == "fail":
+                log_utils.log_warn(f"preflight {site.section}.{site.entry}: {site.detail}",
+                                   module="preflight")
+    except Exception:                                        # noqa: BLE001
+        pass
     return report
 
 
@@ -604,4 +618,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    import log_utils
+    log_utils.install()          # usbliter8.log + unhandled-exception logging
     sys.exit(main())

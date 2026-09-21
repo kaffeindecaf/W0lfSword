@@ -7428,7 +7428,7 @@ main() {
     # subcommands run without root; every other ul8 command still goes through
     # the root gate in its dispatch branch below.
     if [ "$cmd" = "usbliter8" ] || [ "$cmd" = "ul8" ]; then
-        UL8_READONLY=" preflight verify gaps coverage offsets audit explain version help -h --help "
+        UL8_READONLY=" preflight verify gaps coverage offsets audit explain logs version help -h --help "
         if [ "$EUID" -ne 0 ] && [[ "$UL8_READONLY" == *" ${args[0]:-} "* ]]; then
             shift
             run_usbliter8 "$@"

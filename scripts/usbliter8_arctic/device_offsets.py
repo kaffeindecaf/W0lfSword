@@ -359,6 +359,8 @@ def get_active_device() -> dict[str, Any] | None:
 # ── CLI (for testing / standalone use) ──
 
 if __name__ == "__main__":
+    import log_utils
+    log_utils.install()          # usbliter8.log + unhandled-exception logging
     if len(sys.argv) < 2:
         print(f"\n  {C.FROST}usbliter8-arctic — device offset manager{C.NC}\n")
         print(f"  Usage:")

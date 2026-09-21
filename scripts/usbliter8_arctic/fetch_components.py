@@ -309,6 +309,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    import log_utils
+    log_utils.install()          # usbliter8.log + unhandled-exception logging
     try:
         sys.exit(main())
     except RuntimeError as exc:

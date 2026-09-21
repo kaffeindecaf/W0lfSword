@@ -2,7 +2,7 @@
 
 > The easy way to run the usbliter8 tethered jailbreak. A TUI hub that walks you through the whole chain: wire up an RP2350 board, flash the exploit firmware, build a custom firmware for your A12/A13 iPhone or iPad, restore it, and boot. Offsets are managed as validated YAML profiles, and a fingerprint engine migrates them between iOS betas automatically.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-129%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-151%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 ## Quick start
 
@@ -194,6 +194,9 @@ Standalone script interfaces:
 python3 ul8.py menu                                   # TUI hub (alias of main.py)
 
 python3 pwn_utils.py scan | wait                      # USB detection / PWN wait
+python3 ul8.py logs                                   # errors this far, from usbliter8.log
+python3 ul8.py logs --tail 20 --level ERROR           # last 20 errors only
+python3 ul8.py logs --grep ipad12p --json             # machine-readable
 
 python3 device_offsets.py list                        # available offset profiles
 python3 device_offsets.py validate offsets/iPhone12,3_27.0b2.yaml
@@ -302,6 +305,44 @@ The 2026-09-20 audit of the iPhone 11 Pro profiles against the upstream scripts 
 
 Tests: `python3 -m pytest tests/ -q` (99 tests; offset ground truth = b2 → b3 oracle in `OffsetMigrationChecklist.md`).
 
+## Logging
+
+Every error and warning that reaches the screen is also appended to
+`usbliter8.log` in the repo root, so "it failed" can be reported with the actual
+reason attached instead of a screenshot of the last line. The file is
+gitignored, capped at 2 MB and rotated (`.1` -> `.2` -> `.3`).
+
+```bash
+python3 ul8.py logs                            # header + the last 60 entries
+python3 ul8.py logs --level ERROR --tail 20    # errors only
+python3 ul8.py logs --since 2026-09-21T14 --grep sandbox
+python3 ul8.py logs --path                     # just the file path
+python3 ul8.py logs --clear                    # truncate (and drop backups)
+python3 ul8.py logs --json | python3 -m json.tool
+```
+
+What lands in it:
+
+- every `colors.err()` / `colors.warn()` message, tagged with the module and line
+  that produced it (`[cfw_builder:412]`), which is how the whole toolkit is
+  covered without sprinkling log calls everywhere
+- unhandled exceptions with the full traceback (`sys.excepthook` and
+  `threading.excepthook`), plus Ctrl-C
+- pipeline steps: build start/finish, the per-section patch manifest, preflight
+  verdicts and every failed site, firmware/step logging from `hardware_guide`
+  and `pwn_utils`
+
+Environment overrides:
+
+```bash
+UL8_LOG_FILE=/tmp/ul8.log     python3 ul8.py pwn     # another location
+UL8_LOG_LEVEL=INFO            python3 ul8.py build … # also record info/steps
+UL8_NO_LOG=1                  python3 ul8.py build … # no file at all
+```
+
+Logging never breaks a run: an unwritable path prints one stderr note and
+disables itself. Test runs never touch the repo log.
+
 ## Contributing offsets
 
 Found offsets for a device/iOS combo that isn't covered yet? The `contribute` flow handles the whole thing:
@@ -350,7 +391,8 @@ usbliter8-arctic/
 ├── kczip.py              # zip64 range reader (ported from W0lfSword)
 ├── hardware_guide.py     # guided setup, health check, firmware flashing
 ├── deps.py               # dependency checker & installer
-├── log_utils.py · colors.py
+├── log_utils.py          # usbliter8.log: errors, warnings, tracebacks, `ul8.py logs`
+├── colors.py
 ├── offsets/              # device offset profiles (+ template, sources, canonical.yaml)
 │   └── evidence/         # preflight-recorded original bytes per profile (self-verifying)
 ├── tools/                # binary utilities (img4, img4tool, usbliter8ctl, …)

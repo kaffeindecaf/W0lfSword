@@ -770,6 +770,8 @@ def cmd_list_templates(json_out: bool = False):
 
 
 if __name__ == "__main__":
+    import log_utils
+    log_utils.install()          # usbliter8.log + unhandled-exception logging
     if len(sys.argv) < 2:
         print(f"\n  {C.FROST}usbliter8 profile generator{C.NC}\n")
         print(f"  Commands:")

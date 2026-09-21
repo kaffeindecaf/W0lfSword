@@ -506,6 +506,14 @@ def _print_manifest() -> None:
     """Per-section patch manifest: what this build actually wrote."""
     if not MANIFEST:
         return
+    try:
+        import log_utils
+        for sec, status, detail in MANIFEST:
+            log_utils.log("WARN" if status in ("skipped", "mismatch", "failed", "partial")
+                          else "INFO", f"manifest {sec}: {status} {detail}".strip(),
+                          module="cfw_builder")
+    except Exception:                                        # noqa: BLE001
+        pass
     print()
     print(section("Patch manifest"))
     for section, status, detail in MANIFEST:
@@ -529,6 +537,14 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
         offsets = yaml.safe_load(f)
 
     model = offsets.get("model", "unknown")
+    try:
+        import log_utils
+        log_utils.install()
+        log_utils.log_info(f"build start: {model} iOS {offsets.get('ios_version', '?')} "
+                           f"({offsets.get('build', '?')}) ipsw={ipsw_path} dry_run={DRY_RUN}",
+                           module="cfw_builder")
+    except Exception:                                        # noqa: BLE001
+        pass
     ios = offsets.get("ios_version", "unknown")
     device = offsets.get("device", "unknown")
 
@@ -625,6 +641,14 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
 
     _print_manifest()
 
+    try:
+        import log_utils
+        log_utils.log("INFO" if ok_patch else "ERROR",
+                      f"build {'finished' if ok_patch else 'FAILED'}: {model} -> {ipsw_dir}",
+                      module="cfw_builder")
+    except Exception:                                        # noqa: BLE001
+        pass
+
     if ok_patch:
         blocked = [m for m in MANIFEST if m[1] in ("skipped", "mismatch", "failed")]
         print()
@@ -650,6 +674,8 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
 # ── CLI ──
 
 if __name__ == "__main__":
+    import log_utils
+    log_utils.install()          # usbliter8.log + unhandled-exception logging
     import sys
     args = sys.argv[1:]
 

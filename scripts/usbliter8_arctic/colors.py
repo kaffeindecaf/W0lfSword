@@ -21,10 +21,21 @@ class C:
 def ok(msg: str) -> str:
     return f"  {C.GRN}✓{C.NC} {msg}"
 
+def _record(level: str, msg: str) -> None:
+    """Mirror an on-screen error/warning into usbliter8.log (never raises)."""
+    try:
+        import log_utils
+        log_utils.record_display(level, msg)
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
 def err(msg: str) -> str:
+    _record("ERROR", msg)
     return f"  {C.RED}✗{C.NC} {msg}"
 
 def warn(msg: str) -> str:
+    _record("WARN", msg)
     return f"  {C.AMB}⚠{C.NC} {msg}"
 
 def info(msg: str) -> str:

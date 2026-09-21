@@ -584,13 +584,24 @@ def menu_postboot():
 #  Entry
 # ═══════════════════════════════════════════════════════════════
 
+def _argv_after(verb: str) -> list[str]:
+    """Raw argv after a subcommand verb, so its own options pass through intact."""
+    argv = sys.argv[1:]
+    if verb in argv:
+        return argv[argv.index(verb) + 1:]
+    return []
+
 if __name__ == "__main__":
     import argparse
+
+    import log_utils
+    log_utils.install()          # usbliter8.log + unhandled-exception logging
     p = argparse.ArgumentParser(description="usbliter8-arctic — iOS exploit hub")
     p.add_argument("--dry-run", action="store_true", help="Simulate without modifying files")
     p.add_argument("command", nargs="?", default="menu",
                    help="Subcommand: menu, pwn, offsets, coverage, gaps, preflight, "
-                        "audit, fetch, migrate, build, flash, boot, sshrd, net, vnc, explain")
+                        "audit, fetch, migrate, build, flash, boot, sshrd, net, vnc, "
+                        "explain, logs")
     p.add_argument("profile", nargs="?", default="", help="profile path for preflight/audit")
     # flags for the wrapped tool (--json, --fetch, --record, ...) pass through
     args, extra = p.parse_known_args()
@@ -635,5 +646,7 @@ if __name__ == "__main__":
     elif args.command == "migrate":
         import migrate
         migrate.cli_main(([args.profile] if args.profile else []) + extra)
+    elif args.command == "logs":
+        raise SystemExit(log_utils.main(_argv_after("logs") or None))
     else:
         menu()

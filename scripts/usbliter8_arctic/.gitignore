@@ -2,6 +2,7 @@ diagrams.txt
 __pycache__/
 *.pyc
 session.log
+usbliter8.log*
 config.yaml
 firmware/
 research/
