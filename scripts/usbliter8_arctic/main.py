@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 
+import source_audit
 from colors import C, ok, err, warn, info, section, key_value, header, prompt
 import log_utils
 from device_offsets import list_offset_files, set_active_device, get_active_device, find_online_sources
@@ -19,20 +20,6 @@ from pwn_utils import print_device_status, verify_pwn_mode, check_pyusb_installe
 PROJECT_ROOT = Path(__file__).parent
 SCRIPTS_DIR = Path(__file__).parent
 OFFSETS_DIR = SCRIPTS_DIR / "offsets"
-
-def _find_work_dirs() -> list[Path]:
-    """Find usbliter8-fun work directories from multiple locations."""
-    candidates = [
-        Path(__file__).parent.parent / "referenceforAI",
-        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI",
-        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI" / "projects",
-    ]
-    for base in candidates:
-        if base.exists():
-            dirs = list(base.glob("usbliter8-fun*/work-*"))
-            if dirs:
-                return sorted(dirs)
-    return []
 
 
 def clear():
@@ -413,30 +400,6 @@ def menu_configure():
                 pass
 
 
-def _run_build_gate(offset_path) -> bool:
-    """Verify the profile before a build; ask before overriding a block."""
-    from device_offsets import pending_entries, validate_offsets
-    import preflight
-    report = preflight.run_preflight(offset_path)
-    if report.verdict == "ok":
-        print(ok(f"preflight: {report.count('match', 'plausible')} sites verified"))
-        return True
-
-    print()
-    preflight.print_report(report, verbose=False)
-    if report.verdict == "blocked":
-        ans = log_utils.safe_input(prompt("preflight BLOCKED this build — build anyway? [y/N]: ") or "n")
-        if ans.lower() not in ("y", "yes"):
-            return False
-        import cfw_builder
-        cfw_builder.FORCE = True
-        return True
-    if pending_entries(offset_path) > 0:
-        ans = log_utils.safe_input(prompt("profile has pending offsets — build anyway? [y/N]: ") or "n")
-        return ans.lower() in ("y", "yes")
-    _ = validate_offsets
-    return True
-
 
 def menu_build():
     """Sub-menu: build CFW."""
@@ -484,7 +447,7 @@ def menu_flash():
     print()
 
     # Find work directory
-    work_dirs = _find_work_dirs()
+    work_dirs = source_audit.find_work_dirs()
     if work_dirs:
         print(section("Available Work Dirs"))
         for i, d in enumerate(work_dirs):
@@ -518,7 +481,7 @@ def menu_sshrd():
         print(err(f"Not in PWN DFU: {msg}"))
         return
 
-    work_dirs = _find_work_dirs()
+    work_dirs = source_audit.find_work_dirs()
     work_dir = None
     if work_dirs:
         work_dir = Path(log_utils.safe_input(prompt(f"Work dir [{work_dirs[0]}]: ") or str(work_dirs[0])))
@@ -543,7 +506,7 @@ def menu_normal_boot():
         print(err(f"Not in PWN DFU: {msg}"))
         return
 
-    work_dirs = _find_work_dirs()
+    work_dirs = source_audit.find_work_dirs()
     work_dir = None
     if work_dirs:
         work_dir = Path(log_utils.safe_input(prompt(f"Work dir [{work_dirs[0]}]: ") or str(work_dirs[0])))
@@ -604,111 +567,13 @@ def menu_postboot():
 # ═══════════════════════════════════════════════════════════════
 #  Entry
 # ═══════════════════════════════════════════════════════════════
-
-def _argv_after(verb: str) -> list[str]:
-    """Raw argv after a subcommand verb, so its own options pass through intact."""
-    argv = sys.argv[1:]
-    if verb in argv:
-        return argv[argv.index(verb) + 1:]
-    return []
-
-def _cli() -> int:
-    """Command line entry point: whatever it raises, guard() turns into an exit code."""
-    import argparse
-
-    import log_utils
-    log_utils.install()          # usbliter8.log + unhandled-exception logging
-    p = argparse.ArgumentParser(description="usbliter8-arctic — iOS exploit hub")
-    p.add_argument("--dry-run", action="store_true", help="Simulate without modifying files")
-    p.add_argument("command", nargs="?", default="menu",
-                   help="Subcommand: menu, pwn, offsets, coverage, gaps, preflight, "
-                        "audit, fetch, migrate, build, flash, boot, sshrd, net, vnc, "
-                        "ssh, postboot, explain, version, logs")
-    p.add_argument("profile", nargs="?", default="", help="profile path for preflight/audit")
-    p.add_argument("--no-deps", action="store_true",
-                   help="skip the dependency check (nothing is installed)")
-    # flags for the wrapped tool (--json, --fetch, --record, ...) pass through
-    args, extra = p.parse_known_args()
-
-    if not args.no_deps and os.environ.get("UL8_NO_DEPS") not in ("1", "true", "yes"):
-        import deps
-        deps.ensure_for_command(args.command, quiet="--json" in extra)
-
-    if args.dry_run:
-        import cfw_builder, boot_chain
-        cfw_builder.DRY_RUN = True
-        boot_chain.DRY_RUN = True
-
-    if args.command == "menu":
-        menu()
-    elif args.command == "pwn":
-        print_device_status()
-    elif args.command == "offsets":
-        from device_offsets import list_offset_files
-        for f in list_offset_files():
-            icon = "✓" if f["status"] == "ready" else "⚠"
-            print(f"  {icon} {f['device']} ({f['model']}) — iOS {f['ios']} [{f['soc']}]  {f['passed']} patches")
-    elif args.command == "explain":
-        from boot_chain import explain_usbliter8
-        explain_usbliter8()
-    elif args.command == "coverage":
-        import profile_gen
-        profile_gen.cmd_coverage(json_out="--json" in extra)
-    elif args.command == "gaps":
-        import profile_gen
-        profile_gen.cmd_gaps(json_out="--json" in extra)
-    elif args.command in ("preflight", "verify"):
-        import preflight
-        argv = ([args.profile] if args.profile else []) + extra
-        raise SystemExit(preflight.main(argv or None))
-    elif args.command == "fetch":
-        import fetch_components
-        raise SystemExit(fetch_components.main(extra))
-    elif args.command == "audit":
-        argv = ([args.profile] if args.profile else []) + extra
-        if not argv:
-            print(err("usage: main.py audit <make_cfw.py> <profile.yaml>"))
-            raise SystemExit(2)
-        import source_audit
-        raise SystemExit(source_audit.main(argv))
-    elif args.command == "migrate":
-        import migrate
-        migrate.cli_main(([args.profile] if args.profile else []) + extra)
-    elif args.command == "build":
-        menu_build()
-    elif args.command == "flash":
-        menu_flash()
-    elif args.command == "boot":
-        menu_normal_boot()
-    elif args.command == "sshrd":
-        menu_sshrd()
-    elif args.command == "net":
-        from boot_chain import setup_usb_network
-        setup_usb_network()
-    elif args.command == "vnc":
-        from boot_chain import setup_vnc
-        setup_vnc()
-    elif args.command == "ssh":
-        from boot_chain import ssh_connect
-        ssh_connect()
-    elif args.command == "postboot":
-        menu_postboot()
-    elif args.command == "version":
-        import version
-        raise SystemExit(version.main(_argv_after("version")))
-    elif args.command == "logs":
-        raise SystemExit(log_utils.main(_argv_after("logs")))
-    else:
-        print(err(f"unknown subcommand '{args.command}'"))
-        print(info("try: menu, pwn, offsets, coverage, gaps, preflight, audit, fetch, "
-             "migrate, build, flash, boot, sshrd, net, vnc, ssh, postboot, "
-             "explain, version, logs"))
-        return log_utils.EXIT_ERROR
-    return log_utils.EXIT_OK
-
+# The command line lives in cli.py (one verb table for `ul8.py <verb>`,
+# `./usbliter8 <verb>` and `./W0lfSword ul8 <verb>`). This module is the TUI:
+# the banner, the menu and the menu_* actions the wrapper calls by name.
 
 if __name__ == "__main__":
+    import cli
     import log_utils
 
     log_utils.install()          # usbliter8.log + clean exits
-    sys.exit(log_utils.guard(_cli))
+    sys.exit(log_utils.guard(cli.main))

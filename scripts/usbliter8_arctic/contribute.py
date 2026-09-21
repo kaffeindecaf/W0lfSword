@@ -256,31 +256,28 @@ def usage() -> None:
     print()
 
 
-def _cli() -> int:
+def cli(argv: list[str] | None = None) -> int:
     """Command line entry point: whatever it raises, guard() turns into an exit code."""
-    if len(sys.argv) < 2:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv:
         usage()
-        sys.exit(0)
+        return log_utils.EXIT_OK
 
-    cmd = sys.argv[1]
-    args = sys.argv[2:]
-    rc = 0
+    cmd, args = argv[0], argv[1:]
     if cmd == "new":
-        rc = cmd_new(args)
-    elif cmd == "status":
-        rc = cmd_status()
-    elif cmd == "pr":
-        rc = cmd_pr(args)
-    else:
-        print(err(f"Unknown command: {cmd}"))
-        usage()
-        rc = 1
-    sys.exit(rc)
-    return log_utils.EXIT_OK
+        return cmd_new(args) or log_utils.EXIT_OK
+    if cmd == "status":
+        return cmd_status() or log_utils.EXIT_OK
+    if cmd == "pr":
+        return cmd_pr(args) or log_utils.EXIT_OK
+
+    print(err(f"Unknown command: {cmd}"))
+    usage()
+    return log_utils.EXIT_ERROR
 
 
 if __name__ == "__main__":
     import log_utils
 
     log_utils.install()          # usbliter8.log + clean exits
-    sys.exit(log_utils.guard(_cli))
+    sys.exit(log_utils.guard(cli))

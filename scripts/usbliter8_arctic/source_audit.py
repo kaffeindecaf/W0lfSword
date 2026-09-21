@@ -453,6 +453,24 @@ def cmd_liter8(args: list[str]) -> int:
     return 0
 
 
+def find_work_dirs() -> list[Path]:
+    """Upstream usbliter8-fun work directories, newest layout first.
+
+    Both the TUI build flow (main.py) and the migration engine (migrate.py) read
+    `make_cfw.py` out of these; the search order lives here once.
+    """
+    candidates = [
+        Path(__file__).parent.parent / "referenceforAI",
+        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI",
+        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI" / "projects",
+    ]
+    dirs: list[Path] = []
+    for base in candidates:
+        if base.exists():
+            dirs.extend(sorted(base.glob("usbliter8-fun*/work-*")))
+    return dirs
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)

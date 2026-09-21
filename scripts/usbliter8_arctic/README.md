@@ -2,7 +2,7 @@
 
 > The easy way to run the usbliter8 tethered jailbreak. A TUI hub that walks you through the whole chain: wire up an RP2350 board, flash the exploit firmware, build a custom firmware for your A12/A13 iPhone or iPad, restore it, and boot. Offsets are managed as validated YAML profiles, and a fingerprint engine migrates them between iOS betas automatically.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-300%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-305%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 ## Quick start
 
@@ -248,10 +248,13 @@ Environment variables for scripted installs:
 
 ## CLI usage
 
-Standalone script interfaces:
+Every verb below works the same through any entry point, and `ul8.py <verb>` is
+the shortest one. Modules can still be run directly when you want just that
+piece (`python3 preflight.py <profile>`); the dispatcher only adds the dependency
+check, the exit-code guard and the log.
 
 ```bash
-python3 ul8.py menu                                   # TUI hub (alias of main.py)
+python3 ul8.py menu                                   # the TUI (default when you pass nothing)
 
 python3 pwn_utils.py scan | wait                      # USB detection / PWN wait
 python3 ul8.py logs                                   # errors this far, from usbliter8.log
@@ -518,13 +521,31 @@ The CFW builder applies hex patches at precise offsets for each component:
 - **Restore Ramdisk**: ASR signature bypass, FDR force-succeed
 - **Daemons**: coreauthd, ctkd, mobileactivationd activation bypass
 
-## Layout
+## Entry points and layout
+
+There are three ways in, and only one place where the commands live:
+
+| You type | What runs | Notes |
+|---|---|---|
+| `./usbliter8` | the terminal script, which drives the TUI or a subcommand | the friendly front door: root gate for USB commands, progress output, `./usbliter8 ul8 <verb>` forwards to the standalone launcher |
+| `python3 ul8.py <verb>` | `ul8.py` -> `cli.py` | standalone, no bash. Same verbs as below, no root gate |
+| `python3 main.py <verb>` | `main.py` -> `cli.py` | kept because scripts and the wrapper have always called it |
+
+`cli.py` holds the verb table (verb, description, handler) and is the only
+dispatcher: the help text, the "unknown subcommand" message and the dependency
+check all read from it, so a command cannot be advertised without being
+dispatchable. `main.py` is the TUI (banner, menu, build/flash/boot flows) and
+`ul8.py` is a three-line shim around `cli.py`; the interactive menu is one verb
+among the others (`menu`, the default).
 
 ```
 usbliter8-arctic/
-├── usbliter8             # terminal script (W0lfSword style), main entry point
-├── main.py / ul8.py      # TUI hub + standalone launcher
+├── usbliter8             # terminal script (W0lfSword style), friendly front door
+├── cli.py                # the verb table: one dispatcher for every subcommand
+├── main.py               # TUI: banner, menu, build/flash/boot flows
+├── ul8.py                # standalone launcher (shim around cli.py)
 ├── contribute.py         # offset contribution helper (new/status/pr)
+├── toolchain.py          # bundled tool paths (Mach-O aware) + command runner
 ├── boot_chain.py         # boot / restore / SSH / post-boot utilities
 ├── cfw_builder.py        # CFW patching pipeline (per-section patch manifest)
 ├── components.py         # per-device IPSW component resolution (iBSS/iBEC/kernel/…)
@@ -542,7 +563,7 @@ usbliter8-arctic/
 ├── img4wrap.py           # IMG4/IM4P container read+write (pure Python, lzfse via pyimg4)
 ├── safety_check.py       # pre-push/CI gate: leaks, machine paths, profile/evidence drift
 ├── hardware_guide.py     # guided setup, health check, firmware flashing
-├── deps.py               # dependency checker & installer
+├── deps.py               # OS detection, dependency check and installer
 ├── log_utils.py          # usbliter8.log: errors, warnings, tracebacks, exit guard
 ├── version.py            # version + git commit of the checkout
 ├── colors.py

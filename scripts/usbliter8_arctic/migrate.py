@@ -24,6 +24,7 @@ import yaml
 from colors import C, ok, err, warn, info, section, prompt
 import log_utils
 from fingerprint import MatchResult, migrate_site
+from source_audit import find_work_dirs
 
 SCRIPT_DIR = Path(__file__).parent
 OFFSETS_DIR = SCRIPT_DIR / "offsets"
@@ -130,18 +131,6 @@ def diff_section(base: dict, target: dict, section: str) -> dict[str, str]:
 
 # ── Component loading ────────────────────────────────────────────────
 
-def _find_work_dirs() -> list[Path]:
-    candidates = [
-        SCRIPT_DIR.parent / "referenceforAI",
-        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI",
-        Path.home() / "Desktop" / "W0lfSword" / "referenceforAI" / "projects",
-    ]
-    dirs = []
-    for base in candidates:
-        if base.exists():
-            dirs.extend(sorted(base.glob("usbliter8-fun*/work-*")))
-    return dirs
-
 
 def _discover_raw_files() -> dict[str, dict[str, Path]]:
     """Search work dirs for extracted raw components keyed by build tag.
@@ -149,7 +138,7 @@ def _discover_raw_files() -> dict[str, dict[str, Path]]:
     Returns {build: {component: path}} where build is e.g. "27.0b2".
     """
     found: dict[str, dict[str, Path]] = {}
-    for work_dir in _find_work_dirs():
+    for work_dir in find_work_dirs():
         build = work_dir.name.split("-", 1)[-1]
         for comp, patterns in FILE_PATTERNS.items():
             if comp in found.get(build, {}):
@@ -166,7 +155,7 @@ def _discover_raw_files() -> dict[str, dict[str, Path]]:
 def _fetch_via_workdir(build: str, component: str) -> Path | None:
     """Run the work dir's get_fw.py to fetch/decrypt components. Opt-in."""
     script = None
-    for work_dir in _find_work_dirs():
+    for work_dir in find_work_dirs():
         if work_dir.name.endswith(build):
             for name in ("get_fw.py", "make_cfw.py"):
                 candidate = work_dir / name

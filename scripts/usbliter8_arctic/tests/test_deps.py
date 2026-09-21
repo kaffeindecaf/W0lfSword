@@ -26,6 +26,18 @@ def gate_enabled(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def classic_pip(monkeypatch):
+    """Pin the installer instead of inheriting the environment.
+
+    A uv venv has no pip, so a test asserting the pip command line would fail
+    there for the wrong reason; the uv fallback has its own tests.
+    """
+    monkeypatch.setattr(deps, "pip_available", lambda: True)
+    monkeypatch.setattr(deps, "uv_available", lambda: False)
+    yield
+
+
 # ── detection ───────────────────────────────────────────────────────
 
 def test_platform_info_shape_and_values():

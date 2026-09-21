@@ -105,10 +105,6 @@ def fatal(message: str, hint: str = "", code: int = EXIT_ERROR) -> None:
     raise CleanExit(code, message)
 
 
-def warn_and_continue(message: str) -> None:
-    """A recoverable problem: log it, tell the user, keep going."""
-    log_warn(message, module=_caller_module())
-
 
 def safe_input(prompt_text: str, default: str = "", *, eof_default: str | None = None,
                eof_code: int = EXIT_ERROR,
@@ -322,8 +318,6 @@ def log_info(msg: str, **kw) -> str | None:     return log("INFO", msg, **kw)
 def log_step(msg: str, **kw) -> str | None:     return log("STEP", msg, **kw)
 def log_warn(msg: str, **kw) -> str | None:     return log("WARN", msg, **kw)
 def log_error(msg: str, **kw) -> str | None:    return log("ERROR", msg, **kw)
-def log_critical(msg: str, **kw) -> str | None: return log("CRITICAL", msg, **kw)
-
 
 def log_exception(exc: BaseException, msg: str = "unhandled exception") -> None:
     log("ERROR", msg, exc=exc, module="excepthook")
@@ -435,9 +429,6 @@ def log_stats(path: Path | str | None = None) -> dict:
 
 # ── small utilities other modules import from here ──────────────────
 
-# backward-compatible alias: the log used to be called session.log
-LOG_FILE = DEFAULT_LOG_FILE
-
 
 def retry(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0,
           exceptions: tuple = (Exception,)):
@@ -473,7 +464,7 @@ def timeout(seconds: int, msg: str = "Operation timed out"):
 
     @contextmanager
     def _ctx():
-        def _handler(signum, frame):
+        def _handler(_signum, _frame):
             raise TimeoutError(msg)
 
         old = signal.signal(signal.SIGALRM, _handler)

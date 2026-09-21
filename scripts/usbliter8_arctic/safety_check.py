@@ -44,6 +44,7 @@ import log_utils
 ROOT = Path(__file__).parent
 OFFSETS = ROOT / "offsets"
 EVIDENCE = OFFSETS / "evidence"
+EVIDENCE_REL = f"{EVIDENCE.parent.name}/{EVIDENCE.name}"      # offsets/evidence
 
 ALLOW_MARKER = "safety-allow"
 GENERATED = ("usbliter8.log", "session.log", "active_device.yaml", "config.yaml",
@@ -188,7 +189,7 @@ def check_evidence(files: list[str]) -> tuple[list[str], list[str]]:
     import yaml
     problems, summary = [], []
     for rel in sorted(files):
-        if not rel.startswith("offsets/evidence/") or not rel.endswith(".json"):
+        if not rel.startswith(f"{EVIDENCE_REL}/") or not rel.endswith(".json"):
             continue
         try:
             evidence = json.loads(read(rel))

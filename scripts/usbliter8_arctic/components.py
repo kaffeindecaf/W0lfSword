@@ -23,8 +23,6 @@ from pathlib import Path
 
 from profile_gen import DEVICE_DB
 
-KINDS = ("ibss", "ibec", "txm", "devicetree", "kernelcache", "restoreramdisk")
-
 # kind -> human label, expected subdirectory ("" = anywhere/root), globs
 SPEC = {
     "ibss":          ("iBSS",          "Firmware/dfu",       ("iBSS.*.im4p",)),

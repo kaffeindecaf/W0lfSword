@@ -201,7 +201,8 @@ def test_modules_using_log_utils_import_it_at_module_level():
         text = path.read_text()
         if "log_utils." not in text:
             continue
-        if not re.search(r"^import log_utils$", text, re.M):
+        # a trailing linter suppression on the import line is fine
+        if not re.search(r"^import log_utils(\s+#.*)?$", text, re.M):
             offenders.append(path.name)
     assert not offenders, f"missing module-level `import log_utils`: {offenders}"
 

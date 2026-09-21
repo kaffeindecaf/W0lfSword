@@ -1,106 +1,20 @@
 #!/usr/bin/env python3
-"""ul8 — standalone usbliter8-arctic launcher."""
+"""ul8 — standalone launcher for usbliter8-arctic.
+
+This file exists so the toolkit has a name of its own (`./ul8.py <verb>`) and so
+`./W0lfSword ul8 <verb>` keeps working. The verbs themselves live in `cli.py`;
+the interactive menu lives in `main.py`.
+"""
 
 import sys
 from pathlib import Path
 
-from colors import err, info
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import log_utils
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
-
-
-def _argv_after(verb: str) -> list[str]:
-    """Raw argv after a subcommand verb, so its own options pass through intact."""
-    argv = sys.argv[1:]
-    if verb in argv:
-        return argv[argv.index(verb) + 1:]
-    return []
-
-def _cli() -> int:
-    """Command line entry point: whatever it raises, guard() turns into an exit code."""
-    import argparse
-
-    import log_utils
-    log_utils.install()          # usbliter8.log + unhandled-exception logging
-
-    p = argparse.ArgumentParser(
-        prog="ul8",
-        description="usbliter8-arctic — iOS kernel exploit hub (standalone)",
-    )
-    p.add_argument("--dry-run", action="store_true", help="Simulate without modifying files")
-    p.add_argument(
-        "command",
-        nargs="?",
-        default="menu",
-        help="Subcommand: menu, pwn, offsets, preflight, gaps, explain, health, deps, "
-             "logs, version",
-    )
-    p.add_argument("profile", nargs="?", default="", help="profile for preflight")
-    p.add_argument("--no-deps", action="store_true",
-                   help="skip the dependency check (nothing is installed)")
-    # parse_known_args: flags meant for the wrapped tool (--json, --fetch, --record)
-    # must pass through instead of being rejected by this parser.
-    args, extra = p.parse_known_args()
-
-    if not args.no_deps:
-        import deps
-        deps.ensure_for_command(args.command, quiet="--json" in extra)
-
-    if args.dry_run:
-        import cfw_builder
-        import boot_chain
-        cfw_builder.DRY_RUN = True
-        boot_chain.DRY_RUN = True
-
-    if args.command == "menu":
-        import main
-        main.menu()
-    elif args.command == "pwn":
-        import pwn_utils
-        pwn_utils.print_device_status()
-    elif args.command == "preflight":
-        import preflight
-        argv = ([args.profile] if args.profile else []) + extra
-        sys.exit(preflight.main(argv or None))
-    elif args.command == "gaps":
-        import profile_gen
-        profile_gen.cmd_gaps(json_out="--json" in extra)
-    elif args.command == "offsets":
-        import device_offsets
-        for f in device_offsets.list_offset_files():
-            icon = "✓" if f["status"] == "ready" else "⚠"
-            print(
-                f"  {icon} {f['device']} ({f['model']}) — "
-                f"iOS {f['ios']} [{f['soc']}]  {f['passed']} patches"
-            )
-    elif args.command == "explain":
-        import boot_chain
-        boot_chain.explain_usbliter8()
-    elif args.command == "health":
-        import hardware_guide
-        hardware_guide.run_health_check()
-    elif args.command == "deps":
-        from deps import install_dependencies
-        install_dependencies()
-    elif args.command == "logs":
-        sys.exit(log_utils.main(_argv_after("logs")))
-    elif args.command == "version":
-        import version
-        sys.exit(version.main(_argv_after("version")))
-    else:
-        print(err(f"unknown subcommand '{args.command}'"))
-        print(info("try: menu, pwn, offsets, preflight, gaps, coverage, explain, health, "
-             "deps, logs, version"))
-        return log_utils.EXIT_ERROR
-    return log_utils.EXIT_OK
+import cli          # noqa: E402  (needs the path above)
+import log_utils    # noqa: E402
 
 
 if __name__ == "__main__":
-    import log_utils
-
     log_utils.install()          # usbliter8.log + clean exits
-    sys.exit(log_utils.guard(_cli))
+    sys.exit(log_utils.guard(cli.main))

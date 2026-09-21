@@ -162,9 +162,6 @@ def is_root() -> bool:
         return False
 
 
-def has_sudo() -> bool:
-    return platform.system() != "Windows" and bool(shutil.which("sudo"))
-
 
 def is_interactive() -> bool:
     """A terminal we can ask a question on."""
@@ -608,10 +605,6 @@ def check_dependencies() -> dict:
             results["python_packages"] = False
     return results
 
-
-def print_dependency_status() -> dict:
-    """Legacy entry point for the health check."""
-    return print_status(("usb", "profiles", "build", "migrate"), title="Dependency Status")
 
 
 def install_dependencies() -> bool:

@@ -155,6 +155,7 @@ py_pwn()         { $PY pwn_utils.py "$@"; }
 py_health()      { $PY -c "from hardware_guide import run_health_check; run_health_check()"; }
 py_explain()     { $PY -c "from boot_chain import explain_usbliter8; explain_usbliter8()"; }
 py_deps()        { $PY deps.py "$@"; }
+py_ul8()         { $PY ul8.py "$@"; }        # the verb table in cli.py
 
 # ── Commands ───────────────────────────────────────────────────
 cmd_menu() { py_menu menu; }
@@ -199,6 +200,7 @@ cmd_pwn() {
 
 cmd_health() { py_health; }
 cmd_deps()   { py_deps "${@}"; }
+cmd_ul8()    { py_ul8 "${@}"; }
 
 cmd_offsets() {
     case "${1:-list}" in
@@ -319,6 +321,7 @@ cmd_help() {
     echo -e "  ${C_EYE}pwn${NC}            check / wait for PWN DFU"
     echo -e "  ${C_EYE}health${NC}         health check (board, tools, firmware, USB)"
     echo -e "  ${C_EYE}deps${NC}           check dependencies and offer to install what is missing"
+    echo -e "  ${C_EYE}ul8${NC} <verb>     any verb from cli.py, straight through (e.g. ul8 coverage --json)"
     echo -e "  ${C_EYE}offsets${NC}        list / validate / find / activate offset profiles"
     echo -e "  ${C_EYE}coverage${NC}       per-device profile status table"
     echo -e "  ${C_EYE}gaps${NC}           which profile sections still need offsets"
@@ -385,6 +388,7 @@ run_menu() {
             9|x|health)         cmd_health ;;
             o|offsets)          cmd_offsets list ;;
             c|coverage)         cmd_coverage ;;
+            u|ul8)              cmd_ul8 ;;
             m|migrate)          printf "  ${C_DIM}Usage: migrate <base.yaml> <target.yaml|iOS> [--comp-dir DIR] [--auto]${NC}\n"; cmd_migrate ;;
             p|propagate)        printf "  ${C_DIM}Usage: propagate <base.yaml> <Model> [--comp-dir DIR] [--force]${NC}\n"; cmd_propagate ;;
             t|contribute)       cmd_contribute ;;
@@ -436,6 +440,7 @@ main() {
         deps|deps-install)     cmd_deps "${args[@]}" ;;
         offsets)               cmd_offsets "${args[@]}" ;;
         coverage)              cmd_coverage "${args[@]}" ;;
+        ul8)                   cmd_ul8 "${args[@]}" ;;
         gaps)                  cmd_gaps "${args[@]}" ;;
         preflight|verify)      cmd_preflight "${args[@]}" ;;
         audit)                 cmd_audit "${args[@]}" ;;

@@ -124,9 +124,6 @@ def resolve_ipsw_url(device: str, build: str, use_cache: bool = True) -> tuple[s
     return "", ""
 
 
-def _short_board(board: str) -> str:
-    return board[:-2] if board.endswith("ap") else board
-
 
 def patterns_for(component: str, board: str, kernel_name: str = "", model: str = "") -> list:
     """Entry-name patterns for a component of one device.

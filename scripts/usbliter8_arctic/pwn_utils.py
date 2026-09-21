@@ -20,9 +20,7 @@ APPLE_DFU_VID = 0x05AC
 APPLE_DFU_PID = 0x1227
 APPLE_WTF_PID = 0x1280    # WTF mode (pre-DFU)
 APPLE_RESTORE_PID = 0x1281  # restore mode
-APPLE_RECOVERY_PID = 0x1281  # same as restore
 
-RP2350_DFU_PID = 0x000f     # RP2350 in BOOTSEL (UF2 flash drive)
 
 
 USB_HELP = (
@@ -184,16 +182,6 @@ def detect_apple_dfu() -> dict | None:
             }
     return None
 
-
-def detect_device_state() -> dict:
-    """Detect all connected devices and their states. Returns comprehensive status dict."""
-    result = {
-        "rp2350": detect_rp2350(),
-        "apple_dfu": detect_apple_dfu(),
-        "pyusb_available": check_pyusb_installed(),
-    }
-    result["pwned"] = verify_pwn_mode()[0] if result["apple_dfu"] else False
-    return result
 
 
 def verify_pwn_mode() -> tuple[bool, str]:

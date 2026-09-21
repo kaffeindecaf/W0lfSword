@@ -58,12 +58,3 @@ def key_value(key: str, value: str) -> str:
 
 def prompt(text: str) -> str:
     return f"  {C.FROST}{text}{C.NC} "
-
-def divider() -> str:
-    return f"  {C.DIM}{'─' * 56}{C.NC}"
-
-def progress_bar(current: int, total: int, width: int = 20) -> str:
-    pct = (current * 100) // total if total > 0 else 0
-    filled = (pct * width) // 100
-    empty = width - filled
-    return f"{C.GRN}{'▓' * filled}{C.DIM}{'░' * empty}{C.NC} {pct}%"

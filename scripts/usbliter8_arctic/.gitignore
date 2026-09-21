@@ -1,10 +1,16 @@
-diagrams.txt
-__pycache__/
-*.pyc
-session.log
+# runtime output and local state (never committed)
 usbliter8.log*
+session.log
+.usbliter8/
 config.yaml
 firmware/
 research/
+
+# local goals doc (the committed feature spec is OffsetMigrationChecklist.md)
 checklist.md
-.usbliter8/
+
+# python caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/

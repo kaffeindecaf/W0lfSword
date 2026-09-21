@@ -12,11 +12,11 @@ from urllib.request import urlretrieve, URLError
 
 import yaml
 
+import toolchain
 from colors import C, ok, err, warn, info, section, key_value, header, prompt
 import log_utils
 from log_utils import log_info, log_warn, log_error, log_step
 
-TOOLS_DIR = Path(__file__).parent / "tools"
 FW_DIR = Path(__file__).parent / "firmware"
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 
@@ -478,9 +478,9 @@ def run_health_check() -> dict[str, bool]:
     results["firmware_present"] = fw_ok
 
     # 3. Tools
-    from log_utils import check_command
     required = ["usbliter8ctl"]
-    tools = {t: (TOOLS_DIR / t).exists() or check_command(t) for t in required}
+    # a bundled macOS binary "exists" on Linux but cannot run: ask toolchain
+    tools = {t: toolchain.tool_available(t) for t in required}
     for t, ok_val in tools.items():
         color = C.GRN if ok_val else C.RED
         print(key_value(f"Tool: {t}", f"{color}{'found' if ok_val else 'NOT FOUND'}{C.NC}"))
@@ -522,8 +522,8 @@ def run_health_check() -> dict[str, bool]:
         results["rp2350_detected"] = False
 
     # 5. Tools directory check
-    tools_ok = TOOLS_DIR.exists() and list(TOOLS_DIR.glob("*"))
-    print(key_value("Tool dir", f"{C.GRN}ready ({len(list(TOOLS_DIR.glob('*')))}){C.NC}" if tools_ok else f"{C.RED}empty/missing{C.NC}"))
+    tools_ok = toolchain.TOOLS_DIR.exists() and list(toolchain.TOOLS_DIR.glob("*"))
+    print(key_value("Tool dir", f"{C.GRN}ready ({len(list(toolchain.TOOLS_DIR.glob('*')))}){C.NC}" if tools_ok else f"{C.RED}empty/missing{C.NC}"))
     results["tool_dir_ready"] = tools_ok
 
     # Summary
@@ -538,36 +538,6 @@ def run_health_check() -> dict[str, bool]:
     log_info(f"Health check: {'ALL OK' if all_ok else f'FAILURES: {failed}'}")
     return results
 
-
-def verify_board_for_exploit() -> bool:
-    """Pre-flash verification checklist. Returns True if ready."""
-    print(header("Pre-Flash Verification"))
-    print()
-
-    checks = [
-        ("Board configured", _load_config().get("selected_board") is not None),
-        ("Firmware downloaded", any(
-            check_firmware(bid) for bid in UF2_FILES
-        )),
-        ("usbliter8ctl available", (TOOLS_DIR / "usbliter8ctl").exists()),
-        ("RP2350 tools present", TOOLS_DIR.exists() and list(TOOLS_DIR.glob("*"))),
-    ]
-
-    all_pass = True
-    for name, result in checks:
-        if result:
-            print(ok(name))
-        else:
-            print(err(name))
-            all_pass = False
-
-    print()
-    if all_pass:
-        print(ok("Verification passed — ready to proceed"))
-    else:
-        print(err("Some checks failed — resolve before flashing"))
-
-    return all_pass
 
 
 if __name__ == "__main__":

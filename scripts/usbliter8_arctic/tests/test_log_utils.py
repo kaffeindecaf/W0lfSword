@@ -283,7 +283,7 @@ def test_legacy_helpers_still_exist():
     """hardware_guide.py imports check_command from here; a rewrite that drops
     these breaks the health check at runtime, not at import."""
     for name in ("retry", "timeout", "check_command", "check_tools", "require_tool",
-                 "status_summary", "LOG_FILE", "log_info", "log_warn", "log_error",
+                 "status_summary", "log_info", "log_warn", "log_error",
                  "log_step"):
         assert hasattr(log_utils, name), f"log_utils.{name} disappeared"
 

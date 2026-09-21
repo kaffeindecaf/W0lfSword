@@ -18,11 +18,12 @@ from pathlib import Path
 import yaml
 
 import components
+import device_offsets
 import dt_patch
+import toolchain
 from colors import C, ok, err, warn, info, stage, section
 import log_utils
 
-TOOLS_DIR = Path(__file__).parent / "tools"
 DRY_RUN = False
 VERBOSE = True
 FORCE = False          # --force: build despite failed preflight / pending entries
@@ -34,53 +35,6 @@ MANIFEST: list[tuple[str, str, str]] = []
 
 def _note(section: str, status: str, detail: str = "") -> None:
     MANIFEST.append((section, status, detail))
-
-
-def blocked_sections(offsets: dict) -> list[dict]:
-    """Sections this profile declares as blocked (see device_offsets.blocked_sections)."""
-    blockers = offsets.get("blockers")
-    if isinstance(blockers, dict):
-        out = []
-        for name, body in blockers.items():
-            out.append({"section": name, **(body if isinstance(body, dict) else {"reason": body})})
-        return out
-    return [b for b in blockers or [] if isinstance(b, dict)]
-
-
-def _tool(name: str) -> str:
-    """Get full path to a tool binary."""
-    p = TOOLS_DIR / name
-    if p.exists():
-        return str(p)
-    # fallback to PATH
-    return name
-
-
-def _board_config(offsets: dict) -> str:
-    """Full board config id (e.g. d421ap) from the profile."""
-    return offsets.get("board", "d421ap")
-
-
-def _board_short(offsets: dict) -> str:
-    """Short board id (e.g. d421) used in iBSS/iBEC file names."""
-    board = _board_config(offsets)
-    return board[:-2] if board.endswith("ap") else board
-
-
-def _run(cmd: list[str], cwd: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
-    """Run a command, logging output if VERBOSE."""
-    if DRY_RUN:
-        print(f"    {C.DIM}[dry-run] {' '.join(cmd)}{C.NC}")
-        return subprocess.CompletedProcess(cmd, 0)
-
-    if VERBOSE:
-        print(f"    {C.DIM}$ {' '.join(cmd)}{C.NC}")
-
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-    if VERBOSE and result.stdout:
-        for line in result.stdout.strip().splitlines()[-5:]:
-            print(f"      {C.DIM}{line}{C.NC}")
-    return result
 
 
 def _patch_at(fp, offset: int, data: bytes | str):
@@ -96,39 +50,17 @@ def _patch_at(fp, offset: int, data: bytes | str):
     fp.flush()
 
 
-def _hex_to_bytes(hex_str: str) -> bytes:
-    """Convert hex string to bytes."""
-    return bytes.fromhex(hex_str.replace(" ", "").lower())
+def _board_config(offsets: dict) -> str:
+    """Full board config id (e.g. d421ap) from the profile."""
+    return offsets.get("board", "d421ap")
 
 
-MACHO_MAGICS = (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe")
-
-
-def _is_macho(path: Path) -> bool:
-    try:
-        with open(path, "rb") as fh:
-            return fh.read(4) in MACHO_MAGICS
-    except OSError:
-        return False
-
-
-def _tool_available(name: str) -> bool:
-    """True when a tool can actually run here.
-
-    tools/ holds macOS Mach-O binaries, so on Linux/Windows they exist but are
-    unusable; those users get the built-in Python codec instead of a crash.
-    """
-    import shutil
-    import sys
-
-    if shutil.which(name):
-        return True
-    bundled = TOOLS_DIR / name
-    if not bundled.is_file():
-        return False
-    if sys.platform == "darwin":
-        return True
-    return not _is_macho(bundled)
+def _run(cmd: list[str], cwd: str | None = None, check: bool = False) -> subprocess.CompletedProcess:
+    """Run a command (see toolchain.run); output is shown when VERBOSE."""
+    if DRY_RUN:
+        print(f"    {C.DIM}[dry-run] {' '.join(str(part) for part in cmd)}{C.NC}")
+        return subprocess.CompletedProcess(cmd, 0)
+    return toolchain.run(cmd, cwd=cwd, echo=VERBOSE, tail=5 if VERBOSE else 0)
 
 
 def _extract_im4p_to_raw(im4p_path: str | Path, output_path: str | Path) -> bool:
@@ -138,8 +70,8 @@ def _extract_im4p_to_raw(im4p_path: str | Path, output_path: str | Path) -> bool
     decoder: the bundled binaries are Mach-O, so a Windows or Linux user has no
     way to extract a component otherwise (issue #4).
     """
-    if _tool_available("img4"):
-        r = _run([_tool("img4"), "-i", str(im4p_path), "-o", str(output_path)])
+    if toolchain.tool_available("img4"):
+        r = _run([toolchain.tool("img4"), "-i", str(im4p_path), "-o", str(output_path)])
         if r.returncode == 0 and Path(output_path).exists():
             return True
         if VERBOSE:
@@ -164,9 +96,9 @@ def _wrap_raw_to_im4p(raw_path: str | Path, im4p_path: str | Path, tag: str = ""
     img4tool first, then the built-in writer. The container carries no signature
     either way: the device is pwned, which is the whole point of the chain.
     """
-    if _tool_available("img4tool"):
-        cmd = [_tool("img4tool"), "-c", str(im4p_path), "-t", tag, str(raw_path)] if tag else \
-              [_tool("img4tool"), "-c", str(im4p_path), str(raw_path)]
+    if toolchain.tool_available("img4tool"):
+        cmd = [toolchain.tool("img4tool"), "-c", str(im4p_path), "-t", tag, str(raw_path)] if tag else \
+              [toolchain.tool("img4tool"), "-c", str(im4p_path), str(raw_path)]
         if _run(cmd).returncode == 0:
             return True
         if VERBOSE:
@@ -198,7 +130,7 @@ def _apply_dict_patches(fp, patches: dict, section_name: str) -> int:
             off = entry["offset"]
             val = entry["value"]
             try:
-                data = _hex_to_bytes(val)
+                data = device_offsets.hex_to_bytes(val)
             except ValueError:
                 data = val  # string for boot-args
             _patch_at(fp, off, data)
@@ -360,7 +292,7 @@ def patch_kernel(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> b
         _note("kernel", "failed", "extract")
         return False
 
-    blocked = blocked_sections(offsets)
+    blocked = device_offsets.blocked_sections_of(offsets)
     if blocked:
         print(err(f"kernel section is BLOCKED for {offsets.get('model', '?')} — refusing to patch"))
         for entry in blocked:
@@ -386,7 +318,7 @@ def patch_kernel(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) -> b
                 name = entry.get("name", "kernel")
                 try:
                     try:
-                        data = _hex_to_bytes(val)
+                        data = device_offsets.hex_to_bytes(val)
                     except ValueError:
                         # ASCII payloads (e.g. the kernel identity string
                         # "/PATCHED_ARM64_T8030") are written verbatim
@@ -498,7 +430,7 @@ def patch_userland(ipsw_dir: str | Path, offsets: dict, work_dir: str | Path) ->
                     off = entry["offset"]
                     val = entry["value"]
                     try:
-                        data = _hex_to_bytes(val)
+                        data = device_offsets.hex_to_bytes(val)
                         _patch_at(fp, off, data)
                         count += 1
                         if VERBOSE:
@@ -525,11 +457,11 @@ def _profile_gate(offsets_path: Path, source: Path | None = None) -> bool:
     and, when components are available, every site is byte-checked first
     (preflight.py). Skipped only with --force.
     """
-    from device_offsets import pending_entries, validate_offsets
+    from device_offsets import pending_entries, validate_offsets  # noqa: F811 (kept local for readability)
 
     passed, failed, errors = validate_offsets(offsets_path)
     profile_data = yaml.safe_load(offsets_path.read_text()) or {}
-    blocked_list = blocked_sections(profile_data)
+    blocked_list = device_offsets.blocked_sections_of(profile_data)
     pend = pending_entries(offsets_path) + sum(int(b.get("entries", 0) or 0) for b in blocked_list)
 
     blocked = False
@@ -658,7 +590,7 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
         if ipsw_path.is_dir():
             _rd, _cands, rd_reason = components.find_component(ipsw_path, "restoreramdisk",
                                                             offsets)
-        blocked_names = {b.get("section") for b in blocked_sections(offsets)}
+        blocked_names = {b.get("section") for b in device_offsets.blocked_sections_of(offsets)}
         skipped = 0
         for section_name in ["ibss", "ibec", "devicetree", "kernel", "restoreramdisk", "daemons"]:
             section_data = offsets.get("patches", {}).get(section_name, {})

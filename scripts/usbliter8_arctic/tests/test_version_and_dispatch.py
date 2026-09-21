@@ -83,62 +83,65 @@ def test_log_session_header_records_the_version(tmp_path):
 
 
 # ── dispatch honesty ────────────────────────────────────────────────
+# All verbs live in cli.py now; ul8.py and main.py must stay thin. These tests
+# are what would have caught `ul8.py version` (advertised, never dispatched)
+# and they are also what stops a second dispatcher from growing back.
 
-def _dispatch_facts(module: str) -> tuple[set[str], set[str]]:
-    """(advertised subcommands, handled subcommands) read from the source."""
-    tree = ast.parse((ROOT / module).read_text())
+def _verb_table() -> dict:
+    sys.path.insert(0, str(ROOT))
+    import importlib
+    import cli
+    importlib.reload(cli)
+    return cli.VERBS
 
-    advertised: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.keyword) and node.arg == "help" and isinstance(node.value, ast.Constant):
-            text = str(node.value.value)
-            if "Subcommand:" in text:
-                names = text.split("Subcommand:", 1)[1]
-                advertised.update(n.strip().rstrip(",") for n in names.split(",") if n.strip())
-        elif isinstance(node, ast.keyword) and node.arg == "help" and isinstance(node.value, ast.BinOp):
-            # multi-line concatenated help strings
-            parts = []
-            stack = [node.value]
-            while stack:
-                item = stack.pop()
-                if isinstance(item, ast.Constant):
-                    parts.append(str(item.value))
-                elif isinstance(item, ast.BinOp):
-                    stack.extend([item.left, item.right])
-            text = "".join(reversed(parts))
-            if "Subcommand:" in text:
-                names = text.split("Subcommand:", 1)[1]
-                advertised.update(n.strip().rstrip(",") for n in names.split(",") if n.strip())
 
-    handled: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Compare):
-            continue
-        if not (isinstance(node.left, ast.Attribute) and node.left.attr == "command"):
-            continue
-        for op, comparator in zip(node.ops, node.comparators):
-            if not isinstance(op, (ast.Eq, ast.In)):
-                continue
-            if isinstance(comparator, ast.Constant):
-                handled.add(str(comparator.value))
-            elif isinstance(comparator, (ast.Tuple, ast.List)):
-                handled.update(str(e.value) for e in comparator.elts
-                               if isinstance(e, ast.Constant))
-    return {a for a in advertised if a}, handled
+def test_verb_table_rows_are_complete():
+    cli = __import__("cli")
+    for verb, row in cli.VERBS.items():
+        assert isinstance(row, tuple) and len(row) == 2, verb
+        description, handler = row
+        assert description and isinstance(description, str), verb
+        assert callable(handler), verb
+        assert verb == verb.lower() and " " not in verb, verb
+
+
+def test_aliases_point_at_real_verbs():
+    cli = __import__("cli")
+    for alias, target in cli.ALIASES.items():
+        assert target in cli.VERBS, f"{alias} -> {target}"
+
+
+def test_help_lists_every_verb(tmp_path):
+    out = _run(["ul8.py", "--help"], tmp_path)
+    assert out.returncode == 0
+    cli = __import__("cli")
+    for verb in cli.verb_list():
+        assert verb in out.stdout, f"{verb} missing from --help"
+
+
+def test_dependency_features_cover_every_verb():
+    """A verb without a deps mapping would silently skip the dependency check."""
+    import deps
+    cli = __import__("cli")
+    unmapped = [v for v in cli.verb_list() if v not in deps.COMMAND_FEATURES]
+    assert unmapped == [], unmapped
 
 
 @pytest.mark.parametrize("module", ["ul8.py", "main.py"])
-def test_every_advertised_subcommand_is_dispatched(module):
-    advertised, handled = _dispatch_facts(module)
-    missing = sorted(advertised - handled)
-    assert not missing, f"{module} advertises {missing} but never dispatches them"
+def test_launchers_do_not_reimplement_the_dispatch(module):
+    tree = ast.parse((ROOT / module).read_text())
+    dispatch = [n for n in ast.walk(tree)
+                if isinstance(n, ast.Compare)
+                and isinstance(n.left, ast.Attribute) and n.left.attr == "command"]
+    assert not dispatch, f"{module} grew its own subcommand dispatch again"
+    assert "cli.main" in (ROOT / module).read_text(), module
 
 
-def test_version_is_dispatched_by_both_launchers():
+def test_version_is_dispatched_by_both_launchers(tmp_path):
     for module in ("ul8.py", "main.py"):
-        _advertised, handled = _dispatch_facts(module)
-        assert "version" in handled, module
-        assert "logs" in handled, module
+        out = _run([module, "version"], tmp_path)
+        assert out.returncode == 0, out.stderr
+        assert version.VERSION in out.stdout, module
 
 
 def _run(args: list[str], tmp_path: Path) -> subprocess.CompletedProcess:
@@ -156,7 +159,7 @@ def test_cli_version_and_unknown_subcommand(tmp_path):
     bad = _run(["ul8.py", "definitely-not-a-command"], tmp_path)
     assert bad.returncode == 1
     assert "unknown subcommand" in bad.stdout
-    assert "try: menu" in bad.stdout                    # tells the user what exists
+    assert "try:" in bad.stdout and "preflight" in bad.stdout   # lists what exists
 
     bad_main = _run(["main.py", "definitely-not-a-command"], tmp_path)
     assert bad_main.returncode == 1
