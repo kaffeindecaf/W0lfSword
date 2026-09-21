@@ -102,18 +102,93 @@ def _hex_to_bytes(hex_str: str) -> bytes:
     return bytes.fromhex(hex_str.replace(" ", "").lower())
 
 
+MACHO_MAGICS = (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe")
+
+
+def _is_macho(path: Path) -> bool:
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(4) in MACHO_MAGICS
+    except OSError:
+        return False
+
+
+def _tool_available(name: str) -> bool:
+    """True when a tool can actually run here.
+
+    tools/ holds macOS Mach-O binaries, so on Linux/Windows they exist but are
+    unusable; those users get the built-in Python codec instead of a crash.
+    """
+    import shutil
+    import sys
+
+    if shutil.which(name):
+        return True
+    bundled = TOOLS_DIR / name
+    if not bundled.is_file():
+        return False
+    if sys.platform == "darwin":
+        return True
+    return not _is_macho(bundled)
+
+
 def _extract_im4p_to_raw(im4p_path: str | Path, output_path: str | Path) -> bool:
-    """Use img4 to unwrap an im4p file to raw binary."""
-    r = _run([_tool("img4"), "-i", str(im4p_path), "-o", str(output_path)])
-    return r.returncode == 0 and Path(output_path).exists()
+    """Unwrap an im4p container to its raw payload.
+
+    tools/img4 first (the long-standing macOS path), then the in-tree pure-Python
+    decoder: the bundled binaries are Mach-O, so a Windows or Linux user has no
+    way to extract a component otherwise (issue #4).
+    """
+    if _tool_available("img4"):
+        r = _run([_tool("img4"), "-i", str(im4p_path), "-o", str(output_path)])
+        if r.returncode == 0 and Path(output_path).exists():
+            return True
+        if VERBOSE:
+            print(warn(f"img4 could not unwrap {Path(im4p_path).name}, trying the "
+                       f"built-in decoder"))
+
+    try:
+        import img4wrap
+        payload = img4wrap.payload_of(im4p_path)
+    except Exception as exc:                                  # noqa: BLE001
+        print(err(f"cannot unwrap {Path(im4p_path).name}: {exc}"))
+        return False
+    Path(output_path).write_bytes(payload)
+    if VERBOSE:
+        print(f"    {C.DIM}{Path(im4p_path).name} -> {len(payload):,} B payload{C.NC}")
+    return True
 
 
 def _wrap_raw_to_im4p(raw_path: str | Path, im4p_path: str | Path, tag: str = "") -> bool:
-    """Use img4tool to wrap a raw binary back into im4p format."""
-    cmd = [_tool("img4tool"), "-c", str(im4p_path), "-t", tag, str(raw_path)] if tag else \
-          [_tool("img4tool"), "-c", str(im4p_path), str(raw_path)]
-    r = _run(cmd)
-    return r.returncode == 0
+    """Wrap a raw binary back into an im4p container.
+
+    img4tool first, then the built-in writer. The container carries no signature
+    either way: the device is pwned, which is the whole point of the chain.
+    """
+    if _tool_available("img4tool"):
+        cmd = [_tool("img4tool"), "-c", str(im4p_path), "-t", tag, str(raw_path)] if tag else \
+              [_tool("img4tool"), "-c", str(im4p_path), str(raw_path)]
+        if _run(cmd).returncode == 0:
+            return True
+        if VERBOSE:
+            print(warn(f"img4tool failed for {Path(im4p_path).name}, using the "
+                       f"built-in writer"))
+
+    try:
+        import img4wrap
+        description = ""
+        destination = Path(im4p_path)
+        if destination.exists():                 # keep Apple's metadata on rewrap
+            try:
+                description = img4wrap.unwrap_file(destination).description
+            except Exception:                                 # noqa: BLE001
+                description = ""
+        container = img4wrap.wrap(Path(raw_path).read_bytes(), tag or "IM4P", description)
+    except Exception as exc:                                  # noqa: BLE001
+        print(err(f"cannot wrap {Path(im4p_path).name}: {exc}"))
+        return False
+    Path(im4p_path).write_bytes(container)
+    return True
 
 
 def _apply_dict_patches(fp, patches: dict, section_name: str) -> int:

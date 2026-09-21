@@ -485,10 +485,28 @@ def run_health_check() -> dict[str, bool]:
     results["tools_ready"] = all(tools.values())
 
     # 4. RP2350
-    from pwn_utils import check_pyusb_installed, detect_rp2350
+    from pwn_utils import USB_HELP, check_pyusb_installed, detect_rp2350, usb_status
     pyusb_ok = check_pyusb_installed()
     print(key_value("pyusb", f"{C.GRN}installed{C.NC}" if pyusb_ok else f"{C.AMB}not installed{C.NC}"))
     results["pyusb_available"] = pyusb_ok
+
+    status = usb_status()
+    if status["ready"]:
+        print(key_value("usb backend", f"{C.GRN}{status['backend']}{C.NC}"))
+    else:
+        print(key_value("usb backend", f"{C.RED}unavailable{C.NC}"))
+        for line in (status["problem"] or USB_HELP).splitlines():
+            print(f"    {C.DIM}{line}{C.NC}")
+    results["usb_backend_ready"] = status["ready"]
+
+    try:
+        import img4wrap
+        decoder_ok, decoder_note = img4wrap.decoder_available()
+        print(key_value("IMG4 codec", f"{C.GRN}{decoder_note}{C.NC}" if decoder_ok
+                        else f"{C.AMB}{decoder_note}{C.NC}"))
+        results["img4_decoder"] = decoder_ok
+    except Exception:                                          # noqa: BLE001
+        results["img4_decoder"] = False
 
     if pyusb_ok:
         rp = detect_rp2350()

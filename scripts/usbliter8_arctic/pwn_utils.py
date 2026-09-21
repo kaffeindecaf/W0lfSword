@@ -25,7 +25,25 @@ APPLE_RECOVERY_PID = 0x1281  # same as restore
 RP2350_DFU_PID = 0x000f     # RP2350 in BOOTSEL (UF2 flash drive)
 
 
-def _get_usb() -> object | None:
+USB_HELP = (
+    "Windows: bind the device with Zadig (https://zadig.akeo.ie) and/or "
+    "`python3 -m pip install libusb-package`\n"
+    "           Linux:   sudo apt install libusb-1.0-0   (or pacman -S libusb)\n"
+    "           macOS:   brew install libusb"
+)
+
+# resolved once per run: pyusb's backend lookup is slow and its failure mode
+# ("No backend available" / "libusb-1.0 missing") is what confuses Windows users
+_USB = {"resolved": False, "backend": None, "note": "", "problem": ""}
+
+
+def usb_core() -> object | None:
+    """The `usb.core` module, or None when pyusb is not installed.
+
+    Named explicitly because the old `_get_usb()` that promised "the usb module"
+    but returned `usb.core` is what made callers write `usb.core.find(...)` on an
+    already-narrowed module (see detect_apple_dfu below, issue #4).
+    """
     try:
         import usb.core
         return usb.core
@@ -33,46 +51,137 @@ def _get_usb() -> object | None:
         return None
 
 
+def _get_usb() -> object | None:
+    """Kept for callers that predate `usb_core()`."""
+    return usb_core()
+
+
+def _windows_libusb_candidates() -> list[str]:
+    import os
+    candidates = [
+        r"C:\Windows\System32\libusb-1.0.dll",
+        r"C:\Windows\SysWOW64\libusb-1.0.dll",
+        r"C:\Program Files\libusb-1.0\libusb-1.0.dll",
+        r"C:\Program Files (x86)\libusb-1.0\libusb-1.0.dll",
+    ]
+    for var in ("LOCALAPPDATA", "USERPROFILE", "ProgramFiles"):
+        base = os.environ.get(var)
+        if base:
+            candidates.append(os.path.join(base, "libusb-1.0.dll"))
+            candidates.append(os.path.join(base, "libusb", "libusb-1.0.dll"))
+    return candidates
+
+
+def usb_backend() -> tuple[object | None, str]:
+    """Resolve a libusb backend once. Returns (backend or None, note).
+
+    On Windows the DLL is not where pyusb looks, so a pip-installed
+    `libusb-package` and the usual install locations are tried explicitly
+    instead of handing the user a bare "libusb-1.0 missing".
+    """
+    if _USB["resolved"]:
+        return _USB["backend"], _USB["note"] or _USB["problem"]
+    _USB["resolved"] = True
+
+    if usb_core() is None:
+        _USB["problem"] = f"pyusb is not installed - run: python3 -m pip install pyusb\n{USB_HELP}"
+        return None, _USB["problem"]
+
+    import usb.backend.libusb1 as libusb1
+
+    try:                                       # pip-installed libusb (any OS)
+        import libusb_package
+        find_library = getattr(libusb_package, "get_library_path", None)
+        if find_library is not None:
+            backend = libusb1.get_backend(find_library=lambda _name: str(find_library()))
+            if backend is not None:
+                _USB["backend"], _USB["note"] = backend, "libusb-package"
+                return backend, _USB["note"]
+    except ImportError:
+        pass
+
+    backend = libusb1.get_backend()             # whatever pyusb can find
+    if backend is not None:
+        _USB["backend"], _USB["note"] = backend, "pyusb default search"
+        return backend, _USB["note"]
+
+    if sys.platform.startswith("win"):
+        import os
+        for path in _windows_libusb_candidates():
+            if os.path.exists(path):
+                backend = libusb1.get_backend(find_library=lambda _name, p=path: p)
+                if backend is not None:
+                    _USB["backend"], _USB["note"] = backend, path
+                    return backend, _USB["note"]
+
+    _USB["problem"] = f"no libusb-1.0 backend available\n{USB_HELP}"
+    return None, _USB["problem"]
+
+
+def usb_problem() -> str:
+    """Human-readable reason USB access fails, or "" when it works."""
+    _backend, note = usb_backend()
+    return _USB["problem"] or ("", note)[0]
+
+
+def _usb_find(**kwargs):
+    """Find one USB device, turning backend failures into a clear diagnostic."""
+    core = usb_core()
+    if core is None:
+        usb_backend()                            # sets the problem text
+        return None
+    backend, _note = usb_backend()
+    try:
+        return core.find(backend=backend, **kwargs)
+    except Exception as exc:                     # NoBackendError, USBError, ...
+        if not _USB["problem"]:
+            _USB["problem"] = (f"USB enumeration failed: {exc}\n{USB_HELP}"
+                               if "backend" in str(exc).lower()
+                               else f"USB enumeration failed: {exc}")
+        log_warn(f"USB enumeration failed: {exc}")
+        return None
+
+
+def usb_status() -> dict:
+    """State of the USB stack, for the health check and the menu."""
+    core = usb_core()
+    backend, note = usb_backend()
+    return {
+        "pyusb": core is not None,
+        "backend": note,
+        "problem": _USB["problem"],
+        "ready": core is not None and _USB["problem"] == "",
+    }
+
+
 def detect_rp2350() -> dict | None:
     """Find an RP2350 board connected via USB. Returns {vid, pid, serial, bus, address} or None."""
-    usb = _get_usb()
-    if not usb:
-        return None
-    try:
-        dev = usb.find(idVendor=RP2350_VID, idProduct=RP2350_PID)
-        if dev:
-            return {
-                "vid": hex(RP2350_VID),
-                "pid": hex(RP2350_PID),
-                "serial": getattr(dev, 'serial_number', 'N/A'),
-                "bus": dev.bus,
-                "address": dev.address,
-            }
-    except Exception:
-        pass
+    dev = _usb_find(idVendor=RP2350_VID, idProduct=RP2350_PID)
+    if dev:
+        return {
+            "vid": hex(RP2350_VID),
+            "pid": hex(RP2350_PID),
+            "serial": getattr(dev, 'serial_number', 'N/A'),
+            "bus": dev.bus,
+            "address": dev.address,
+        }
     return None
 
 
 def detect_apple_dfu() -> dict | None:
     """Find an Apple device in DFU or WTF mode. Returns {vid, pid, mode, serial, bus, address} or None."""
-    usb = _get_usb()
-    if not usb:
-        return None
-    try:
-        dfu_pids = {APPLE_DFU_PID: "DFU", APPLE_WTF_PID: "WTF", APPLE_RESTORE_PID: "restore"}
-        for pid, mode in dfu_pids.items():
-            dev = usb.core.find(idVendor=APPLE_DFU_VID, idProduct=pid)
-            if dev:
-                return {
-                    "vid": hex(APPLE_DFU_VID),
-                    "pid": hex(pid),
-                    "mode": mode,
-                    "serial": getattr(dev, 'serial_number', 'N/A'),
-                    "bus": dev.bus,
-                    "address": dev.address,
-                }
-    except Exception as e:
-        log_warn(f"USB enumeration error: {e}")
+    dfu_pids = {APPLE_DFU_PID: "DFU", APPLE_WTF_PID: "WTF", APPLE_RESTORE_PID: "restore"}
+    for pid, mode in dfu_pids.items():
+        dev = _usb_find(idVendor=APPLE_DFU_VID, idProduct=pid)
+        if dev:
+            return {
+                "vid": hex(APPLE_DFU_VID),
+                "pid": hex(pid),
+                "mode": mode,
+                "serial": getattr(dev, 'serial_number', 'N/A'),
+                "bus": dev.bus,
+                "address": dev.address,
+            }
     return None
 
 

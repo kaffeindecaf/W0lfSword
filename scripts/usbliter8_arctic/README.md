@@ -2,7 +2,7 @@
 
 > The easy way to run the usbliter8 tethered jailbreak. A TUI hub that walks you through the whole chain: wire up an RP2350 board, flash the exploit firmware, build a custom firmware for your A12/A13 iPhone or iPad, restore it, and boot. Offsets are managed as validated YAML profiles, and a fingerprint engine migrates them between iOS betas automatically.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-190%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-227%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 ## Quick start
 
@@ -39,11 +39,18 @@ chmod +x usbliter8 main.py
 git clone https://github.com/kaffeindecaf/usbliter8-arctic.git
 cd usbliter8-arctic
 
-py -m pip install pyusb pyyaml
+py -m pip install pyusb pyyaml pyimg4 libusb-package
 py main.py
 ```
 
-> Windows needs libusb to talk to the board and the phone: install [Zadig](https://zadig.akeo.ie/), then bind the WinUSB driver to the RP2350 (RPI-RP2 bootloader) and to the iPhone in DFU mode. The bundled tools are macOS binaries, so the CFW build step falls back to tools on your PATH (see `deps.py`). Guided setup, PWN checks and offset tooling work fine.
+> **libusb**: `libusb-package` (installed above) supplies the DLL, so Zadig is only
+> needed when Windows still refuses the device: bind the WinUSB driver to the
+> RP2350 (RPI-RP2 bootloader) and to the iPhone in DFU mode.
+>
+> **Firmware components**: `pyimg4` unwraps the IMG4/lzfse containers IPSW
+> components ship in. The bundled `tools/` binaries are macOS Mach-O and are
+> ignored here, so without `pyimg4` a CFW build cannot read or write components.
+> Which of the two is in use is printed by `py deps.py` under `IMG4 codec`.
 
 ### The `usbliter8` terminal script
 
@@ -182,6 +189,7 @@ For boards without a built-in USB-A host port (Pico 2, RP2350-Zero, Tiny2350), c
 ## Prerequisites
 
 - **RP2350 board** (NOT RP2040, A13 requires RP2350): Waveshare RP2350-USB-A (recommended, no soldering) · Raspberry Pi Pico 2 · Waveshare RP2350-Zero · Pimoroni Tiny2350
+- `pyusb` + `pyyaml` for USB and profiles, `pyimg4` for IPSW components on Linux/Windows (the bundled `tools/` are macOS Mach-O)
 - Lightning-to-USB-A cable + a compatible A12/A13 device
 - Python 3.9+ (Linux/macOS/Windows)
 - Binary tools in `tools/` are macOS Mach-O; the interactive menu guides tool handling, and `deps.py` falls back to tools on your PATH
@@ -281,7 +289,7 @@ disappearing quietly:
 
 Profiles are only as good as the artefact they came from, so the repo can now re-derive and re-check them:
 
-- **`fetch_components.py`** pulls iBSS/iBEC/TXM/DeviceTree/kernelcache out of any IPSW on Apple's CDN with HTTP Range requests (ported from W0lfSword's `kczip.py`), so no 6 GB download is needed to discover offsets. `--list` shows the matching entries, `--extract-payload` unwraps the im4p with pyimg4.
+- **`fetch_components.py`** pulls iBSS/iBEC/TXM/DeviceTree/kernelcache out of any IPSW on Apple's CDN with HTTP Range requests (ported from W0lfSword's `kczip.py`), so no 6 GB download is needed to discover offsets. `--list` shows the matching entries, `--extract-payload` unwraps the im4p with `img4wrap.py` (pyimg4 when installed).
 - **`source_audit.py`** parses an upstream `make_cfw.py` (wh1te4ever / 34306) or a Liter8 fixture set and diffs it against a profile byte by byte: `COVERED`, `PARTIAL` (profile writes less than upstream), `MISMATCH`, `REVIEW` (PC-relative sites such as adrp/add redirects, not comparable across builds), `MISSING`, `PROFILE-ONLY`. Reports land in `research/work/`.
 - **`liter8_import.py`** maps Liter8's reviewed fixture oracles onto our entry names, refuses anything whose payload is not our canonical patch, marks everything else `pending`, and (with `--verify-components`) re-checks every mapped site against the real binary before writing.
 
@@ -443,6 +451,7 @@ usbliter8-arctic/
 ├── fetch_components.py   # ranged IPSW component fetcher + IPSW url resolution
 ├── preflight.py          # verify a profile against the real component bytes
 ├── kczip.py              # zip64 range reader (ported from W0lfSword)
+├── img4wrap.py           # IMG4/IM4P container read+write (pure Python, lzfse via pyimg4)
 ├── safety_check.py       # pre-push/CI gate: leaks, machine paths, profile/evidence drift
 ├── hardware_guide.py     # guided setup, health check, firmware flashing
 ├── deps.py               # dependency checker & installer
@@ -454,6 +463,17 @@ usbliter8-arctic/
 ├── tools/                # binary utilities (img4, img4tool, usbliter8ctl, …)
 └── firmware/             # downloaded UF2 firmware files
 ```
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `No backend available` / `libusb-1.0 missing` | pyusb cannot reach libusb. `python -m pip install libusb-package`, or install libusb-1.0 and bind the device with Zadig. `python3 -c "import pwn_utils; print(pwn_utils.usb_problem())"` prints the exact state and per-OS hints |
+| `preflight blocked this build: the profile does not match the component` on a correct IPSW | Was a bug: components were compared as IMG4 containers instead of their decompressed payload. Fixed, and undecodable components are now reported as skipped instead of "changed". If it still blocks, `python3 preflight.py <profile> --quiet` shows the first failing site |
+| `no IPSW url found for <device> <build>` | the url lookup does not know that beta build, which is harmless when you point the build at a local IPSW; the message is informational |
+| `cannot unwrap <component>: ... pip install pyimg4` | component is lzfse-compressed and no decoder is installed |
+| `every module parses` fails in CI | run `python3 -m compileall -q .` locally; a module that tests never import can still be broken |
+| offsets look "unchanged" but the device panics | kernel offsets are per `kernelcache.release.*` component; check `python3 profile_gen.py gaps` for a profile whose kernel section came from another board |
 
 ## Warnings
 

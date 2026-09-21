@@ -23,13 +23,14 @@ from pathlib import Path
 
 from profile_gen import DEVICE_DB
 
-KINDS = ("ibss", "ibec", "devicetree", "kernelcache", "restoreramdisk")
+KINDS = ("ibss", "ibec", "txm", "devicetree", "kernelcache", "restoreramdisk")
 
 # kind -> human label, expected subdirectory ("" = anywhere/root), globs
 SPEC = {
     "ibss":          ("iBSS",          "Firmware/dfu",       ("iBSS.*.im4p",)),
     "ibec":          ("iBEC",          "Firmware/dfu",       ("iBEC.*.im4p",)),
     "devicetree":    ("DeviceTree",    "Firmware/all_flash", ("DeviceTree.*.im4p",)),
+    "txm":           ("txm",           "Firmware",           ("txm*.im4p", "TXM*.im4p")),
     "kernelcache":   ("kernelcache",   "",                   ("kernelcache.release.*",)),
     # classic layouts wrap the dmg in an im4p (094-13753-150.dmg.im4p); iOS 26/27
     # ship the dmg bare at the archive root

@@ -154,6 +154,28 @@ fi
 section "Audit"
 if [ "$(./W0lfSword audit 2>&1 | grep -c 'AUDIT PASSED')" -gt 0 ]; then ok "audit"; else bad "audit"; fi
 
+section "THEOS validation (issue #3)"
+# A mispointed THEOS must fail with a reason, not a bare make error.
+FAKE_THEOS="$(mktemp -d)"
+if THEOS="$FAKE_THEOS" ./W0lfSword build >/tmp/regression_fake_theos.log 2>&1; then
+    bad "fake THEOS accepted (build ran anyway)"
+elif grep -q "has no makefiles/" /tmp/regression_fake_theos.log; then
+    ok "mispointed THEOS rejected with a reason"
+else
+    bad "mispointed THEOS rejected without the makefiles hint"
+fi
+rm -rf "$FAKE_THEOS"
+
+REALISH_THEOS="$(mktemp -d)"; mkdir -p "$REALISH_THEOS/makefiles"
+# capture first: with `set -o pipefail` a non-zero doctor would mask a match
+THEOS_OUT=$(THEOS="$REALISH_THEOS" ./W0lfSword doctor 2>&1 || true)
+if printf '%s' "$THEOS_OUT" | grep -qE "THEOS.*$REALISH_THEOS"; then
+    ok "THEOS with makefiles/ is accepted"
+else
+    bad "THEOS with makefiles/ was not accepted"
+fi
+rm -rf "$REALISH_THEOS"
+
 section "Doctor"
 if [ "$(./W0lfSword doctor 2>&1 | grep -cE 'All tools ready|All.*present')" -gt 0 ]; then ok "doctor"; else bad "doctor"; fi
 

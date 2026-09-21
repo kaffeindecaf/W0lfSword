@@ -20,6 +20,15 @@ PY_PACKAGES = {
     "yaml": "pyyaml",
 }
 
+# needed to unwrap/patch IPSW components; without it the bundled macOS-only
+# tools/ binaries are the only way, which no Windows or Linux user has
+OPTIONAL_PACKAGES = {
+    "pyimg4": ("IMG4/lzfse component codec (preflight + CFW build)", ""),
+    "libusb_package": ("libusb DLL on Windows (no Zadig needed)", "Windows"),
+}
+PIP_NAMES = {"usb": "pyusb", "yaml": "pyyaml", "pyimg4": "pyimg4",
+             "libusb_package": "libusb-package"}
+
 APT_PACKAGES = ["python3-usb", "python3-yaml", "libusb-1.0-0"]
 PACMAN_PACKAGES = ["python-pyusb", "python-yaml", "libusb"]
 DNF_PACKAGES = ["python3-pyusb", "python3-pyyaml", "libusb1"]
@@ -37,6 +46,29 @@ def _python_ok() -> bool:
 
 
 def _libusb_ok() -> bool:
+    """Whether pyusb can actually reach libusb (not just whether a file exists).
+
+    Asking pyusb is the only check that covers Windows (libusb-1.0.dll, Zadig,
+    libusb-package) and macOS (brew) as well as Linux's ldconfig scan.
+    """
+    try:
+        import pwn_utils
+        status = pwn_utils.usb_status()
+        if status["pyusb"]:
+            return bool(status["ready"])
+    except Exception:                                          # noqa: BLE001
+        pass
+
+    try:
+        import ctypes.util
+        if ctypes.util.find_library("usb-1.0") or ctypes.util.find_library("libusb-1.0"):
+            return True
+    except Exception:                                          # noqa: BLE001
+        pass
+
+    if platform.system() == "Windows":
+        return any(Path(c).exists() for c in _windows_libusb_paths())
+
     if shutil.which("ldconfig") is None:
         return False
     try:
@@ -48,8 +80,20 @@ def _libusb_ok() -> bool:
         return False
 
 
+def _windows_libusb_paths() -> list[str]:
+    candidates = [r"C:\Windows\System32\libusb-1.0.dll",
+                  r"C:\Program Files\libusb-1.0\libusb-1.0.dll",
+                  r"C:\Program Files (x86)\libusb-1.0\libusb-1.0.dll"]
+    for var in ("LOCALAPPDATA", "USERPROFILE"):
+        base = os.environ.get(var)
+        if base:
+            candidates += [os.path.join(base, "libusb-1.0.dll"),
+                           os.path.join(base, "libusb", "libusb-1.0.dll")]
+    return candidates
+
+
 def check_dependencies() -> dict[str, bool]:
-    """Return dependency check results without installing anything."""
+    """Required and optional dependency status; installs nothing."""
     results = {"python_packages": _python_ok(), "libusb": _libusb_ok()}
     for mod, pkg in PY_PACKAGES.items():
         try:
@@ -57,6 +101,12 @@ def check_dependencies() -> dict[str, bool]:
             results[f"pkg_{pkg}"] = True
         except ImportError:
             results[f"pkg_{pkg}"] = False
+    for mod in OPTIONAL_PACKAGES:
+        try:
+            importlib.import_module(mod)
+            results[f"opt_{mod}"] = True
+        except ImportError:
+            results[f"opt_{mod}"] = False
     return results
 
 
@@ -75,16 +125,39 @@ def print_dependency_status() -> dict[str, bool]:
 
     print(key_value("libusb-1.0", f"{C.GRN}found{C.NC}" if results["libusb"] else f"{C.RED}missing{C.NC}"))
 
-    # Bundled binary tools
+    for mod, (purpose, platform_only) in OPTIONAL_PACKAGES.items():
+        if platform_only and platform.system() != platform_only:
+            print(key_value(f"py {mod}", f"{C.DIM}n/a on {platform.system()}{C.NC}"))
+            continue
+        state = f"{C.GRN}installed{C.NC}" if results[f"opt_{mod}"] else f"{C.AMB}missing{C.NC}"
+        print(key_value(f"py {mod}", f"{state}  {C.DIM}{purpose}{C.NC}"))
+
+    # Bundled binary tools (macOS Mach-O: unusable elsewhere)
     tools_dir = Path(__file__).parent / "tools"
     n_tools = len(list(tools_dir.glob("*"))) if tools_dir.exists() else 0
-    print(key_value("tools/", f"{C.GRN}{n_tools} binaries{C.NC}" if n_tools else f"{C.RED}empty{C.NC}"))
+    usable = "usable here" if platform.system() == "Darwin" else "macOS-only, ignored here"
+    print(key_value("tools/", f"{C.GRN}{n_tools} binaries{C.NC} {C.DIM}({usable}){C.NC}"
+                    if n_tools else f"{C.RED}empty{C.NC}"))
 
+    try:
+        import img4wrap
+        ready, note = img4wrap.decoder_available()
+        print(key_value("IMG4 codec",
+                        f"{C.GRN}{note}{C.NC}" if ready else f"{C.AMB}{note}{C.NC}"))
+    except Exception:                                          # noqa: BLE001
+        pass
+
+    required = [k for k in results if not k.startswith("opt_")]
+    optional_needed = [f"opt_{mod}" for mod, (_p, plat) in OPTIONAL_PACKAGES.items()
+                       if not plat or platform.system() == plat]
     print()
-    if all(results.values()):
-        print(ok("All dependencies satisfied"))
-    else:
+    if not all(results[k] for k in required):
         print(warn("Missing dependencies — use [i] Install Dependencies"))
+    elif not all(results.get(k, False) for k in optional_needed):
+        print(warn("Required dependencies satisfied — optional ones missing "
+                   "(see above; component extraction needs pyimg4 off macOS)"))
+    else:
+        print(ok("All dependencies satisfied"))
     return results
 
 
@@ -113,6 +186,12 @@ def install_dependencies() -> bool:
     for mod, pkg in PY_PACKAGES.items():
         status = f"{C.GRN}installed{C.NC}" if results[f"pkg_{pkg}"] else f"{C.RED}missing{C.NC}"
         print(key_value(f"py {pkg}", status))
+    for mod, (_purpose, platform_only) in OPTIONAL_PACKAGES.items():
+        if platform_only and platform.system() != platform_only:
+            continue
+        status = (f"{C.GRN}installed{C.NC}" if results[f"opt_{mod}"]
+                  else f"{C.AMB}missing{C.NC}")
+        print(key_value(f"py {mod}", status))
     print(key_value("libusb-1.0", f"{C.GRN}found{C.NC}" if results["libusb"] else f"{C.RED}missing{C.NC}"))
     print()
 
@@ -141,7 +220,11 @@ def install_dependencies() -> bool:
         return False
 
     if choice == "1":
-        if pkg_mgr == "apt":
+        if platform.system() == "Windows":
+            _run([sys.executable, "-m", "pip", "install", *PIP_NAMES.values()])
+            print(info("USB on Windows also needs the device bound to WinUSB: "
+                       "run Zadig once, or rely on libusb-package installed above"))
+        elif pkg_mgr == "apt":
             _run(["apt", "update"], sudo=True)
             _run(["apt", "install", "-y", *APT_PACKAGES], sudo=True)
         elif pkg_mgr == "pacman":
@@ -154,11 +237,12 @@ def install_dependencies() -> bool:
             _run([sys.executable, "-m", "pip", "install", "--user", "pyusb", "pyyaml"])
         else:
             print(warn(f"No supported package manager found — falling back to pip"))
-            _run([sys.executable, "-m", "pip", "install", "--user", "pyusb", "pyyaml"])
+            _run([sys.executable, "-m", "pip", "install", "--user", *PIP_NAMES.values()])
     elif choice == "2":
-        _run([sys.executable, "-m", "pip", "install", "--user", "pyusb", "pyyaml"])
+        _run([sys.executable, "-m", "pip", "install", "--user", *PIP_NAMES.values()])
     elif choice == "3":
-        _run([sys.executable, "-m", "pip", "install", "--break-system-packages", "pyusb", "pyyaml"])
+        _run([sys.executable, "-m", "pip", "install", "--break-system-packages",
+              *PIP_NAMES.values()])
     else:
         print(warn(f"Unknown option '{choice}' — nothing installed"))
         return False
@@ -171,7 +255,12 @@ def install_dependencies() -> bool:
         print(ok("All dependencies installed — ready to exploit"))
         return True
     print(warn(f"Still missing: {', '.join(missing)}"))
-    print(info("Hint: libusb needs a reboot or `sudo ldconfig` after install in some cases"))
+    if platform.system() == "Windows":
+        print(info("Windows hints: `python -m pip install libusb-package` supplies the "
+                   "DLL, and Zadig (https://zadig.akeo.ie) binds the device to WinUSB"))
+    else:
+        print(info("Hint: libusb needs a reboot or `sudo ldconfig` after install "
+                   "in some cases"))
     return False
 
 

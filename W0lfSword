@@ -559,7 +559,7 @@ build_mha_ipa() {
         err "No Filza.ipa found - put it in $PROJECT_DIR or $HOME/Downloads"
         return 1
     fi
-    check_theos || { err "THEOS not set"; return 1; }
+    check_theos || { err "$(theos_problem)"; return 1; }
     local dylib
     dylib=$(ls .theos/obj/debug/arm64/FilzaApplySandboxExt.dylib 2>/dev/null \
          || ls .theos/obj/arm64/FilzaApplySandboxExt.dylib 2>/dev/null || echo "")
@@ -1921,14 +1921,20 @@ reveal_lines() {
 #  § 13 UTILITY
 # ═══════════════════════════════════════════════════════════════
 
-check_theos() {
-    # Try env var, then common paths
-    [ -n "${THEOS:-}" ] && [ -d "$THEOS" ] && return 0
+# theos_problem — "" when Theos is usable, otherwise the reason (echoed).
+# An existing directory is not enough: $THEOS/makefiles is what `make package`
+# needs, and a mispointed THEOS otherwise surfaces as a bare "Build failed
+# (exit=2)" from make (issue #3).
+theos_problem() {
+    if [ -n "${THEOS:-}" ]; then
+        [ -d "$THEOS/makefiles" ] && return 0
+        echo "THEOS=$THEOS has no makefiles/  -  that is not a Theos checkout"
+        return 1
+    fi
     for d in "$HOME/theos" /opt/theos /usr/local/theos "$PROJECT_DIR/.theos" \
              /opt/homebrew/theos /opt/homebrew/share/theos /usr/local/share/theos; do
         [ -d "$d/makefiles" ] && { export THEOS="$d"; vlog "THEOS auto-detected at $d"; return 0; }
     done
-    # Under sudo, $HOME might be /root  -  also check the original user's home
     if [ "$EUID" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
         local sudo_home; sudo_home=$(eval echo "~$SUDO_USER" 2>/dev/null)
         [ -n "$sudo_home" ] && [ -d "$sudo_home/theos/makefiles" ] && {
@@ -1937,8 +1943,15 @@ check_theos() {
             return 0
         }
     fi
+    echo "no Theos found (looked at \$THEOS, ~/theos, /opt/theos, /usr/local/theos, ...)"
     return 1
 }
+
+check_theos() {
+    theos_problem >/dev/null 2>&1
+    return $?
+}
+
 
 # file_mtime <file> — epoch seconds of last modification (GNU `stat -c %Y` with
 # BSD/macOS `stat -f %m` fallback). Prints 0 when neither is available.
@@ -2016,7 +2029,11 @@ scan_devices() {
 
 cmd_build() {
     $VERBOSE || spinner "compiling"
-    check_theos || { err "THEOS not set  -  export THEOS=~/theos"; hint "Or run: sudo ./W0lfSword setup"; return 1; }
+    check_theos || {
+        err "$(theos_problem)"
+        hint "export THEOS=~/theos (Linux) / /opt/theos (macOS), or run: sudo ./W0lfSword setup"
+        return 1
+    }
     local log; log=$(make package 2>&1)
     local ec=$?
     $VERBOSE && echo "$log" | tail -20
@@ -2364,7 +2381,7 @@ cmd_doctor() {
     if check_theos; then
         echo -e "  ${C_GRN}✓${NC} THEOS          ${C_DIM}${THEOS}${NC}"
     else
-        echo -e "  ${C_RED}✗${NC} THEOS          ${C_DIM}export THEOS=~/theos (Linux) / /opt/theos (macOS)${NC}"; ok=false
+        echo -e "  ${C_RED}✗${NC} THEOS          ${C_DIM}$(theos_problem)${NC}"; ok=false
     fi
     if command -v clang &>/dev/null;    then echo -e "  ${C_GRN}✓${NC} clang";          else echo -e "  ${C_RED}✗${NC} clang"; ok=false; fi
     if command -v dpkg-deb &>/dev/null; then echo -e "  ${C_GRN}✓${NC} dpkg-deb";       else echo -e "  ${C_RED}✗${NC} dpkg-deb ${C_DIM}(brew install dpkg / apt install dpkg)${NC}"; ok=false; fi

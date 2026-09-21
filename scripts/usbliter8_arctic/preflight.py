@@ -177,18 +177,49 @@ def discovered_component_dir(profile: dict) -> Path | None:
     return None
 
 
-def read_component_dir(comp_dir: Path) -> dict[str, tuple[str, bytes]]:
-    """Load raw components; `<section>.raw` preferred, `<section>.im4p` noted."""
+def decode_component(label: str, data: bytes) -> tuple[bytes, str]:
+    """Payload bytes for a component, plus a reason when it cannot be decoded.
+
+    IPSW components are DER-encoded IMG4 containers and usually lzfse-compressed;
+    the profile's offsets index into the decompressed payload, so the container
+    must be unwrapped first (see img4wrap).
+    """
+    import img4wrap
+
+    try:
+        result = img4wrap.unwrap(data, via=label)
+    except img4wrap.Unsupported as exc:
+        return b"", str(exc)
+    if result.encrypted:
+        return b"", "payload is encrypted (needs the wiki IV+key)"
+    if not result.payload:
+        return b"", "container decoded to an empty payload"
+    return result.payload, ""
+
+
+def read_component_dir(comp_dir: Path) -> tuple[dict[str, tuple[str, bytes]], dict[str, str]]:
+    """Load components from a directory: `<section>.raw`, `*.im4p`, or real names.
+
+    Returns (components, notes) where notes[section] explains a section that is
+    present but unusable (encrypted, undecodable) instead of silently skipping it.
+    """
+    import components as comp_module
+
+    kind_of = {"ibss": "ibss", "ibec": "ibec", "txm": "txm", "devicetree": "devicetree",
+               "kernel": "kernelcache", "restoreramdisk": "restoreramdisk"}
+    offsets = {"model": "?", "board": "?"}
     out: dict[str, tuple[str, bytes]] = {}
-    for section, (stem, _label, _note) in SECTION_COMPONENT.items():
-        for name in (f"{stem}.raw", f"{stem}.im4p", "restoreramdisk.dmg" if stem == "restoreramdisk" else ""):
-            if not name:
-                continue
-            path = comp_dir / name
-            if path.exists():
-                out[section] = (str(path), path.read_bytes())
-                break
-    return out
+    notes: dict[str, str] = {}
+    for section, kind in kind_of.items():
+        path, _cands, _reason = comp_module.find_component(comp_dir, kind, offsets)
+        if path is None or path.suffix == ".dmg":
+            continue
+        payload, note = decode_component(str(path), path.read_bytes())
+        if note:
+            notes[section] = note
+            continue
+        out[section] = (str(path), payload)
+    return out, notes
 
 
 def fetch_components_for(profile: dict, device: str, url: str = "") -> tuple[dict[str, tuple[str, bytes]], Path | None]:
@@ -384,22 +415,30 @@ def run_preflight(profile_path: Path, *, components: Path | None = None,
     report.pending = pending_entries(profile_path)
     report.structure = structure_checks(profile)
 
+    # a local IPSW is a complete source: do not go to the network behind the
+    # user's back (offline builds matter, and the fetch writes into research/)
     comp_dir = components
-    if fetch or ipsw or url:
+    raw_components: dict = {}
+    if fetch or url:
         model = report.model or device
         raw_components, fetched_dir = fetch_components_for(profile, model, url)
         if fetched_dir:
             comp_dir = fetched_dir
         if not raw_components:
             report.profile_errors.append("no components fetched")
-    elif comp_dir is None:
+    elif comp_dir is None and ipsw is None:
         comp_dir = discovered_component_dir(profile)
     if comp_dir is not None and not comp_dir.is_dir():
         comp_dir = None
 
-    raw_by_section: dict[str, tuple[str, bytes]] = read_component_dir(comp_dir) if comp_dir else {}
+    decode_notes: dict[str, str] = {}
+    raw_by_section: dict[str, tuple[str, bytes]] = {}
+    if comp_dir:
+        raw_by_section, decode_notes = read_component_dir(comp_dir)
     if ipsw is not None:
-        raw_by_section.update(read_components_from_ipsw(ipsw, profile))
+        ipsw_components, ipsw_notes = read_components_from_ipsw(ipsw, profile)
+        raw_by_section.update(ipsw_components)
+        decode_notes.update(ipsw_notes)
 
     ident_errors, ident_notes = component_identity(comp_dir, profile)
     report.profile_errors += ident_errors
@@ -411,9 +450,10 @@ def run_preflight(profile_path: Path, *, components: Path | None = None,
         label = SECTION_COMPONENT.get(section, (section, section, "unknown component"))[1]
         raw_entry = raw_by_section.get(section)
         if raw_entry is None:
-            note = SECTION_COMPONENT.get(section, ("", "", "no component"))[2]
+            note = decode_notes.get(section) or SECTION_COMPONENT.get(
+                section, ("", "", "no component"))[2]
             report.sites.append(Site(section, "*", 0, "skipped",
-                                     f"no raw {label} to check ({note})"))
+                                     f"no usable {label} to check ({note})"))
             continue
         comp_path, raw = raw_entry
         report.components[section] = {"path": comp_path, "size": len(raw)}
@@ -441,12 +481,20 @@ def run_preflight(profile_path: Path, *, components: Path | None = None,
     return report
 
 
-def read_components_from_ipsw(ipsw: Path, profile: dict) -> dict[str, tuple[str, bytes]]:
-    """Pull the components a profile needs straight out of a local IPSW file."""
+def read_components_from_ipsw(ipsw: Path, profile: dict) -> tuple[dict[str, tuple[str, bytes]],
+                                                                 dict[str, str]]:
+    """Pull and decode the components a profile needs out of a local IPSW file.
+
+    Components must be unwrapped before their bytes are compared: the profile's
+    offsets index into the decompressed payload, not the IMG4 container. Reading
+    the container raw made every site look "changed" and blocked good builds
+    (issue #4).
+    """
     import kczip
     import zipfile
 
     out: dict[str, tuple[str, bytes]] = {}
+    notes: dict[str, str] = {}
     try:
         with zipfile.ZipFile(ipsw) as zf:
             names = zf.namelist()
@@ -462,11 +510,16 @@ def read_components_from_ipsw(ipsw: Path, profile: dict) -> dict[str, tuple[str,
                     if "RESEARCH" in name:
                         continue
                     if needle in name and name.endswith(".im4p"):
-                        out[section] = (f"{ipsw.name}:{name}", zf.read(name))
+                        label = f"{ipsw.name}:{name}"
+                        payload, note = decode_component(label, zf.read(name))
+                        if note:
+                            notes[section] = note
+                        else:
+                            out[section] = (label, payload)
                         break
-    except (zipfile.BadZipFile, OSError):
-        pass
-    return out
+    except (zipfile.BadZipFile, OSError) as exc:
+        notes["*"] = f"cannot read the IPSW: {exc}"
+    return out, notes
 
 
 def _iter_entries(section: str, data):

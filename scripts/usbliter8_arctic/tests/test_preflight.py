@@ -228,13 +228,79 @@ def test_cli_json_stays_clean(profile_path, component):
 # ── components from a local IPSW ───────────────────────────────────
 
 def test_read_components_from_ipsw(tmp_path):
+    """Components come out of an IPSW DECODED: the container is IMG4/lzfse.
+
+    Comparing profile offsets against container bytes is what produced the wall
+    of bogus "does not match" results in issue #4.
+    """
     import zipfile
+
+    import img4wrap
+
+    ipsw = tmp_path / "iPhone12,1_27.0_24A437_Restore.ipsw"
+    wrapped = img4wrap.wrap(bytes(COMPONENT), "ibss", "mBoot-test")
+    with zipfile.ZipFile(ipsw, "w") as zf:
+        zf.writestr("Firmware/dfu/iBSS.n104.RELEASE.im4p", wrapped)
+        zf.writestr("Firmware/dfu/iBEC.n104.RELEASE.im4p", wrapped)
+        zf.writestr("Firmware/txm.iphoneos.release.im4p",
+                    img4wrap.wrap(bytes(COMPONENT), "trxm", "1"))
+
+    out, notes = preflight.read_components_from_ipsw(ipsw, {"model": "iPhone12,1"})
+    assert set(out) == {"ibss", "ibec", "txm"}
+    assert notes == {}
+    assert out["ibss"][1] == bytes(COMPONENT)          # payload, not container
+    assert out["ibss"][1] != wrapped
+    assert "iBSS.n104" in out["ibss"][0]
+
+
+@pytest.fixture
+def hermetic(tmp_path, monkeypatch):
+    """Never touch the developer's research/ dir or the network in these tests."""
+    monkeypatch.setattr(preflight, "EXTRACTED_DIR", tmp_path / "extracted")
+    monkeypatch.setattr(preflight, "fetch_components_for",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("a local IPSW must not trigger a fetch")))
+    return tmp_path
+
+
+def test_ipsw_with_wrapped_components_does_not_block(hermetic, tmp_path, profile_path):
+    """Issue #4 regression: a wrapped local IPSW must verify, not block."""
+    import zipfile
+
+    import img4wrap
+
     ipsw = tmp_path / "iPhone12,1_27.0_24A437_Restore.ipsw"
     with zipfile.ZipFile(ipsw, "w") as zf:
-        zf.writestr("Firmware/dfu/iBSS.n104.RELEASE.im4p", bytes(COMPONENT[:0x100]))
-        zf.writestr("Firmware/dfu/iBEC.n104.RELEASE.im4p", bytes(COMPONENT[:0x100]))
-        zf.writestr("Firmware/txm.iphoneos.release.im4p", bytes(COMPONENT[:0x50]))
-    out = preflight.read_components_from_ipsw(ipsw, {"model": "iPhone12,1"})
-    assert set(out) == {"ibss", "ibec", "txm"}
-    assert out["ibss"][1] == bytes(COMPONENT[:0x100])
-    assert "iBSS.n104" in out["ibss"][0]
+        zf.writestr("Firmware/dfu/iBSS.n104.RELEASE.im4p",
+                    img4wrap.wrap(bytes(COMPONENT), "ibss", "mBoot-20457"))
+        zf.writestr("Firmware/txm.iphoneos.release.im4p",
+                    img4wrap.wrap(bytes(COMPONENT), "trxm", "1"))
+
+    report = preflight.run_preflight(profile_path, ipsw=ipsw)
+    assert report.verdict != "blocked", [s.detail for s in report.sites if s.severity == "fail"]
+    ibss = [s for s in report.sites if s.section == "ibss"]
+    assert ibss and all(s.status in ("plausible", "match", "already-patched") for s in ibss)
+    assert report.count("changed") == 0
+
+
+def test_ipsw_component_needing_a_decoder_is_skipped_with_a_hint(hermetic, tmp_path,
+                                                                profile_path, monkeypatch):
+    """No decoder installed: say so, do not call the offsets wrong."""
+    import zipfile
+
+    import img4wrap
+
+    monkeypatch.setitem(sys.modules, "pyimg4", None)
+    monkeypatch.setitem(sys.modules, "lzfse", None)
+    # a container whose payload is lzfse: undecodable without pyimg4/lzfse
+    container = img4wrap.wrap(b"bvx2" + b"\x00" * 128, "ibss", "")
+
+    ipsw = tmp_path / "iPhone12,1_27.0_24A437_Restore.ipsw"
+    with zipfile.ZipFile(ipsw, "w") as zf:
+        zf.writestr("Firmware/dfu/iBSS.n104.RELEASE.im4p", container)
+
+    report = preflight.run_preflight(profile_path, ipsw=ipsw)
+    ibss = [s for s in report.sites if s.section == "ibss"]
+    assert ibss and all(s.status == "skipped" for s in ibss)
+    assert "pip install pyimg4" in ibss[0].detail
+    assert report.verdict != "blocked"
