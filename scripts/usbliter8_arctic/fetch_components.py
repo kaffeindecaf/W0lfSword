@@ -40,6 +40,7 @@ import components
 import kczip
 from colors import C, err, info, ok, section, warn
 from profile_gen import DEVICE_DB
+import log_utils
 
 ROOT = Path(__file__).parent
 DEFAULT_OUT_ROOT = ROOT / "research" / "extracted"
@@ -142,8 +143,8 @@ def patterns_for(component: str, board: str, kernel_name: str = "", model: str =
 
 
 def _model_for_board(board: str) -> str:
-    for model, info in DEVICE_DB.items():
-        if info.get("board") == board:
+    for model, dev_info in DEVICE_DB.items():
+        if dev_info.get("board") == board:
             return model
     return ""
 
@@ -275,7 +276,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
-    dev = _device_entry(args.device)
+    _device_entry(args.device)          # validates the model, exits on an unknown one
     comps = [c.strip() for c in args.entries.split(",") if c.strip()]
     bad = [c for c in comps if c not in ALL_COMPONENTS]
     if bad:
@@ -314,7 +315,7 @@ if __name__ == "__main__":
     import log_utils
     log_utils.install()          # usbliter8.log + unhandled-exception logging
     try:
-        sys.exit(main())
+        sys.exit(log_utils.guard(main))
     except RuntimeError as exc:
         print(err(str(exc)))
         sys.exit(1)

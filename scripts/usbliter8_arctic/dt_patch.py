@@ -34,6 +34,7 @@ import argparse
 import struct
 import sys
 from pathlib import Path
+import log_utils
 
 FLAG_PLACEHOLDER = 0x80000000
 NAME_LEN = 32
@@ -280,4 +281,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import log_utils
+    log_utils.install()
+    sys.exit(log_utils.guard(main))

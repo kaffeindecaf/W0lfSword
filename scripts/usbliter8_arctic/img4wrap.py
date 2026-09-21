@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import log_utils
 
 MAGIC = b"IM4P"
 COMPRESSION = {
@@ -281,4 +282,4 @@ if __name__ == "__main__":
     import log_utils
     log_utils.install()          # usbliter8.log + unhandled-exception logging
     import sys
-    sys.exit(main())
+    sys.exit(log_utils.guard(main))

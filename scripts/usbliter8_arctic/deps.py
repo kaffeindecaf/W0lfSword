@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from colors import C, ok, err, warn, info, section, key_value, header, prompt
+import log_utils
 
 PY_PACKAGES = {
     "usb": "pyusb",
@@ -212,7 +213,7 @@ def install_dependencies() -> bool:
     print()
 
     try:
-        choice = input(prompt("Choose [1/2/3] or [q]uit: ") or "1").strip().lower()
+        choice = log_utils.safe_input(prompt("Choose [1/2/3] or [q]uit: ") or "1").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print()
         return False
@@ -265,4 +266,6 @@ def install_dependencies() -> bool:
 
 
 if __name__ == "__main__":
-    install_dependencies()
+    import log_utils
+    log_utils.install()
+    sys.exit(log_utils.guard(install_dependencies))

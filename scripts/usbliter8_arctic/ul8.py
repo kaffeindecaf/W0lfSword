@@ -4,6 +4,9 @@
 import sys
 from pathlib import Path
 
+from colors import err, info
+import log_utils
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -16,7 +19,8 @@ def _argv_after(verb: str) -> list[str]:
         return argv[argv.index(verb) + 1:]
     return []
 
-if __name__ == "__main__":
+def _cli() -> int:
+    """Command line entry point: whatever it raises, guard() turns into an exit code."""
     import argparse
 
     import log_utils
@@ -76,7 +80,20 @@ if __name__ == "__main__":
         from deps import install_dependencies
         install_dependencies()
     elif args.command == "logs":
-        sys.exit(log_utils.main(_argv_after("logs") or None))
+        sys.exit(log_utils.main(_argv_after("logs")))
+    elif args.command == "version":
+        import version
+        sys.exit(version.main(_argv_after("version")))
     else:
-        import main
-        main.menu()
+        print(err(f"unknown subcommand '{args.command}'"))
+        print(info("try: menu, pwn, offsets, preflight, gaps, coverage, explain, health, "
+             "deps, logs, version"))
+        return log_utils.EXIT_ERROR
+    return log_utils.EXIT_OK
+
+
+if __name__ == "__main__":
+    import log_utils
+
+    log_utils.install()          # usbliter8.log + clean exits
+    sys.exit(log_utils.guard(_cli))

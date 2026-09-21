@@ -11,7 +11,8 @@ import sys
 import time
 from pathlib import Path
 
-from colors import C, ok, err, warn, info, stage, section, key_value, divider, header, prompt
+from colors import C, ok, err, warn, info, section, key_value, header, prompt
+import log_utils
 from device_offsets import list_offset_files, set_active_device, get_active_device, find_online_sources
 from pwn_utils import print_device_status, verify_pwn_mode, check_pyusb_installed, wait_for_pwn
 
@@ -161,7 +162,7 @@ def show_device_status():
 
 def show_board_status():
     """Display RP2350 board and firmware status."""
-    from hardware_guide import _load_config, check_firmware, UF2_FILES
+    from hardware_guide import _load_config, check_firmware
     cfg = _load_config()
     board_id = cfg.get("selected_board", "unknown")
     print(f"  {C.GREY}── microcontroller ──────────────────────────────────────────────{C.NC}")
@@ -243,7 +244,7 @@ def menu():
 
         print()
         try:
-            choice = input(f"  {C.FROST}{C.B}usbliter8 ▸{C.NC} ").strip().lower()
+            choice = log_utils.safe_input(f"  {C.FROST}{C.B}usbliter8 ▸{C.NC} ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print(); break
 
@@ -278,7 +279,7 @@ def menu():
             if verify_pwn_mode()[0]:
                 pass
             else:
-                ans = input(prompt("Wait for PWN DFU? [y/N]: ") or "n")
+                ans = log_utils.safe_input(prompt("Wait for PWN DFU? [y/N]: ") or "n")
                 if ans.lower() in ("y", "yes"):
                     wait_for_pwn(timeout=60)
 
@@ -301,7 +302,7 @@ def menu():
         else:
             print(warn(f"Unknown: '{choice}' — try 1-9, h/c/b/f/p/e/x/i, or q"))
 
-        input(f"\n  {C.DIM}── Press Enter to continue ──{C.NC}")
+        log_utils.safe_input(f"\n  {C.DIM}── Press Enter to continue ──{C.NC}")
 
 
 def menu_configure():
@@ -327,13 +328,13 @@ def menu_configure():
     print(f"  {C.EYE}[g]{C.NC} Gap matrix: which sections still need offsets")
     print()
 
-    choice = input(prompt("Select device [#], find [f], validate [v], audit [a], fetch [r], "
+    choice = log_utils.safe_input(prompt("Select device [#], find [f], validate [v], audit [a], fetch [r], "
                           "preflight [p], gaps [g], or [b]ack: ") or "").strip().lower()
 
     if choice == "p":
-        path = input(prompt("Profile YAML (blank = active device): ")).strip()
+        path = log_utils.safe_input(prompt("Profile YAML (blank = active device): ")).strip()
         argv = [path] if path else []
-        record = input(prompt("Record verified bytes as evidence? [y/N]: ")).strip().lower()
+        record = log_utils.safe_input(prompt("Record verified bytes as evidence? [y/N]: ")).strip().lower()
         if record in ("y", "yes"):
             argv.append("--record")
         import preflight
@@ -342,22 +343,22 @@ def menu_configure():
         import profile_gen
         profile_gen.cmd_gaps()
     elif choice == "a":
-        script = input(prompt("Path to upstream make_cfw.py: ")).strip()
-        profile = input(prompt("Path to profile YAML: ")).strip()
+        script = log_utils.safe_input(prompt("Path to upstream make_cfw.py: ")).strip()
+        profile = log_utils.safe_input(prompt("Path to profile YAML: ")).strip()
         if script and profile:
             import subprocess
             subprocess.run([sys.executable, str(PROJECT_ROOT / "source_audit.py"),
                             "script", script, profile])
     elif choice == "r":
-        url = input(prompt("IPSW url (Apple CDN): ")).strip()
-        model = input(prompt("Device model (e.g. iPhone12,1): ")).strip()
+        url = log_utils.safe_input(prompt("IPSW url (Apple CDN): ")).strip()
+        model = log_utils.safe_input(prompt("Device model (e.g. iPhone12,1): ")).strip()
         if url and model:
             import subprocess
             cmd = [sys.executable, str(PROJECT_ROOT / "fetch_components.py"),
                    "--url", url, "--device", model, "--extract-payload"]
             subprocess.run(cmd)
     elif choice == "f":
-        model = input(prompt("Enter device model (e.g. iPhone12,1): ")).strip()
+        model = log_utils.safe_input(prompt("Enter device model (e.g. iPhone12,1): ")).strip()
         if model:
             sources = find_online_sources(model)
             if sources:
@@ -371,7 +372,7 @@ def menu_configure():
             else:
                 print(warn(f"No known online sources for {model}"))
     elif choice == "v":
-        path = input(prompt("Path to offset YAML file: ")).strip()
+        path = log_utils.safe_input(prompt("Path to offset YAML file: ")).strip()
         if path:
             from device_offsets import validate_offsets
             passed, failed, errors = validate_offsets(Path(path))
@@ -404,14 +405,14 @@ def _run_build_gate(offset_path) -> bool:
     print()
     preflight.print_report(report, verbose=False)
     if report.verdict == "blocked":
-        ans = input(prompt("preflight BLOCKED this build — build anyway? [y/N]: ") or "n")
+        ans = log_utils.safe_input(prompt("preflight BLOCKED this build — build anyway? [y/N]: ") or "n")
         if ans.lower() not in ("y", "yes"):
             return False
         import cfw_builder
         cfw_builder.FORCE = True
         return True
     if pending_entries(offset_path) > 0:
-        ans = input(prompt("profile has pending offsets — build anyway? [y/N]: ") or "n")
+        ans = log_utils.safe_input(prompt("profile has pending offsets — build anyway? [y/N]: ") or "n")
         return ans.lower() in ("y", "yes")
     _ = validate_offsets
     return True
@@ -433,12 +434,12 @@ def menu_build():
     print(key_value("iOS", ios))
     print()
 
-    ipsw_path = input(prompt("Path to IPSW file: ")).strip()
+    ipsw_path = log_utils.safe_input(prompt("Path to IPSW file: ")).strip()
     if not ipsw_path or not Path(ipsw_path).exists():
         print(err("IPSW not found — download from https://updates.cdn-apple.com/"))
         return
 
-    dr = input(prompt("Dry-run (validate only, no writes)? [y/N]: ") or "n")
+    dr = log_utils.safe_input(prompt("Dry-run (validate only, no writes)? [y/N]: ") or "n")
     if dr.lower() in ("y", "yes"):
         import cfw_builder
         cfw_builder.DRY_RUN = True
@@ -469,7 +470,7 @@ def menu_flash():
         for i, d in enumerate(work_dirs):
             print(f"  {C.EYE}[{i + 1}]{C.NC} {C.DIM}{d}{C.NC}")
 
-    work_dir = input(prompt("Path to work directory (or press Enter to skip): ")).strip()
+    work_dir = log_utils.safe_input(prompt("Path to work directory (or press Enter to skip): ")).strip()
     if not work_dir:
         print(info("Flash skipped — return to Configure and Build first"))
         return
@@ -479,7 +480,7 @@ def menu_flash():
     is_pwned, msg = verify_pwn_mode()
     if not is_pwned:
         print(err(f"Device not in PWN DFU: {msg}"))
-        ans = input(prompt("Continue anyway? [y/N]: ") or "n")
+        ans = log_utils.safe_input(prompt("Continue anyway? [y/N]: ") or "n")
         if ans.lower() not in ("y", "yes"):
             return
 
@@ -500,9 +501,9 @@ def menu_sshrd():
     work_dirs = _find_work_dirs()
     work_dir = None
     if work_dirs:
-        work_dir = Path(input(prompt(f"Work dir [{work_dirs[0]}]: ") or str(work_dirs[0])))
+        work_dir = Path(log_utils.safe_input(prompt(f"Work dir [{work_dirs[0]}]: ") or str(work_dirs[0])))
     else:
-        work_dir = Path(input(prompt("Work directory path: ")).strip())
+        work_dir = Path(log_utils.safe_input(prompt("Work directory path: ")).strip())
 
     if not work_dir.exists():
         print(err(f"Directory not found: {work_dir}"))
@@ -525,9 +526,9 @@ def menu_normal_boot():
     work_dirs = _find_work_dirs()
     work_dir = None
     if work_dirs:
-        work_dir = Path(input(prompt(f"Work dir [{work_dirs[0]}]: ") or str(work_dirs[0])))
+        work_dir = Path(log_utils.safe_input(prompt(f"Work dir [{work_dirs[0]}]: ") or str(work_dirs[0])))
     else:
-        work_dir = Path(input(prompt("Work directory path: ")).strip())
+        work_dir = Path(log_utils.safe_input(prompt("Work directory path: ")).strip())
 
     if not work_dir.exists():
         print(err(f"Directory not found: {work_dir}"))
@@ -555,7 +556,7 @@ def menu_postboot():
         print(f"  {C.EYE}[ b ]{C.NC}  {C.SNOW}{'Back':<20}{C.NC}")
         print()
 
-        choice = input(prompt("Choose: ")).strip().lower()
+        choice = log_utils.safe_input(prompt("Choose: ")).strip().lower()
 
         if choice == "1":
             from boot_chain import setup_usb_network
@@ -576,7 +577,7 @@ def menu_postboot():
         else:
             break
 
-        input(f"\n  {C.DIM}── Press Enter to continue ──{C.NC}")
+        log_utils.safe_input(f"\n  {C.DIM}── Press Enter to continue ──{C.NC}")
         clear()
 
 
@@ -591,7 +592,8 @@ def _argv_after(verb: str) -> list[str]:
         return argv[argv.index(verb) + 1:]
     return []
 
-if __name__ == "__main__":
+def _cli() -> int:
+    """Command line entry point: whatever it raises, guard() turns into an exit code."""
     import argparse
 
     import log_utils
@@ -601,7 +603,7 @@ if __name__ == "__main__":
     p.add_argument("command", nargs="?", default="menu",
                    help="Subcommand: menu, pwn, offsets, coverage, gaps, preflight, "
                         "audit, fetch, migrate, build, flash, boot, sshrd, net, vnc, "
-                        "explain, logs")
+                        "ssh, postboot, explain, version, logs")
     p.add_argument("profile", nargs="?", default="", help="profile path for preflight/audit")
     # flags for the wrapped tool (--json, --fetch, --record, ...) pass through
     args, extra = p.parse_known_args()
@@ -646,7 +648,41 @@ if __name__ == "__main__":
     elif args.command == "migrate":
         import migrate
         migrate.cli_main(([args.profile] if args.profile else []) + extra)
+    elif args.command == "build":
+        menu_build()
+    elif args.command == "flash":
+        menu_flash()
+    elif args.command == "boot":
+        menu_normal_boot()
+    elif args.command == "sshrd":
+        menu_sshrd()
+    elif args.command == "net":
+        from boot_chain import setup_usb_network
+        setup_usb_network()
+    elif args.command == "vnc":
+        from boot_chain import setup_vnc
+        setup_vnc()
+    elif args.command == "ssh":
+        from boot_chain import ssh_connect
+        ssh_connect()
+    elif args.command == "postboot":
+        menu_postboot()
+    elif args.command == "version":
+        import version
+        raise SystemExit(version.main(_argv_after("version")))
     elif args.command == "logs":
-        raise SystemExit(log_utils.main(_argv_after("logs") or None))
+        raise SystemExit(log_utils.main(_argv_after("logs")))
     else:
-        menu()
+        print(err(f"unknown subcommand '{args.command}'"))
+        print(info("try: menu, pwn, offsets, coverage, gaps, preflight, audit, fetch, "
+             "migrate, build, flash, boot, sshrd, net, vnc, ssh, postboot, "
+             "explain, version, logs"))
+        return log_utils.EXIT_ERROR
+    return log_utils.EXIT_OK
+
+
+if __name__ == "__main__":
+    import log_utils
+
+    log_utils.install()          # usbliter8.log + clean exits
+    sys.exit(log_utils.guard(_cli))

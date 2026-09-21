@@ -12,7 +12,9 @@ Checks that FAIL the run:
   2. machine-local      absolute home paths ("/home/<you>/...") in tracked files
   3. generated files    usbliter8.log, session.log, research/, firmware/,
                         config.yaml, checklist.md, __pycache__ tracked by git
-  4. profiles           every offsets/*.yaml validates; the file name matches
+  4. shadowed imports   an import shadowed inside a function and called there
+                        (crashes at runtime as a str/None "not callable")
+  5. profiles           every offsets/*.yaml validates; the file name matches
                         its model + ios_version; a profile claiming to be
                         verified has no pending entries and no blockers
   5. evidence drift     offsets/evidence/*.json entries must still match the
@@ -37,6 +39,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+import log_utils
 
 ROOT = Path(__file__).parent
 OFFSETS = ROOT / "offsets"
@@ -221,6 +224,54 @@ def check_evidence(files: list[str]) -> tuple[list[str], list[str]]:
     return problems, summary
 
 
+def check_shadowed_imports(files: list[str]) -> list[str]:
+    """An import shadowed inside a function and then called there is a crash.
+
+    `from colors import section` + `for section in ...` + `section("title")` in
+    the same function raises `'str' object is not callable` at runtime. Static
+    tools flag the shadowing; this check flags the combination that actually
+    breaks, so a harmless shadow does not block a push.
+    """
+    import ast
+
+    problems: list[str] = []
+    for rel in files:
+        if not rel.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse(read(rel))
+        except SyntaxError as exc:
+            problems.append(f"{rel}: does not parse ({exc.msg})")
+            continue
+
+        imported = set()
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                imported.update(a.asname or a.name for a in node.names)
+            elif isinstance(node, ast.Import):
+                imported.update((a.asname or a.name).split(".")[0] for a in node.names)
+
+        for func in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+            shadowed = set()
+            for node in ast.walk(func):
+                targets = []
+                if isinstance(node, ast.For):
+                    targets = (node.target.elts if isinstance(node.target, ast.Tuple)
+                               else [node.target])
+                elif isinstance(node, ast.Assign):
+                    targets = list(node.targets)
+                for target in targets:
+                    if isinstance(target, ast.Name) and target.id in imported:
+                        shadowed.add(target.id)
+            called = {n.func.id for n in ast.walk(func)
+                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+            for name in sorted(shadowed.intersection(called)):
+                problems.append(
+                    f"{rel}: {func.name}() shadows the imported '{name}' and calls it "
+                    f"(rename the local or the import)")
+    return problems
+
+
 def check_badge(files: list[str]) -> list[str]:
     if "README.md" not in files:
         return []
@@ -274,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, runner in (("secrets", check_secrets),
                          ("machine-local paths", check_machine_paths),
                          ("generated files", check_generated),
+                         ("shadowed imports", check_shadowed_imports),
                          ("offset profiles", check_profiles)):
         found = runner(files)
         results[name] = found
@@ -300,8 +352,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {C.DIM}evidence  {note}{C.NC}")
         for name, found in results.items():
             mark = f"{C.RED}✗{C.NC}" if found and name in (
-                "secrets", "machine-local paths", "generated files", "offset profiles",
-                "evidence drift") else (f"{C.AMB}⚠{C.NC}" if found else f"{C.GRN}✓{C.NC}")
+                "secrets", "machine-local paths", "generated files", "shadowed imports",
+                "offset profiles", "evidence drift") else (
+                f"{C.AMB}⚠{C.NC}" if found else f"{C.GRN}✓{C.NC}")
             print(f"  {mark} {name:<20} {C.DIM}{'clean' if not found else str(len(found)) + ' issue(s)'}{C.NC}")
 
     for problem in failures:
@@ -324,4 +377,4 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":
     import log_utils
     log_utils.install()          # usbliter8.log + unhandled-exception logging
-    sys.exit(main())
+    sys.exit(log_utils.guard(main))

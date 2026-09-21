@@ -45,6 +45,14 @@ LEVEL_ALIASES = {"WARNING": "WARN", "ERR": "ERROR", "FATAL": "CRITICAL", "TRACE"
 MAX_BYTES = 2 * 1024 * 1024   # rotate at 2 MB
 KEEP_BACKUPS = 3
 
+# Process exit codes. Keep these documented in the README: the wrapper script and
+# CI gate on them, so a change here is a user-visible change.
+EXIT_OK = 0          # finished
+EXIT_ERROR = 1       # refused or failed cleanly (bad input, missing file, ...)
+EXIT_BLOCKED = 2     # verification refused to let the run continue (preflight)
+EXIT_CRASH = 3       # unexpected exception, traceback recorded in the log
+EXIT_INTERRUPT = 130 # Ctrl-C
+
 LOG_LOCK = threading.RLock()
 _state = {
     "path": DEFAULT_LOG_FILE,
@@ -64,6 +72,106 @@ _LEVEL_COLORS = {
     "ERROR": "\033[0;31m",
     "CRITICAL": "\033[1;31m",
 }
+
+
+class CleanExit(Exception):
+    """Raised to stop with a message and an exit code instead of a traceback."""
+
+    def __init__(self, code: int = EXIT_ERROR, message: str = ""):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def fatal(message: str, hint: str = "", code: int = EXIT_ERROR) -> None:
+    """Print an error (and how to fix it), log it, then stop cleanly.
+
+    Use this instead of letting an exception escape: the user gets one readable
+    line plus a hint, the log gets the story, and the exit code says what
+    happened.
+    """
+    from colors import C, err
+    print(err(message))
+    if hint:
+        print(f"  {C.DIM}{hint}{C.NC}")
+    log("ERROR", message, module=_caller_module())
+    if hint:
+        log("INFO", f"hint: {hint}", module=_caller_module())
+    raise CleanExit(code, message)
+
+
+def warn_and_continue(message: str) -> None:
+    """A recoverable problem: log it, tell the user, keep going."""
+    log_warn(message, module=_caller_module())
+
+
+def safe_input(prompt_text: str, default: str = "", *, eof_default: str | None = None,
+               eof_code: int = EXIT_ERROR,
+               eof_message: str = "input ended (stdin closed)") -> str:
+    """input() that cannot crash the program.
+
+    - EOF (piped or closed stdin): return `eof_default` when the caller says a
+      default is safe, otherwise stop cleanly. Never silently take a destructive
+      action because there was no input.
+    - Ctrl-C: stop cleanly with EXIT_INTERRUPT.
+    """
+    from colors import C, err
+    try:
+        return input(prompt_text)
+    except EOFError:
+        if eof_default is not None:
+            log("INFO", f"{eof_message} - using default {eof_default!r}",
+                module=_caller_module())
+            return eof_default
+        print()
+        print(err(eof_message))
+        print(f"  {C.DIM}this prompt needs a terminal: run it interactively or pass "
+              f"the arguments on the command line{C.NC}")
+        log("ERROR", eof_message, module=_caller_module())
+        raise CleanExit(eof_code, eof_message) from None
+    except KeyboardInterrupt:
+        print()
+        log("INFO", "interrupted at a prompt (Ctrl-C)", module=_caller_module())
+        raise CleanExit(EXIT_INTERRUPT, "interrupted") from None
+
+
+def guard(func, *args, **kwargs) -> int:
+    """Run an entry point and turn every outcome into a clean exit code.
+
+    Wraps the whole run so a user never sees a raw traceback: the traceback goes
+    to the log, the screen gets one line plus where to find the details.
+    """
+    from colors import C, err, warn
+    try:
+        result = func(*args, **kwargs)
+        return int(result) if isinstance(result, int) else EXIT_OK
+    except CleanExit as exc:
+        if exc.message and exc.code != EXIT_OK:
+            log("INFO", f"stopping: {exc.message}", module="guard")
+        return exc.code
+    except KeyboardInterrupt:
+        print()
+        print(warn("Interrupted - nothing further was changed."))
+        log("INFO", "interrupted by user (Ctrl-C)", module="guard")
+        return EXIT_INTERRUPT
+    except BrokenPipeError:
+        # piping into `head`/`less`: not an error, just close quietly
+        log("DEBUG", "broken pipe (output closed early)", module="guard")
+        return EXIT_OK
+    except SystemExit as exc:
+        return int(exc.code or EXIT_OK)
+    except Exception as exc:                                  # noqa: BLE001
+        log("ERROR", "unhandled exception", exc=exc, module="guard")
+        print()
+        print(err(f"Something went wrong: {type(exc).__name__}: {exc}"))
+        print(f"  {C.DIM}The full traceback is in the log: "
+              f"{log_path()}{C.NC}")
+        print(f"  {C.DIM}Show it with: python3 ul8.py logs --level ERROR --tail 40{C.NC}")
+        if os.environ.get("UL8_DEBUG") in ("1", "true", "yes"):
+            traceback.print_exception(type(exc), exc, exc.__traceback__)
+        print(f"  {C.DIM}Nothing else was changed. Please report it with that log "
+              f"entry.{C.NC}")
+        return EXIT_CRASH
 
 
 def _under_pytest() -> bool:
@@ -185,13 +293,13 @@ def session_header(argv: list[str] | None = None, *, note: str = "") -> None:
         import platform
         from datetime import timezone
         here = Path.cwd()
-        version = ""
-        for name in ("VERSION", "__version__"):
-            if hasattr(sys.modules.get("__main__"), name):
-                version = str(getattr(sys.modules["__main__"], name))
-                break
+        try:
+            import version as version_module
+            build = version_module.describe()
+        except Exception:                                      # noqa: BLE001
+            build = ""
         log("INFO", "-" * 72, module="log_utils")
-        log("INFO", f"usbliter8-arctic run start {version}".strip(), module="log_utils")
+        log("INFO", f"usbliter8-arctic run start {build}".strip(), module="log_utils")
         log("INFO", f"argv: {' '.join(argv if argv is not None else sys.argv)}", module="log_utils")
         log("INFO", f"cwd: {here}  user: {os.environ.get('USER', '?')}", module="log_utils")
         log("INFO", f"python {platform.python_version()} on {platform.platform()} "
@@ -231,10 +339,16 @@ def install(level: str = "", path: Path | str | None = None) -> None:
     def _hook(exc_type, exc, tb):
         if issubclass(exc_type, KeyboardInterrupt):
             log("INFO", "interrupted by user (Ctrl-C)", module="excepthook")
-        else:
-            error = exc if isinstance(exc, BaseException) else exc_type
-            log("ERROR", "unhandled exception", exc=error, module="excepthook")
-        sys.__excepthook__(exc_type, exc, tb)
+            sys.stderr.write("\n  interrupted\n")
+            return
+        error = exc if isinstance(exc, BaseException) else exc_type
+        log("ERROR", "unhandled exception", exc=error, module="excepthook")
+        sys.stderr.write(
+            f"\n  Something went wrong: {exc_type.__name__}: {error}\n"
+            f"    full traceback: {log_path()}\n"
+            f"    show it with: python3 ul8.py logs --level ERROR --tail 40\n")
+        if os.environ.get("UL8_DEBUG") in ("1", "true", "yes"):
+            traceback.print_exception(exc_type, exc, tb)
 
     sys.excepthook = _hook
 

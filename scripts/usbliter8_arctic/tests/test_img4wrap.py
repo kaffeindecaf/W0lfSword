@@ -48,6 +48,8 @@ def test_wrapped_payload_is_detected():
 # ── reading ─────────────────────────────────────────────────────────
 
 def test_round_trip_with_pyimg4():
+    """The preferred backend; skipped where pyimg4 is not installed (CI installs it)."""
+    pytest.importorskip("pyimg4")
     container = img4wrap.wrap(PAYLOAD, "ibss", "mBoot-20457.0.77.0.2")
     result = img4wrap.unwrap(container)
     assert result.payload == PAYLOAD
@@ -72,7 +74,6 @@ def test_long_der_lengths_round_trip(no_pyimg4):
 
 
 def test_bzip2_payload_is_decompressed_with_stdlib(no_pyimg4):
-    import struct
     compressed = bz2.compress(PAYLOAD)
     container = img4wrap.wrap(compressed, "ibss", "")
     result = img4wrap.unwrap(container)

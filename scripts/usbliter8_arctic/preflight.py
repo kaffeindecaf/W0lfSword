@@ -47,6 +47,7 @@ import yaml
 from colors import C, err, info, ok, section, warn
 from device_offsets import _hex_to_bytes, pending_entries, validate_offsets
 from profile_gen import DEVICE_DB
+import log_utils
 
 ROOT = Path(__file__).parent
 OFFSETS_DIR = ROOT / "offsets"
@@ -210,22 +211,21 @@ def read_component_dir(comp_dir: Path) -> tuple[dict[str, tuple[str, bytes]], di
     offsets = {"model": "?", "board": "?"}
     out: dict[str, tuple[str, bytes]] = {}
     notes: dict[str, str] = {}
-    for section, kind in kind_of.items():
+    for sec_name, kind in kind_of.items():
         path, _cands, _reason = comp_module.find_component(comp_dir, kind, offsets)
         if path is None or path.suffix == ".dmg":
             continue
         payload, note = decode_component(str(path), path.read_bytes())
         if note:
-            notes[section] = note
+            notes[sec_name] = note
             continue
-        out[section] = (str(path), payload)
+        out[sec_name] = (str(path), payload)
     return out, notes
 
 
 def fetch_components_for(profile: dict, device: str, url: str = "") -> tuple[dict[str, tuple[str, bytes]], Path | None]:
     """Range-fetch iBSS/iBEC/TXM (and friends) and extract their payloads."""
     import fetch_components as fc
-    import kczip
 
     if not url:
         url, _version = fc.resolve_ipsw_url(device, str(profile.get("build", "")))
@@ -241,7 +241,7 @@ def fetch_components_for(profile: dict, device: str, url: str = "") -> tuple[dic
         return {}, out_dir
 
     # unwrap the im4p containers we just wrote
-    for section, (stem, _l, _n) in SECTION_COMPONENT.items():
+    for sec_name, (stem, _l, _n) in SECTION_COMPONENT.items():
         im4p = out_dir / f"{stem}.im4p"
         if im4p.exists():
             fc._pyimg4_extract(im4p)
@@ -446,20 +446,20 @@ def run_preflight(profile_path: Path, *, components: Path | None = None,
 
     recorded = load_evidence(profile_path).get("entries", {})
 
-    for section, data in profile.get("patches", {}).items():
-        label = SECTION_COMPONENT.get(section, (section, section, "unknown component"))[1]
-        raw_entry = raw_by_section.get(section)
+    for sec_name, data in profile.get("patches", {}).items():
+        label = SECTION_COMPONENT.get(sec_name, (sec_name, sec_name, "unknown component"))[1]
+        raw_entry = raw_by_section.get(sec_name)
         if raw_entry is None:
-            note = decode_notes.get(section) or SECTION_COMPONENT.get(
-                section, ("", "", "no component"))[2]
-            report.sites.append(Site(section, "*", 0, "skipped",
+            note = decode_notes.get(sec_name) or SECTION_COMPONENT.get(
+                sec_name, ("", "", "no component"))[2]
+            report.sites.append(Site(sec_name, "*", 0, "skipped",
                                      f"no usable {label} to check ({note})"))
             continue
         comp_path, raw = raw_entry
-        report.components[section] = {"path": comp_path, "size": len(raw)}
-        for name, entry in _iter_entries(section, data):
-            site = check_site(section, name, entry, raw,
-                              recorded.get(f"{section}.{name}"), label)
+        report.components[sec_name] = {"path": comp_path, "size": len(raw)}
+        for name, entry in _iter_entries(sec_name, data):
+            site = check_site(sec_name, name, entry, raw,
+                              recorded.get(f"{sec_name}.{name}"), label)
             report.sites.append(site)
 
     if record:
@@ -490,7 +490,6 @@ def read_components_from_ipsw(ipsw: Path, profile: dict) -> tuple[dict[str, tupl
     the container raw made every site look "changed" and blocked good builds
     (issue #4).
     """
-    import kczip
     import zipfile
 
     out: dict[str, tuple[str, bytes]] = {}
@@ -667,10 +666,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if report.verdict == "blocked":
         return 2
-    return 0
+
+    gave_a_source = bool(args.components or args.ipsw or args.url or args.fetch)
+    if gave_a_source and not report.components:
+        # the source was unusable (unreadable IPSW, undecodable components):
+        # say so as a failure rather than "review" on nothing
+        if not args.json:
+            print(err("nothing could be verified: no usable component came out of "
+                      "the source you passed"))
+            print(f"  {C.DIM}Check the path, and that pyimg4 is installed for lzfse "
+                  f"containers (`python3 -m pip install pyimg4`).{C.NC}")
+        return log_utils.EXIT_ERROR
+    return log_utils.EXIT_OK
 
 
 if __name__ == "__main__":
     import log_utils
     log_utils.install()          # usbliter8.log + unhandled-exception logging
-    sys.exit(main())
+    sys.exit(log_utils.guard(main))

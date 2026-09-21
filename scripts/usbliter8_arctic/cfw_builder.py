@@ -10,17 +10,17 @@ from __future__ import annotations
 
 import os
 import shutil
-import struct
+import sys
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 import components
 import dt_patch
 from colors import C, ok, err, warn, info, stage, section
+import log_utils
 
 TOOLS_DIR = Path(__file__).parent / "tools"
 DRY_RUN = False
@@ -38,7 +38,6 @@ def _note(section: str, status: str, detail: str = "") -> None:
 
 def blocked_sections(offsets: dict) -> list[dict]:
     """Sections this profile declares as blocked (see device_offsets.blocked_sections)."""
-    from device_offsets import blocked_sections as _blocked
     blockers = offsets.get("blockers")
     if isinstance(blockers, dict):
         out = []
@@ -593,10 +592,10 @@ def _print_manifest() -> None:
         pass
     print()
     print(section("Patch manifest"))
-    for section, status, detail in MANIFEST:
+    for sec_name, status, detail in MANIFEST:
         color = {"patched": C.GRN, "skipped": C.AMB, "mismatch": C.RED,
                  "failed": C.RED, "partial": C.AMB}.get(status, C.DIM)
-        print(f"  {color}{status:<9}{C.NC} {section:<15} {C.DIM}{detail}{C.NC}")
+        print(f"  {color}{status:<9}{C.NC} {sec_name:<15} {C.DIM}{detail}{C.NC}")
     print()
 
 
@@ -750,10 +749,13 @@ def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
 
 # ── CLI ──
 
-if __name__ == "__main__":
+def _cli() -> int:
+    """Command line entry point: whatever it raises, guard() turns into an exit code."""
+    # the flags live at module level: without `global` these assignments would
+    # only rebind locals and --force/--dry-run/--quiet would silently do nothing
+    global FORCE, FORCE_COMPONENT, DRY_RUN, VERBOSE
     import log_utils
     log_utils.install()          # usbliter8.log + unhandled-exception logging
-    import sys
     args = sys.argv[1:]
 
     if "--force" in args:
@@ -788,3 +790,11 @@ if __name__ == "__main__":
         sys.exit(1)
 
     build_cfw(ipsw, offsets)
+    return log_utils.EXIT_OK
+
+
+if __name__ == "__main__":
+    import log_utils
+
+    log_utils.install()          # usbliter8.log + clean exits
+    sys.exit(log_utils.guard(_cli))

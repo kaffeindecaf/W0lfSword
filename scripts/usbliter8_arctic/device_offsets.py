@@ -6,7 +6,6 @@ and manages the active device configuration.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,6 +13,7 @@ from typing import Any
 import yaml
 
 from colors import C, ok, err, warn, info, section
+import log_utils
 
 OFFSETS_DIR = Path(__file__).parent / "offsets"
 SENTINEL = 0xDEADBEEF
@@ -107,7 +107,6 @@ def validate_offsets(filepath: Path) -> tuple[int, int, list[str]]:
     if not isinstance(data, dict) or "patches" not in data:
         return 0, 1, ["Invalid YAML: missing 'patches' top-level key"]
 
-    device_info = data.get("device", "unknown")
     model = data.get("model", "unknown")
     ios = data.get("ios_version", "unknown")
 
@@ -115,8 +114,8 @@ def validate_offsets(filepath: Path) -> tuple[int, int, list[str]]:
     errors = []
 
     sections_to_check = ["ibss", "ibec", "restoreramdisk", "txm"]
-    for section in sections_to_check:
-        for item in _extract_section_offsets(data, section):
+    for sec_name in sections_to_check:
+        for item in _extract_section_offsets(data, sec_name):
             off = item["offset"]
             val = item["value"]
             if not _is_valid_offset(off):
@@ -217,7 +216,7 @@ def pending_entries(filepath: Path) -> int:
     if not isinstance(patches_data, dict):
         return 0
     count = 0
-    for section, section_data in patches_data.items():
+    for sec_name, section_data in patches_data.items():
         if isinstance(section_data, list):
             count += sum(1 for e in section_data if isinstance(e, dict) and e.get("pending"))
         elif isinstance(section_data, dict):
@@ -360,7 +359,8 @@ def get_active_device() -> dict[str, Any] | None:
 
 # ── CLI (for testing / standalone use) ──
 
-if __name__ == "__main__":
+def _cli() -> int:
+    """Command line entry point: whatever it raises, guard() turns into an exit code."""
     import log_utils
     log_utils.install()          # usbliter8.log + unhandled-exception logging
     if len(sys.argv) < 2:
@@ -436,3 +436,11 @@ if __name__ == "__main__":
             print(err("Specify an offset YAML file to activate"))
             sys.exit(1)
         set_active_device(target)
+    return log_utils.EXIT_OK
+
+
+if __name__ == "__main__":
+    import log_utils
+
+    log_utils.install()          # usbliter8.log + clean exits
+    sys.exit(log_utils.guard(_cli))

@@ -20,7 +20,8 @@ import yaml
 from pathlib import Path
 from typing import Any
 
-from colors import C, ok, err, warn, info, section, header
+from colors import C, ok, err, warn, info, section
+import log_utils
 
 SCRIPT_DIR = Path(__file__).parent
 OFFSETS_DIR = SCRIPT_DIR / "offsets"
@@ -192,7 +193,7 @@ def cmd_create(args: list[str]):
     out_path = OFFSETS_DIR / fname
 
     if out_path.exists():
-        overwrite = input(f"  {C.AMB}{fname} already exists. Overwrite? [y/N]:{C.NC} ")
+        overwrite = log_utils.safe_input(f"  {C.AMB}{fname} already exists. Overwrite? [y/N]:{C.NC} ")
         if overwrite.lower() not in ("y", "yes"):
             print(info("Cancelled"))
             return
@@ -318,9 +319,11 @@ def cmd_fill(args: list[str]):
             i += 1
 
     if not profile_path.is_file():
-        print(err(f"No such profile: {profile_path}")); return 1
+        print(err(f"No such profile: {profile_path}"))
+        return 1
     if base_path is None or comp_dir is None:
-        print(err("--from and --comp-dir are required")); return 1
+        print(err("--from and --comp-dir are required"))
+        return 1
 
     profile = yaml.safe_load(profile_path.read_text())
     base = yaml.safe_load(base_path.read_text())
@@ -453,7 +456,7 @@ def cmd_propagate(args: list[str]):
     tag = ios_tag or _tag_from_path(base_path)
     out_path = OFFSETS_DIR / f"{model}_{tag}.yaml"
     if out_path.exists() and not overwrite:
-        ans = input(f"  {C.AMB}{out_path.name} already exists. Overwrite? [y/N]:{C.NC} ") or "n"
+        ans = log_utils.safe_input(f"  {C.AMB}{out_path.name} already exists. Overwrite? [y/N]:{C.NC} ") or "n"
         if ans.lower() not in ("y", "yes"):
             print(info("Cancelled"))
             return
@@ -591,7 +594,7 @@ def coverage_data() -> dict:
     from device_offsets import pending_entries, validate_offsets
 
     devices = []
-    for model, info in sorted(DEVICE_DB.items()):
+    for model, dev_info in sorted(DEVICE_DB.items()):
         files = sorted(OFFSETS_DIR.glob(f"{model}_*.yaml"))
         profiles = []
         for f in files:
@@ -609,16 +612,16 @@ def coverage_data() -> dict:
                 "status": status,
                 "patches_ok": passed,
                 "pending": pend,
-                "kernel_component": info.get("kernel_component", ""),
+                "kernel_component": dev_info.get("kernel_component", ""),
                 "sections": {sec: {"filled": filled, "total": total}
                              for sec, (filled, total) in stats.items()},
             })
         devices.append({
             "model": model,
-            "name": info["name"],
-            "soc": info["soc"],
-            "board": info["board"],
-            "kernel_component": info.get("kernel_component", ""),
+            "name": dev_info["name"],
+            "soc": dev_info["soc"],
+            "board": dev_info["board"],
+            "kernel_component": dev_info.get("kernel_component", ""),
             "profiles": profiles,
         })
     ready = sum(1 for d in devices for p in d["profiles"] if p["status"] == "ready")
@@ -719,11 +722,11 @@ def cmd_coverage(json_out: bool = False):
     print(f"  {C.EYE}{'Device':<24}{'Model':<12}{'SoC':<5}{'Profiles':<16}Status{C.NC}")
     print(f"  {'─' * 62}")
     n_devices = n_with_profiles = n_ready = 0
-    for model, info in sorted(DEVICE_DB.items()):
+    for model, dev_info in sorted(DEVICE_DB.items()):
         n_devices += 1
         files = sorted(OFFSETS_DIR.glob(f"{model}_*.yaml"))
         if not files:
-            print(f"  {info['name']:<24}{model:<12}{info['soc']:<5}{'—':<16}{C.DIM}no profile{C.NC}")
+            print(f"  {dev_info['name']:<24}{model:<12}{dev_info['soc']:<5}{'—':<16}{C.DIM}no profile{C.NC}")
             continue
         n_with_profiles += 1
         tags, statuses = [], set()
@@ -745,7 +748,7 @@ def cmd_coverage(json_out: bool = False):
             icon, col = "⚠ pending", C.AMB
         else:
             icon, col = "✗ incomplete", C.RED
-        print(f"  {info['name']:<24}{model:<12}{info['soc']:<5}{label:<16}{col}{icon}{C.NC}")
+        print(f"  {dev_info['name']:<24}{model:<12}{dev_info['soc']:<5}{label:<16}{col}{icon}{C.NC}")
     print(f"  {'─' * 62}")
     print(f"  {C.DIM}{n_with_profiles}/{n_devices} devices have profiles · {n_ready} ready to flash{C.NC}")
 
@@ -763,15 +766,16 @@ def cmd_list_templates(json_out: bool = False):
         return
     print(section("Device Database"))
     print()
-    for model, info in sorted(DEVICE_DB.items()):
+    for model, dev_info in sorted(DEVICE_DB.items()):
         has_profile = list(OFFSETS_DIR.glob(f"{model}_*.yaml"))
         status = C.GRN + "✓" if has_profile else C.AMB + "⚠"
-        kernel = info.get("kernel_component", "kernelcache.release.?")
-        print(f"  {status}{C.NC} {C.EYE}{info['name']:<22}{C.NC} {C.DIM}{model:<12}{C.NC} "
-              f"[{info['soc']}]  {info['board']:<9} {C.DIM}{kernel}{C.NC}")
+        kernel = dev_info.get("kernel_component", "kernelcache.release.?")
+        print(f"  {status}{C.NC} {C.EYE}{dev_info['name']:<22}{C.NC} {C.DIM}{model:<12}{C.NC} "
+              f"[{dev_info['soc']}]  {dev_info['board']:<9} {C.DIM}{kernel}{C.NC}")
 
 
-if __name__ == "__main__":
+def _cli() -> int:
+    """Command line entry point: whatever it raises, guard() turns into an exit code."""
     import log_utils
     log_utils.install()          # usbliter8.log + unhandled-exception logging
     if len(sys.argv) < 2:
@@ -810,3 +814,11 @@ if __name__ == "__main__":
     else:
         print(err(f"Unknown command: {cmd}"))
         sys.exit(1)
+    return log_utils.EXIT_OK
+
+
+if __name__ == "__main__":
+    import log_utils
+
+    log_utils.install()          # usbliter8.log + clean exits
+    sys.exit(log_utils.guard(_cli))

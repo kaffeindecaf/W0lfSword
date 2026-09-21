@@ -2,7 +2,7 @@
 
 > The easy way to run the usbliter8 tethered jailbreak. A TUI hub that walks you through the whole chain: wire up an RP2350 board, flash the exploit firmware, build a custom firmware for your A12/A13 iPhone or iPad, restore it, and boot. Offsets are managed as validated YAML profiles, and a fingerprint engine migrates them between iOS betas automatically.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-227%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-256%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 ## Quick start
 
@@ -313,6 +313,41 @@ The 2026-09-20 audit of the iPhone 11 Pro profiles against the upstream scripts 
 
 Tests: `python3 -m pytest tests/ -q` (99 tests; offset ground truth = b2 → b3 oracle in `OffsetMigrationChecklist.md`).
 
+## Errors, exit codes and logs
+
+Nothing in the toolkit should hand a user a Python traceback: the device in the
+loop is real hardware, and "it printed a stack trace" is not a usable report.
+Every entry point runs through `log_utils.guard()`, so whatever happens ends as a
+documented exit code, one readable line on screen, and the full detail in
+`usbliter8.log`.
+
+| Exit | Meaning |
+|---|---|
+| `0` | finished |
+| `1` | refused or failed cleanly (bad input, missing file, unknown subcommand) |
+| `2` | verification refused to continue, e.g. `preflight` says the profile does not match the firmware |
+| `3` | unexpected exception, traceback recorded in the log |
+| `130` | interrupted (Ctrl-C) |
+
+```bash
+python3 ul8.py version            # version + commit + log path
+python3 ul8.py logs --level ERROR  # what went wrong, with tracebacks
+UL8_DEBUG=1 python3 ul8.py build   # also print the traceback on screen
+```
+
+What this buys in practice:
+
+- a crash prints `Something went wrong: <type>: <message>`, the log path, and how
+  to read it; the traceback goes to the log, not to the screen
+- Ctrl-C stops cleanly with code 130 instead of a `KeyboardInterrupt` traceback
+- piping into `head`/`less` (broken pipe) is not treated as an error
+- every interactive prompt tolerates EOF: a prompt that would trigger something
+  destructive stops cleanly when stdin is not a terminal, it never guesses
+- a subcommand that is not implemented says so and lists what exists, instead of
+  silently opening the menu
+- failures in the dangerous stages (restore, normal boot, TSS proxy) are logged
+  with their exit code, so a log file explains what happened after the fact
+
 ## Logging
 
 Every error and warning that reaches the screen is also appended to
@@ -455,7 +490,8 @@ usbliter8-arctic/
 ├── safety_check.py       # pre-push/CI gate: leaks, machine paths, profile/evidence drift
 ├── hardware_guide.py     # guided setup, health check, firmware flashing
 ├── deps.py               # dependency checker & installer
-├── log_utils.py          # usbliter8.log: errors, warnings, tracebacks, `ul8.py logs`
+├── log_utils.py          # usbliter8.log: errors, warnings, tracebacks, exit guard
+├── version.py            # version + git commit of the checkout
 ├── colors.py
 ├── .github/workflows/    # CI: compileall + safety check + profiles + tests (3.13 and 3.9)
 ├── offsets/              # device offset profiles (+ template, sources, canonical.yaml)
@@ -473,6 +509,8 @@ usbliter8-arctic/
 | `no IPSW url found for <device> <build>` | the url lookup does not know that beta build, which is harmless when you point the build at a local IPSW; the message is informational |
 | `cannot unwrap <component>: ... pip install pyimg4` | component is lzfse-compressed and no decoder is installed |
 | `every module parses` fails in CI | run `python3 -m compileall -q .` locally; a module that tests never import can still be broken |
+| a run ended with exit `3` | an unexpected exception: `python3 ul8.py logs --level ERROR` has the traceback, `UL8_DEBUG=1` prints it directly |
+| a prompt vanished or said "input ended" | stdin is not a terminal (piped/CI). Prompts that could erase the device stop instead of assuming an answer |
 | offsets look "unchanged" but the device panics | kernel offsets are per `kernelcache.release.*` component; check `python3 profile_gen.py gaps` for a profile whose kernel section came from another board |
 
 ## Warnings

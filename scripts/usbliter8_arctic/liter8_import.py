@@ -40,6 +40,7 @@ import yaml
 from colors import C, err, info, ok, section, warn
 from device_offsets import SENTINEL, dump_profile_yaml, pending_entries, validate_offsets
 from profile_gen import DEVICE_DB
+import log_utils
 
 ROOT = Path(__file__).parent
 OFFSETS_DIR = ROOT / "offsets"
@@ -567,4 +568,6 @@ def _write_report(report: Path, args, fixtures, imported, skipped, extras,
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import log_utils
+    log_utils.install()
+    sys.exit(log_utils.guard(main))

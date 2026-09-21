@@ -12,7 +12,8 @@ from urllib.request import urlretrieve, URLError
 
 import yaml
 
-from colors import C, ok, err, warn, info, section, key_value, header, divider, prompt
+from colors import C, ok, err, warn, info, section, key_value, header, prompt
+import log_utils
 from log_utils import log_info, log_warn, log_error, log_step
 
 TOOLS_DIR = Path(__file__).parent / "tools"
@@ -235,11 +236,12 @@ class QuitSetup(Exception):
     """Raised when the user asks to exit the guided setup."""
 
 
-def _ask(prompt_text: str, default: str = "", valid: tuple = None, retries: int = 3) -> str:
+def _ask(prompt_text: str, default: str = "", valid: tuple | None = None,
+         retries: int = 3) -> str:
     """Input with validation and retries. 'quit' or Ctrl-C exits the setup."""
     for attempt in range(retries):
         try:
-            ans = input(prompt(prompt_text) or default).strip().lower()
+            ans = log_utils.safe_input(prompt(prompt_text) or default).strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             raise QuitSetup
@@ -444,7 +446,7 @@ def _guided_setup_impl():
     show_troubleshooting()
 
     try:
-        input(prompt("Press Enter to return to menu..."))
+        log_utils.safe_input(prompt("Press Enter to return to menu..."))
     except (EOFError, KeyboardInterrupt):
         print()
 
@@ -569,4 +571,6 @@ def verify_board_for_exploit() -> bool:
 
 
 if __name__ == "__main__":
-    interactive_hardware_setup()
+    import log_utils
+    log_utils.install()
+    sys.exit(log_utils.guard(interactive_hardware_setup))

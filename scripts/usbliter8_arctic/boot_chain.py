@@ -7,12 +7,12 @@ and VNC remote control setup.
 from __future__ import annotations
 
 import os
-import sys
 import time
 import subprocess
 from pathlib import Path
 
-from colors import C, ok, err, warn, info, stage, section, divider, prompt, header
+from colors import C, ok, err, warn, info, stage, section, prompt, header
+import log_utils
 
 TOOLS_DIR = Path(__file__).parent / "tools"
 DRY_RUN = False
@@ -78,10 +78,12 @@ def normal_boot(work_dir: str | Path, password: str = "") -> bool:
     print(stage(2, "Sending boot chain to device..."))
     r = _run(["python3", str(boot_py)], cwd=str(work_dir))
     if r.returncode != 0:
-        print(err("boot.py failed"))
+        print(err(f"boot.py failed (exit={r.returncode})"))
+        log_utils.log_error(f"normal boot failed (exit={r.returncode})", module="boot_chain")
         return False
 
     print(ok("Normal boot sent — device should be booting into iOS"))
+    log_utils.log_info("normal boot chain sent", module="boot_chain")
     return True
 
 
@@ -136,7 +138,7 @@ def restore_device(work_dir: str | Path, password: str = "") -> bool:
     print(f"  {C.RED}All data, apps, and settings will be permanently deleted.{C.NC}")
     print()
 
-    ans = input(prompt("Type YES to confirm: "))
+    ans = log_utils.safe_input(prompt("Type YES to confirm: "))
     if ans != "YES":
         print(info("Restore cancelled."))
         return False
@@ -169,6 +171,12 @@ def restore_device(work_dir: str | Path, password: str = "") -> bool:
             stderr=subprocess.DEVNULL,
         )
         time.sleep(2)
+        if proxy_proc.poll() is not None:
+            print(warn(f"TSS proxy exited immediately (code {proxy_proc.returncode})"))
+            print(f"  {C.DIM}The restore will fail without it. Check that tss_proxy_server.py "
+                  f"runs in {work_dir}.{C.NC}")
+            log_utils.log_warn(f"tss proxy exited early (code {proxy_proc.returncode})",
+                               module="boot_chain")
     print(ok("TSS proxy running"))
 
     print(stage(3, "Restoring CFW (this takes 5-15 minutes)..."))
@@ -177,9 +185,12 @@ def restore_device(work_dir: str | Path, password: str = "") -> bool:
 
     if not DRY_RUN:
         try:
+            log_utils.log_info(f"restore start: {restore_sh} in {work_dir}", module="boot_chain")
             r = subprocess.run(["bash", str(restore_sh)], cwd=str(work_dir))
             if r.returncode != 0:
-                print(err("Restore failed"))
+                print(err(f"Restore failed (exit={r.returncode})"))
+                log_utils.log_error(f"restore_cfw.sh failed with exit {r.returncode}",
+                                    module="boot_chain")
                 return False
         finally:
             if proxy_proc and proxy_proc.poll() is None:
@@ -190,6 +201,7 @@ def restore_device(work_dir: str | Path, password: str = "") -> bool:
                     proxy_proc.kill()
 
     print(ok("Restore complete! Device is now on custom firmware."))
+    log_utils.log_info("restore finished", module="boot_chain")
     return True
 
 

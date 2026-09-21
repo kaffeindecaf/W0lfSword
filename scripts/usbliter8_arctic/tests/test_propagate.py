@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import profile_gen  # noqa: E402
 import device_offsets  # noqa: E402
-from fingerprint import migrate_site  # noqa: E402
 
 ROOT = Path(__file__).parent.parent
 SENTINEL = 0xDEADBEEF

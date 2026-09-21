@@ -18,6 +18,7 @@ from pathlib import Path
 import yaml
 
 from colors import C, ok, err, warn, info, section, key_value, header
+import log_utils
 from device_offsets import (
     validate_offsets,
     pending_entries,
@@ -97,7 +98,7 @@ def cmd_new(args: list[str]) -> int:
     out_path = OFFSETS_DIR / fname
 
     if out_path.exists():
-        overwrite = input(f"  {C.AMB}{fname} already exists. Overwrite? [y/N]:{C.NC} ")
+        overwrite = log_utils.safe_input(f"  {C.AMB}{fname} already exists. Overwrite? [y/N]:{C.NC} ")
         if overwrite.lower() not in ("y", "yes"):
             print(info("Cancelled"))
             return 0
@@ -255,7 +256,8 @@ def usage() -> None:
     print()
 
 
-if __name__ == "__main__":
+def _cli() -> int:
+    """Command line entry point: whatever it raises, guard() turns into an exit code."""
     if len(sys.argv) < 2:
         usage()
         sys.exit(0)
@@ -274,3 +276,11 @@ if __name__ == "__main__":
         usage()
         rc = 1
     sys.exit(rc)
+    return log_utils.EXIT_OK
+
+
+if __name__ == "__main__":
+    import log_utils
+
+    log_utils.install()          # usbliter8.log + clean exits
+    sys.exit(log_utils.guard(_cli))

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import sys
 import time
-import subprocess
 from colors import C, ok, err, warn, info
 from log_utils import log_info, log_warn, log_error, log_step
+import log_utils
 
 
 RP2350_VID = 0x2E8A
@@ -304,7 +304,8 @@ def wait_for_dfu(timeout: int = 30) -> bool:
 
 # ── CLI ──
 
-if __name__ == "__main__":
+def _cli() -> int:
+    """Command line entry point: whatever it raises, guard() turns into an exit code."""
     if len(sys.argv) < 2:
         print_device_status()
     elif sys.argv[1] == "wait":
@@ -318,3 +319,11 @@ if __name__ == "__main__":
         print_device_status()
     else:
         print_device_status()
+    return log_utils.EXIT_OK
+
+
+if __name__ == "__main__":
+    import log_utils
+
+    log_utils.install()          # usbliter8.log + clean exits
+    sys.exit(log_utils.guard(_cli))

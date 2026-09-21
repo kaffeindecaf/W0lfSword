@@ -37,7 +37,8 @@ from pathlib import Path
 
 import yaml
 
-from colors import C, err, info, ok, section, warn
+from colors import C, err, info, section, warn
+import log_utils
 
 ROOT = Path(__file__).parent
 
@@ -465,4 +466,6 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    import log_utils
+    log_utils.install()
+    sys.exit(log_utils.guard(main, sys.argv[1:]))
