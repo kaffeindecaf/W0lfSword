@@ -50,35 +50,36 @@ def _find_script(name: str) -> Path | None:
 
 def normal_boot(work_dir: str | Path) -> bool:
     """Build normal boot chain and send via usbliter8ctl."""
-    print(section("Normal Boot"))
-    print()
+    with log_utils.timed('boot', 'normal_boot'):
+        print(section("Normal Boot"))
+        print()
 
-    # Run get_boot.py to build the normal chain
-    get_boot = Path(work_dir) / "get_boot.py"
-    boot_py = Path(work_dir) / "boot.py"
+        # Run get_boot.py to build the normal chain
+        get_boot = Path(work_dir) / "get_boot.py"
+        boot_py = Path(work_dir) / "boot.py"
 
-    if not get_boot.exists():
-        print(warn(f"get_boot.py not found in {work_dir}"))
-        print(info("Running manually: build ramdisk chain without SSHRD"))
-        return False
+        if not get_boot.exists():
+            print(warn(f"get_boot.py not found in {work_dir}"))
+            print(info("Running manually: build ramdisk chain without SSHRD"))
+            return False
 
-    print(stage(1, "Building normal boot chain..."))
-    r = _run(["python3", str(get_boot)], cwd=str(work_dir))
-    if r.returncode != 0:
-        print(err("get_boot.py failed"))
-        return False
-    print(ok("Boot chain built (Ramdisk should NOT contain RestoreRamdisk)"))
+        print(stage(1, "Building normal boot chain..."))
+        r = _run(["python3", str(get_boot)], cwd=str(work_dir))
+        if r.returncode != 0:
+            print(err("get_boot.py failed"))
+            return False
+        print(ok("Boot chain built (Ramdisk should NOT contain RestoreRamdisk)"))
 
-    print(stage(2, "Sending boot chain to device..."))
-    r = _run(["python3", str(boot_py)], cwd=str(work_dir))
-    if r.returncode != 0:
-        print(err(f"boot.py failed (exit={r.returncode})"))
-        log_utils.log_error(f"normal boot failed (exit={r.returncode})", module="boot_chain")
-        return False
+        print(stage(2, "Sending boot chain to device..."))
+        r = _run(["python3", str(boot_py)], cwd=str(work_dir))
+        if r.returncode != 0:
+            print(err(f"boot.py failed (exit={r.returncode})"))
+            log_utils.log_error(f"normal boot failed (exit={r.returncode})", module="boot_chain")
+            return False
 
-    print(ok("Normal boot sent — device should be booting into iOS"))
-    log_utils.log_info("normal boot chain sent", module="boot_chain")
-    return True
+        print(ok("Normal boot sent — device should be booting into iOS"))
+        log_utils.log_info("normal boot chain sent", module="boot_chain")
+        return True
 
 
 def sshrd_boot(work_dir: str | Path) -> bool:
@@ -126,77 +127,78 @@ def sshrd_boot(work_dir: str | Path) -> bool:
 
 def restore_device(work_dir: str | Path) -> bool:
     """Restore custom firmware to device (ERASES ALL DATA)."""
-    print(section("Restore CFW to Device"))
-    print()
-    print(f"  {C.RED}{C.B}⚠  THIS WILL ERASE THE ENTIRE DEVICE{C.NC}")
-    print(f"  {C.RED}All data, apps, and settings will be permanently deleted.{C.NC}")
-    print()
+    with log_utils.timed('restore', 'restore_device'):
+        print(section("Restore CFW to Device"))
+        print()
+        print(f"  {C.RED}{C.B}⚠  THIS WILL ERASE THE ENTIRE DEVICE{C.NC}")
+        print(f"  {C.RED}All data, apps, and settings will be permanently deleted.{C.NC}")
+        print()
 
-    ans = log_utils.safe_input(prompt("Type YES to confirm: "))
-    if ans != "YES":
-        print(info("Restore cancelled."))
-        return False
+        ans = log_utils.safe_input(prompt("Type YES to confirm: "))
+        if ans != "YES":
+            print(info("Restore cancelled."))
+            return False
 
-    make_cfw = Path(work_dir) / "make_cfw.py"
-    restore_sh = Path(work_dir) / "restore_cfw.sh"
-    tss_proxy = Path(work_dir) / "tss_proxy_server.py"
+        make_cfw = Path(work_dir) / "make_cfw.py"
+        restore_sh = Path(work_dir) / "restore_cfw.sh"
+        tss_proxy = Path(work_dir) / "tss_proxy_server.py"
 
-    missing = [str(p.name) for p in (make_cfw, restore_sh, tss_proxy) if not p.exists()]
-    if missing:
-        print(err(f"Required files not found in {work_dir}: {', '.join(missing)}"))
-        return False
+        missing = [str(p.name) for p in (make_cfw, restore_sh, tss_proxy) if not p.exists()]
+        if missing:
+            print(err(f"Required files not found in {work_dir}: {', '.join(missing)}"))
+            return False
 
-    print(stage(1, "Building custom firmware..."))
-    r = _run(["python3", str(make_cfw)], cwd=str(work_dir))
-    if r.returncode != 0:
-        print(err("make_cfw.py failed"))
-        return False
-    print(ok("CFW built"))
+        print(stage(1, "Building custom firmware..."))
+        r = _run(["python3", str(make_cfw)], cwd=str(work_dir))
+        if r.returncode != 0:
+            print(err("make_cfw.py failed"))
+            return False
+        print(ok("CFW built"))
 
-    proxy_proc = None
-    print(stage(2, "Starting TSS proxy (background)..."))
-    if DRY_RUN:
-        print(f"    {C.DIM}[dry-run] python3 {tss_proxy}{C.NC}")
-    else:
-        proxy_proc = subprocess.Popen(
-            ["python3", str(tss_proxy)],
-            cwd=str(work_dir),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        time.sleep(2)
-        if proxy_proc.poll() is not None:
-            print(warn(f"TSS proxy exited immediately (code {proxy_proc.returncode})"))
-            print(f"  {C.DIM}The restore will fail without it. Check that tss_proxy_server.py "
-                  f"runs in {work_dir}.{C.NC}")
-            log_utils.log_warn(f"tss proxy exited early (code {proxy_proc.returncode})",
-                               module="boot_chain")
-    print(ok("TSS proxy running"))
+        proxy_proc = None
+        print(stage(2, "Starting TSS proxy (background)..."))
+        if DRY_RUN:
+            print(f"    {C.DIM}[dry-run] python3 {tss_proxy}{C.NC}")
+        else:
+            proxy_proc = subprocess.Popen(
+                ["python3", str(tss_proxy)],
+                cwd=str(work_dir),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(2)
+            if proxy_proc.poll() is not None:
+                print(warn(f"TSS proxy exited immediately (code {proxy_proc.returncode})"))
+                print(f"  {C.DIM}The restore will fail without it. Check that tss_proxy_server.py "
+                      f"runs in {work_dir}.{C.NC}")
+                log_utils.log_warn(f"tss proxy exited early (code {proxy_proc.returncode})",
+                                   module="boot_chain")
+        print(ok("TSS proxy running"))
 
-    print(stage(3, "Restoring CFW (this takes 5-15 minutes)..."))
-    print(f"  {C.DIM}The device screen will show a progress bar.{C.NC}")
-    print(f"  {C.DIM}Wait until the script completes and device returns to recovery.{C.NC}")
+        print(stage(3, "Restoring CFW (this takes 5-15 minutes)..."))
+        print(f"  {C.DIM}The device screen will show a progress bar.{C.NC}")
+        print(f"  {C.DIM}Wait until the script completes and device returns to recovery.{C.NC}")
 
-    if not DRY_RUN:
-        try:
-            log_utils.log_info(f"restore start: {restore_sh} in {work_dir}", module="boot_chain")
-            r = subprocess.run(["bash", str(restore_sh)], cwd=str(work_dir))
-            if r.returncode != 0:
-                print(err(f"Restore failed (exit={r.returncode})"))
-                log_utils.log_error(f"restore_cfw.sh failed with exit {r.returncode}",
-                                    module="boot_chain")
-                return False
-        finally:
-            if proxy_proc and proxy_proc.poll() is None:
-                proxy_proc.terminate()
-                try:
-                    proxy_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proxy_proc.kill()
+        if not DRY_RUN:
+            try:
+                log_utils.log_info(f"restore start: {restore_sh} in {work_dir}", module="boot_chain")
+                r = subprocess.run(["bash", str(restore_sh)], cwd=str(work_dir))
+                if r.returncode != 0:
+                    print(err(f"Restore failed (exit={r.returncode})"))
+                    log_utils.log_error(f"restore_cfw.sh failed with exit {r.returncode}",
+                                        module="boot_chain")
+                    return False
+            finally:
+                if proxy_proc and proxy_proc.poll() is None:
+                    proxy_proc.terminate()
+                    try:
+                        proxy_proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proxy_proc.kill()
 
-    print(ok("Restore complete! Device is now on custom firmware."))
-    log_utils.log_info("restore finished", module="boot_chain")
-    return True
+        print(ok("Restore complete! Device is now on custom firmware."))
+        log_utils.log_info("restore finished", module="boot_chain")
+        return True
 
 
 def setup_usb_network(ssh_password: str = "alpine") -> bool:

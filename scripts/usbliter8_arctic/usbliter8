@@ -156,6 +156,7 @@ py_health()      { $PY -c "from hardware_guide import run_health_check; run_heal
 py_explain()     { $PY -c "from boot_chain import explain_usbliter8; explain_usbliter8()"; }
 py_deps()        { $PY deps.py "$@"; }
 py_ul8()         { $PY ul8.py "$@"; }        # the verb table in cli.py
+py_share()       { $PY share.py "$@"; }
 
 # ── Commands ───────────────────────────────────────────────────
 cmd_menu() { py_menu menu; }
@@ -201,6 +202,7 @@ cmd_pwn() {
 cmd_health() { py_health; }
 cmd_deps()   { py_deps "${@}"; }
 cmd_ul8()    { py_ul8 "${@}"; }
+cmd_share()  { py_share "${@}"; }
 
 cmd_offsets() {
     case "${1:-list}" in
@@ -322,6 +324,7 @@ cmd_help() {
     echo -e "  ${C_EYE}health${NC}         health check (board, tools, firmware, USB)"
     echo -e "  ${C_EYE}deps${NC}           check dependencies and offer to install what is missing"
     echo -e "  ${C_EYE}ul8${NC} <verb>     any verb from cli.py, straight through (e.g. ul8 coverage --json)"
+    echo -e "  ${C_EYE}share${NC}          send this device's verified data back (asks first)"
     echo -e "  ${C_EYE}offsets${NC}        list / validate / find / activate offset profiles"
     echo -e "  ${C_EYE}coverage${NC}       per-device profile status table"
     echo -e "  ${C_EYE}gaps${NC}           which profile sections still need offsets"
@@ -441,6 +444,7 @@ main() {
         offsets)               cmd_offsets "${args[@]}" ;;
         coverage)              cmd_coverage "${args[@]}" ;;
         ul8)                   cmd_ul8 "${args[@]}" ;;
+        share)                 cmd_share "${args[@]}" ;;
         gaps)                  cmd_gaps "${args[@]}" ;;
         preflight|verify)      cmd_preflight "${args[@]}" ;;
         audit)                 cmd_audit "${args[@]}" ;;

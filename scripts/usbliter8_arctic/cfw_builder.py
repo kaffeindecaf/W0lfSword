@@ -515,7 +515,6 @@ def _print_manifest() -> None:
     if not MANIFEST:
         return
     try:
-        import log_utils
         for sec, status, detail in MANIFEST:
             log_utils.log("WARN" if status in ("skipped", "mismatch", "failed", "partial")
                           else "INFO", f"manifest {sec}: {status} {detail}".strip(),
@@ -533,150 +532,149 @@ def _print_manifest() -> None:
 
 def build_cfw(ipsw_path: Path, offsets_path: Path) -> bool:
     """Full CFW build pipeline."""
-    if DRY_RUN:
-        print()
-        print(f"  {C.AMB}{'=' * 56}{C.NC}")
-        print(f"  {C.AMB}DRY RUN — no files will be modified{C.NC}")
-        print(f"  {C.AMB}{'=' * 56}{C.NC}")
-        print()
-
-    MANIFEST.clear()
-    with open(offsets_path) as f:
-        offsets = yaml.safe_load(f)
-
-    model = offsets.get("model", "unknown")
-    try:
-        import log_utils
-        log_utils.install()
-        log_utils.log_info(f"build start: {model} iOS {offsets.get('ios_version', '?')} "
-                           f"({offsets.get('build', '?')}) ipsw={ipsw_path} dry_run={DRY_RUN}",
-                           module="cfw_builder")
-    except Exception:                                        # noqa: BLE001
-        pass
-    ios = offsets.get("ios_version", "unknown")
-    device = offsets.get("device", "unknown")
-
-    print(section(f"Target: {device} ({model}) — iOS {ios}"))
-    print()
-
-    if not _profile_gate(offsets_path, ipsw_path):
-        return False
-
-    if not ipsw_path.exists():
-        print(err(f"IPSW not found: {ipsw_path}"))
-        return False
-
-    # Create working directory
-    work_dir = Path(tempfile.mkdtemp(prefix="usbliter8_cfw_"))
-    print(info(f"Work directory: {work_dir}"))
-
-    if DRY_RUN:
-        print()
-        print(f"  {C.SNOW}Would extract IPSW to:{C.NC} {work_dir}")
-        print()
-
-        # Simulate all patch steps
-        print(section("Patch Simulation"))
-        if ipsw_path.is_dir():
-            for kind in ("ibss", "ibec", "devicetree", "kernelcache", "restoreramdisk"):
-                path, _cands, _reason = components.find_component(ipsw_path, kind, offsets)
-                stem = components.component_stem(offsets, kind)
-                label = f"{C.DIM}{kind}{C.NC}"
-                if path is not None:
-                    print(f"    {C.GRN}✓{C.NC} {label}: {path.name}")
-                elif stem:
-                    print(f"    {C.AMB}—{C.NC} {label}: not found (expected {stem})")
-        rd_reason = ""
-        if ipsw_path.is_dir():
-            _rd, _cands, rd_reason = components.find_component(ipsw_path, "restoreramdisk",
-                                                            offsets)
-        blocked_names = {b.get("section") for b in device_offsets.blocked_sections_of(offsets)}
-        skipped = 0
-        for section_name in ["ibss", "ibec", "devicetree", "kernel", "restoreramdisk", "daemons"]:
-            section_data = offsets.get("patches", {}).get(section_name, {})
-            if section_name == "kernel" and isinstance(section_data, list):
-                for entry in section_data:
-                    if not isinstance(entry, dict):
-                        continue
-                    if entry.get("invalid_component") or section_name in blocked_names:
-                        skipped += 1
-                        continue
-                    print(f"    {C.DIM}[dry-run]{C.NC} {entry.get('name', '?')} @ 0x{entry.get('offset', 0):X} → {entry.get('value', '?')}")
-            elif isinstance(section_data, dict):
-                for name, entry in section_data.items():
-                    if isinstance(entry, dict) and "offset" in entry:
-                        if entry.get("pending"):
-                            skipped += 1
-                            continue
-                        if section_name == "restoreramdisk" and rd_reason == "modern-dmg-layout":
-                            skipped += 1
-                            continue
-                        print(f"    {C.DIM}[dry-run]{C.NC} {section_name}.{name} @ 0x{entry['offset']:X}")
-        print()
-        if skipped:
-            print(warn(f"{skipped} entry/entries would be SKIPPED (pending, invalid for "
-                       f"this device's component, or not appliable by this build path)"))
-        if blocked_names:
-            print(warn(f"blocked section(s): {', '.join(sorted(n for n in blocked_names if n))} "
-                       f"(see the profile's blockers:)"))
-        if rd_reason == "modern-dmg-layout":
-            print(warn("restore ramdisk is a bare .dmg: those offsets target "
-                       "restored_external/asr inside the mounted image"))
-        print(ok("Dry-run complete — all patches validated"))
-        shutil.rmtree(work_dir)
-        return True
-
-    # Extract IPSW (it's a ZIP)
-    ipsw_dir = Path(tempfile.mkdtemp(prefix="usbliter8_ipsw_"))
-    print(info(f"Extracting IPSW to {ipsw_dir}..."))
-    import zipfile
-    with zipfile.ZipFile(ipsw_path) as zf:
-        zf.extractall(ipsw_dir)
-    print(ok("IPSW extracted"))
-
-    # Run patches
-    try:
-        ok_patch = all([
-            patch_ibss(ipsw_dir, offsets, work_dir),
-            patch_ibec(ipsw_dir, offsets, work_dir),
-            patch_devicetree(ipsw_dir, offsets, work_dir),
-            patch_kernel(ipsw_dir, offsets, work_dir),
-            patch_restoreramdisk(ipsw_dir, offsets, work_dir),
-            patch_userland(ipsw_dir, offsets, work_dir),
-        ])
-    finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
-
-    _print_manifest()
-
-    try:
-        import log_utils
-        log_utils.log("INFO" if ok_patch else "ERROR",
-                      f"build {'finished' if ok_patch else 'FAILED'}: {model} -> {ipsw_dir}",
-                      module="cfw_builder")
-    except Exception:                                        # noqa: BLE001
-        pass
-
-    if ok_patch:
-        blocked = [m for m in MANIFEST if m[1] in ("skipped", "mismatch", "failed")]
-        print()
-        print(f"  {C.GRN}{'═' * 56}{C.NC}")
-        if blocked:
-            print(f"  {C.AMB}  Custom firmware built, {len(blocked)} section(s) NOT fully applied{C.NC}")
-        else:
-            print(f"  {C.GRN}  Custom firmware built successfully!{C.NC}")
-        print(f"  {C.GRN}  Patched IPSW at: {ipsw_dir}{C.NC}")
-        print(f"  {C.GRN}{'═' * 56}{C.NC}")
-        if blocked:
+    with log_utils.timed('build', 'build_cfw'):
+        if DRY_RUN:
             print()
-            print(warn("Do not restore this build blindly: the sections above were skipped "
-                       "or mismatched."))
+            print(f"  {C.AMB}{'=' * 56}{C.NC}")
+            print(f"  {C.AMB}DRY RUN — no files will be modified{C.NC}")
+            print(f"  {C.AMB}{'=' * 56}{C.NC}")
+            print()
+
+        MANIFEST.clear()
+        with open(offsets_path) as f:
+            offsets = yaml.safe_load(f)
+
+        model = offsets.get("model", "unknown")
+        try:
+            log_utils.install()
+            log_utils.log_info(f"build start: {model} iOS {offsets.get('ios_version', '?')} "
+                               f"({offsets.get('build', '?')}) ipsw={ipsw_path} dry_run={DRY_RUN}",
+                               module="cfw_builder")
+        except Exception:                                        # noqa: BLE001
+            pass
+        ios = offsets.get("ios_version", "unknown")
+        device = offsets.get("device", "unknown")
+
+        print(section(f"Target: {device} ({model}) — iOS {ios}"))
         print()
-        return True
-    else:
-        print()
-        print(err("CFW build had errors — check output above"))
-        return False
+
+        if not _profile_gate(offsets_path, ipsw_path):
+            return False
+
+        if not ipsw_path.exists():
+            print(err(f"IPSW not found: {ipsw_path}"))
+            return False
+
+        # Create working directory
+        work_dir = Path(tempfile.mkdtemp(prefix="usbliter8_cfw_"))
+        print(info(f"Work directory: {work_dir}"))
+
+        if DRY_RUN:
+            print()
+            print(f"  {C.SNOW}Would extract IPSW to:{C.NC} {work_dir}")
+            print()
+
+            # Simulate all patch steps
+            print(section("Patch Simulation"))
+            if ipsw_path.is_dir():
+                for kind in ("ibss", "ibec", "devicetree", "kernelcache", "restoreramdisk"):
+                    path, _cands, _reason = components.find_component(ipsw_path, kind, offsets)
+                    stem = components.component_stem(offsets, kind)
+                    label = f"{C.DIM}{kind}{C.NC}"
+                    if path is not None:
+                        print(f"    {C.GRN}✓{C.NC} {label}: {path.name}")
+                    elif stem:
+                        print(f"    {C.AMB}—{C.NC} {label}: not found (expected {stem})")
+            rd_reason = ""
+            if ipsw_path.is_dir():
+                _rd, _cands, rd_reason = components.find_component(ipsw_path, "restoreramdisk",
+                                                                offsets)
+            blocked_names = {b.get("section") for b in device_offsets.blocked_sections_of(offsets)}
+            skipped = 0
+            for section_name in ["ibss", "ibec", "devicetree", "kernel", "restoreramdisk", "daemons"]:
+                section_data = offsets.get("patches", {}).get(section_name, {})
+                if section_name == "kernel" and isinstance(section_data, list):
+                    for entry in section_data:
+                        if not isinstance(entry, dict):
+                            continue
+                        if entry.get("invalid_component") or section_name in blocked_names:
+                            skipped += 1
+                            continue
+                        print(f"    {C.DIM}[dry-run]{C.NC} {entry.get('name', '?')} @ 0x{entry.get('offset', 0):X} → {entry.get('value', '?')}")
+                elif isinstance(section_data, dict):
+                    for name, entry in section_data.items():
+                        if isinstance(entry, dict) and "offset" in entry:
+                            if entry.get("pending"):
+                                skipped += 1
+                                continue
+                            if section_name == "restoreramdisk" and rd_reason == "modern-dmg-layout":
+                                skipped += 1
+                                continue
+                            print(f"    {C.DIM}[dry-run]{C.NC} {section_name}.{name} @ 0x{entry['offset']:X}")
+            print()
+            if skipped:
+                print(warn(f"{skipped} entry/entries would be SKIPPED (pending, invalid for "
+                           f"this device's component, or not appliable by this build path)"))
+            if blocked_names:
+                print(warn(f"blocked section(s): {', '.join(sorted(n for n in blocked_names if n))} "
+                           f"(see the profile's blockers:)"))
+            if rd_reason == "modern-dmg-layout":
+                print(warn("restore ramdisk is a bare .dmg: those offsets target "
+                           "restored_external/asr inside the mounted image"))
+            print(ok("Dry-run complete — all patches validated"))
+            shutil.rmtree(work_dir)
+            return True
+
+        # Extract IPSW (it's a ZIP)
+        ipsw_dir = Path(tempfile.mkdtemp(prefix="usbliter8_ipsw_"))
+        print(info(f"Extracting IPSW to {ipsw_dir}..."))
+        import zipfile
+        with zipfile.ZipFile(ipsw_path) as zf:
+            zf.extractall(ipsw_dir)
+        print(ok("IPSW extracted"))
+
+        # Run patches
+        try:
+            ok_patch = all([
+                patch_ibss(ipsw_dir, offsets, work_dir),
+                patch_ibec(ipsw_dir, offsets, work_dir),
+                patch_devicetree(ipsw_dir, offsets, work_dir),
+                patch_kernel(ipsw_dir, offsets, work_dir),
+                patch_restoreramdisk(ipsw_dir, offsets, work_dir),
+                patch_userland(ipsw_dir, offsets, work_dir),
+            ])
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+        _print_manifest()
+
+        try:
+            log_utils.log("INFO" if ok_patch else "ERROR",
+                          f"build {'finished' if ok_patch else 'FAILED'}: {model} -> {ipsw_dir}",
+                          module="cfw_builder")
+        except Exception:                                        # noqa: BLE001
+            pass
+
+        if ok_patch:
+            blocked = [m for m in MANIFEST if m[1] in ("skipped", "mismatch", "failed")]
+            print()
+            print(f"  {C.GRN}{'═' * 56}{C.NC}")
+            if blocked:
+                print(f"  {C.AMB}  Custom firmware built, {len(blocked)} section(s) NOT fully applied{C.NC}")
+            else:
+                print(f"  {C.GRN}  Custom firmware built successfully!{C.NC}")
+            print(f"  {C.GRN}  Patched IPSW at: {ipsw_dir}{C.NC}")
+            print(f"  {C.GRN}{'═' * 56}{C.NC}")
+            if blocked:
+                print()
+                print(warn("Do not restore this build blindly: the sections above were skipped "
+                           "or mismatched."))
+            print()
+            return True
+        else:
+            print()
+            print(err("CFW build had errors — check output above"))
+            return False
 
 
 # ── CLI ──
@@ -686,7 +684,6 @@ def _cli() -> int:
     # the flags live at module level: without `global` these assignments would
     # only rebind locals and --force/--dry-run/--quiet would silently do nothing
     global FORCE, FORCE_COMPONENT, DRY_RUN, VERBOSE
-    import log_utils
     log_utils.install()          # usbliter8.log + unhandled-exception logging
     args = sys.argv[1:]
 
@@ -726,7 +723,6 @@ def _cli() -> int:
 
 
 if __name__ == "__main__":
-    import log_utils
 
     log_utils.install()          # usbliter8.log + clean exits
 

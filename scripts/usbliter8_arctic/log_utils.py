@@ -62,6 +62,10 @@ _state = {
     "failed": False,
     "announced": False,
     "explicit": False,
+    "started": 0.0,      # monotonic stamp of install(): for the run summary
+    "counts": {},        # level -> entries actually written this run
+    "timings": [],       # [(label, seconds, ok)] from timed(), slowest first
+    "exit_code": 0,      # set by guard(): the run summary reports it
 }
 
 _LEVEL_COLORS = {
@@ -143,24 +147,29 @@ def guard(func, *args, **kwargs) -> int:
     to the log, the screen gets one line plus where to find the details.
     """
     from colors import C, err, warn
+
+    def _done(code: int) -> int:
+        _state["exit_code"] = code
+        return code
+
     try:
         result = func(*args, **kwargs)
-        return int(result) if isinstance(result, int) else EXIT_OK
+        return _done(int(result) if isinstance(result, int) else EXIT_OK)
     except CleanExit as exc:
         if exc.message and exc.code != EXIT_OK:
-            log("INFO", f"stopping: {exc.message}", module="guard")
-        return exc.code
+            log("INFO", f"stopping: {exc.message}", module="guard", force=True)
+        return _done(exc.code)
     except KeyboardInterrupt:
         print()
         print(warn("Interrupted - nothing further was changed."))
-        log("INFO", "interrupted by user (Ctrl-C)", module="guard")
-        return EXIT_INTERRUPT
+        log("INFO", "interrupted by user (Ctrl-C)", module="guard", force=True)
+        return _done(EXIT_INTERRUPT)
     except BrokenPipeError:
         # piping into `head`/`less`: not an error, just close quietly
         log("DEBUG", "broken pipe (output closed early)", module="guard")
-        return EXIT_OK
+        return _done(EXIT_OK)
     except SystemExit as exc:
-        return int(exc.code or EXIT_OK)
+        return _done(int(exc.code or EXIT_OK))
     except Exception as exc:                                  # noqa: BLE001
         log("ERROR", "unhandled exception", exc=exc, module="guard")
         print()
@@ -172,7 +181,76 @@ def guard(func, *args, **kwargs) -> int:
             traceback.print_exception(type(exc), exc, exc.__traceback__)
         print(f"  {C.DIM}Nothing else was changed. Please report it with that log "
               f"entry.{C.NC}")
-        return EXIT_CRASH
+        return _done(EXIT_CRASH)
+
+
+def timed(module: str, label: str, *, level: str = "STEP"):
+    """Context manager: log `label` start/finish with the duration.
+
+    Long steps (a component fetch, a build, a restore) write a matching pair of
+    lines, so the log can answer "how long did that take, and did it finish".
+    Failures are recorded too: the duration is logged on the way out either way.
+    """
+    import time
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _timer():
+        started = time.monotonic()
+        log(level, f"{label}: start", module=module)
+        ok = False
+        try:
+            yield
+            ok = True
+        finally:
+            took = time.monotonic() - started
+            _state["timings"].append((f"{module}: {label}", took, ok))
+            log(level, f"{label}: {'done' if ok else 'failed'} in {took:.2f}s", module=module)
+
+    return _timer()
+
+
+def run_summary() -> dict:
+    """One line about this run: steps, warnings, errors, wall time.
+
+    Written when the process exits (see install()), so a log file always ends
+    with what the run cost, not just what it complained about.
+    """
+    import time
+
+    counts = _state.get("counts") or {}
+    timings = _state.get("timings") or []
+    started = _state.get("started") or 0.0
+    seconds = time.monotonic() - started if started else 0.0
+    summary = {
+        "steps": len(timings),
+        "slowest": max(timings, key=lambda item: item[1])[:2] if timings else None,
+        "seconds": round(seconds, 2),
+        "warn": counts.get("WARN", 0),
+        "error": counts.get("ERROR", 0) + counts.get("CRITICAL", 0),
+    }
+    summary["exit"] = _state.get("exit_code", 0)
+    # always: one line per run is what makes `logs --summary` able to show the
+    # exit code and duration of the last run, including a run that did nothing
+    log("INFO", f"run summary: {summary['steps']} step(s), {summary['warn']} warning(s), "
+                f"{summary['error']} error(s), {summary['seconds']:.1f}s, "
+                f"exit {summary['exit']}"
+                + (f", slowest {summary['slowest'][0]} {summary['slowest'][1]:.1f}s"
+                   if summary["slowest"] else ""), module="summary", force=True)
+    return summary
+
+
+def _reset_run_counters() -> None:
+    import time
+    _state["started"] = time.monotonic()
+    _state["counts"] = {}
+    _state["timings"] = []
+    _state["exit_code"] = 0        # a fresh run starts with no result yet
+
+
+def run_timings() -> list[tuple[str, float, bool]]:
+    """This run's recorded steps, slowest first (used by tests and logs --slow)."""
+    return sorted(_state.get("timings") or [], key=lambda item: item[1], reverse=True)
 
 
 def _under_pytest() -> bool:
@@ -263,12 +341,18 @@ def _write(line: str) -> None:
             sys.stderr.write(f"  [log] cannot write {path}: {exc} (logging disabled)\n")
 
 
-def log(level: str, msg: str, *, module: str = "", exc: BaseException | None = None) -> str | None:
-    """Write one entry. Returns the line written, or None when filtered out."""
+def log(level: str, msg: str, *, module: str = "", exc: BaseException | None = None,
+        force: bool = False) -> str | None:
+    """Write one entry. Returns the line written, or None when filtered out.
+
+    `force` is for bookkeeping the log must always contain (the session header
+    and the run summary): without it, a WARN-level log would lose the very lines
+    that make `logs --summary` able to say what a run cost.
+    """
     level = normalize_level(level)
     if not is_enabled():
         return None
-    if LEVELS[level] < LEVELS[normalize_level(_state["level"])]:
+    if not force and LEVELS[level] < LEVELS[normalize_level(_state["level"])]:
         return None
 
     if not module:
@@ -283,6 +367,7 @@ def log(level: str, msg: str, *, module: str = "", exc: BaseException | None = N
                 lines.append(f"    {piece}")
     payload = "\n".join(lines) + "\n"
     _write(payload)
+    _state["counts"][level] = _state["counts"].get(level, 0) + 1
     return payload
 
 
@@ -299,15 +384,16 @@ def session_header(argv: list[str] | None = None, *, note: str = "") -> None:
             build = version_module.describe()
         except Exception:                                      # noqa: BLE001
             build = ""
-        log("INFO", "-" * 72, module="log_utils")
-        log("INFO", f"usbliter8-arctic run start {build}".strip(), module="log_utils")
-        log("INFO", f"argv: {' '.join(argv if argv is not None else sys.argv)}", module="log_utils")
-        log("INFO", f"cwd: {here}  user: {os.environ.get('USER', '?')}", module="log_utils")
+        log("INFO", "-" * 72, module="log_utils", force=True)
+        log("INFO", f"usbliter8-arctic run start {build}".strip(), module="log_utils", force=True)
+        log("INFO", f"argv: {' '.join(argv if argv is not None else sys.argv)}", module="log_utils",
+            force=True)
+        log("INFO", f"cwd: {here}  user: {os.environ.get('USER', '?')}", module="log_utils", force=True)
         log("INFO", f"python {platform.python_version()} on {platform.platform()} "
                     f"({datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')})",
-            module="log_utils")
+            module="log_utils", force=True)
         if note:
-            log("INFO", note, module="log_utils")
+            log("INFO", note, module="log_utils", force=True)
     except Exception:                                        # noqa: BLE001 - logging must not raise
         pass
 
@@ -331,9 +417,13 @@ def record_display(level: str, msg: str) -> None:
 def install(level: str = "", path: Path | str | None = None) -> None:
     """Hook unhandled exceptions and start the log with a session header."""
     configure(path=path, level=level)
+    _reset_run_counters()
     if _state["installed"]:
         return
     _state["installed"] = True
+
+    import atexit
+    atexit.register(run_summary)      # every run ends with what it cost
 
     def _hook(exc_type, exc, tb):
         if issubclass(exc_type, KeyboardInterrupt):
@@ -522,6 +612,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--path", action="store_true", help="print the log path and exit")
     ap.add_argument("--clear", action="store_true", help="delete the log (and backups)")
     ap.add_argument("--json", action="store_true", help="machine-readable summary + entries")
+    ap.add_argument("--summary", action="store_true",
+                    help="what the recent runs cost: counts per level, durations, slow steps")
+    ap.add_argument("--slow", type=int, default=0, metavar="N",
+                    help="the N slowest logged steps (pairs with --summary)")
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
     target = log_path()
@@ -540,6 +634,9 @@ def main(argv: list[str] | None = None) -> int:
     stats = log_stats(target)
     lines = read_log(target, tail=args.tail, min_level=args.level,
                      since=args.since, grep=args.grep)
+
+    if args.summary:
+        return _print_summary(target, stats, args.json, args.slow)
 
     if args.json:
         print(json.dumps({**stats, "shown": len(lines), "lines": lines}, indent=2))
@@ -565,6 +662,110 @@ def main(argv: list[str] | None = None) -> int:
         level = line.split("] [", 1)[1].split("]", 1)[0].strip() if line.startswith("[") and "] [" in line else ""
         color = _LEVEL_COLORS.get(level, "")
         print(f"  {color}{level:<8}{C.NC} {line}" if level else f"  {C.DIM}{line}{C.NC}")
+    return 0
+
+
+def run_history(path: Path | str | None = None, limit: int = 5) -> list[dict]:
+    """The most recent runs as recorded in the log (newest first).
+
+    Each entry: start/finish stamps, duration when a summary line exists, and
+    the level counts between those two markers.
+    """
+    target = Path(path) if path else log_path()
+    if not target.exists():
+        return []
+    runs: list[dict] = []
+    current: dict | None = None
+    with open(target, encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            line = raw.rstrip("\n")
+            if "run start" in line and "[" in line:
+                current = {"start": line[1:20], "finish": "", "levels": {},
+                           "summary": ""}
+                runs.append(current)
+                continue
+            if current is None:
+                continue
+            if "run summary:" in line:
+                current["finish"] = line[1:20]
+                current["summary"] = line.split("run summary:", 1)[1].strip()
+                continue
+            if line.startswith("[") and "] [" in line:
+                level = line.split("] [", 1)[1].split("]", 1)[0].strip()
+                current["levels"][level] = current["levels"].get(level, 0) + 1
+    return list(reversed(runs))[:limit]
+
+
+def slow_steps(path: Path | str | None = None, limit: int = 10) -> list[tuple[str, float]]:
+    """Steps slowest-first, parsed from the `label: done in Xs` lines."""
+    import re as _re
+    target = Path(path) if path else log_path()
+    if not target.exists():
+        return []
+    # anchor on the entry prefix: [stamp] [LEVEL   ] [module] label: done in 1.2s
+    pattern = _re.compile(
+        r"^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\] \[[A-Z ]+\] "
+        r"\[(?P<mod>[^\]]+)\] (?P<label>.+?): (?:done|failed) in (?P<secs>[0-9.]+)s")
+    summary_pattern = _re.compile(r"run summary: .*?slowest (?P<label>.+?) (?P<secs>[0-9.]+)s")
+    found: list[tuple[str, float]] = []
+    with open(target, encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            m = pattern.search(raw)
+            if m:
+                found.append((f"{m.group('mod')}: {m.group('label')}", float(m.group("secs"))))
+                continue
+            m = summary_pattern.search(raw)          # WARN level: only the slowest
+            if m:
+                found.append((m.group("label"), float(m.group("secs"))))
+    return sorted(found, key=lambda item: item[1], reverse=True)[:limit]
+
+
+def _print_summary(target: Path, stats: dict, as_json: bool, slow: int) -> int:
+    """`logs --summary`: what the recent runs cost, no raw entries."""
+    import json
+
+    history = run_history(target)
+    steps = slow_steps(target, limit=slow or 5)
+    if as_json:
+        print(json.dumps({"path": str(target), **stats, "runs": history,
+                          "slowest": steps}, indent=2))
+        return 0
+
+    from colors import C
+    if not stats["exists"]:
+        print(f"  {C.AMB}⚠{C.NC} no log yet at {target}")
+        return 0
+
+    print(f"\n  {C.FROST}{C.B}log summary{C.NC}  {C.DIM}{target}{C.NC}")
+    print(f"  {C.DIM}{stats['bytes']:,} bytes · {stats['entries']} entries · "
+          f"{stats['first']} → {stats['last']}{C.NC}")
+    counts = "  ".join(f"{lvl}:{n}" for lvl, n in sorted(stats["levels"].items()))
+    if counts:
+        print(f"  {C.DIM}{counts}{C.NC}")
+    print()
+
+    finished = [run for run in history if run["summary"]]
+    unfinished = len(history) - len(finished)
+    if finished:
+        print(f"  {C.SNOW}recent runs{C.NC}")
+        for run in finished:
+            warn = run["levels"].get("WARN", 0)
+            error = run["levels"].get("ERROR", 0) + run["levels"].get("CRITICAL", 0)
+            tint = C.RED if error else (C.AMB if warn else C.GRN)
+            print(f"    {C.DIM}{run['start']}{C.NC}  {tint}{error} err · "
+                  f"{warn} warn{C.NC}  {C.DIM}{run['summary']}{C.NC}")
+    else:
+        print(f"  {C.DIM}no completed runs recorded yet{C.NC}")
+    if unfinished:
+        print(f"    {C.DIM}{unfinished} run(s) without a summary "
+              f"(killed, or a reader like this one){C.NC}")
+
+    if steps:
+        print()
+        print(f"  {C.SNOW}slowest steps{C.NC}")
+        for label, secs in steps:
+            print(f"    {C.EYE}{secs:8.2f}s{C.NC}  {label}")
+    print()
     return 0
 
 

@@ -266,3 +266,33 @@ def test_git_files_falls_back_to_walking_a_plain_tree(fake_repo):
     found = safety_check.git_files()
     assert "a.py" in found
     assert any(f.endswith("b.yaml") for f in found)
+
+
+def test_shadowed_import_check_catches_a_late_local_import(tmp_path, monkeypatch):
+    """A function-local import used earlier in the same function is a crash."""
+    fake = tmp_path / "late.py"
+    fake.write_text(
+        "import log_utils\n"
+        "\n"
+        "def run():\n"
+        "    with log_utils.timed('x', 'y'):\n"
+        "        pass\n"
+        "    import log_utils\n"
+        "    return log_utils.EXIT_OK\n"
+    )
+    monkeypatch.setattr(safety_check, "ROOT", tmp_path)
+    monkeypatch.setattr(safety_check, "read", lambda rel: fake.read_text())
+    problems = safety_check.check_shadowed_imports(["late.py"])
+    assert problems and "UnboundLocalError" in problems[0]
+
+
+def test_shadowed_import_check_allows_ordinary_lazy_imports(tmp_path, monkeypatch):
+    """A lazy import used only after the import line stays legal."""
+    fake = tmp_path / "lazy.py"
+    fake.write_text(
+        "def run():\n"
+        "    import json\n"
+        "    return json.dumps({'ok': True})\n"
+    )
+    monkeypatch.setattr(safety_check, "read", lambda rel: fake.read_text())
+    assert safety_check.check_shadowed_imports(["lazy.py"]) == []

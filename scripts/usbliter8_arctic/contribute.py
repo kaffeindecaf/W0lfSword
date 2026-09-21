@@ -253,6 +253,7 @@ def usage() -> None:
     print(f"    {C.EYE}new{C.NC}     <model> <ios> [build]   create a profile")
     print(f"    {C.EYE}status{C.NC}                         list profiles + status")
     print(f"    {C.EYE}pr{C.NC}      <file>                  generate PR description + git commands")
+    print(f"    {C.EYE}share{C.NC}     [status|preview|send|on|off]  send this device's data back")
     print()
 
 
@@ -270,6 +271,9 @@ def cli(argv: list[str] | None = None) -> int:
         return cmd_status() or log_utils.EXIT_OK
     if cmd == "pr":
         return cmd_pr(args) or log_utils.EXIT_OK
+    if cmd == "share":
+        import share
+        return share.cli(args)
 
     print(err(f"Unknown command: {cmd}"))
     usage()

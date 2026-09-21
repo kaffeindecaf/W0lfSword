@@ -152,6 +152,11 @@ def _deps(profile: str, extra: list[str]) -> int:
     return 0 if deps.install_dependencies() else log_utils.EXIT_ERROR
 
 
+def _share(profile: str, extra: list[str]) -> int:
+    import share
+    return share.cli(([profile] if profile else []) + extra) or 0
+
+
 def _logs(profile: str, extra: list[str]) -> int:
     return log_utils.main(_argv_after("logs")) or 0
 
@@ -189,6 +194,7 @@ VERBS: dict[str, tuple[str, Handler]] = {
     "explain": ("explain the exploit chain step by step", _explain),
     "contribute": ("contribute an offset profile (new/status/pr)", _contribute),
     "deps": ("check dependencies and offer to install what is missing", _deps),
+    "share": ("send this device's verified data back (status/preview/send)", _share),
     "logs": ("read usbliter8.log (--tail/--level/--grep/--json)", _logs),
     "version": ("print version, commit and python", _version),
 }

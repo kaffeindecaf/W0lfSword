@@ -2,7 +2,7 @@
 
 The usbliter8 tethered jailbreak, wrapped in something you can actually operate. One TUI walks the whole chain, offsets live in validated YAML profiles, and nothing gets flashed before the profile has been checked against the real firmware bytes.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-305%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-338%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 Upstream usbliter8 is a folder of shell scripts and offsets you edit by hand. One wrong number and the device panics on boot. This repo keeps the same exploit (rav000's RP2350 firmware) and rebuilds the parts that hurt:
 
@@ -236,12 +236,15 @@ Each entry is classified: `match` (the recorded original bytes are there), `plau
 Profiles are only as good as the artefact they came from, so the repo can re-derive and re-check them.
 
 - `fetch_components.py` pulls iBSS/iBEC/TXM/DeviceTree/kernelcache out of any IPSW on Apple's CDN with HTTP range requests (`kczip.py`, ported from W0lfSword), so discovering offsets does not need a 6 GB download. `--list` shows matching entries, `--extract-payload` unwraps the im4p with `img4wrap.py` (or pyimg4 when installed).
+
+  `--profile` is the one-command version: device, build and the component list come from the profile, the output lands in the directory preflight looks in, and the last line tells you the preflight command to run. Components already on disk are skipped (`--refresh` re-downloads), several can come down at once (`--jobs 4`), and every fetch is checked against the recorded evidence, so "3 components, all matching the committed profile" is something you read, not something you assume. Each run writes `provenance.json` next to the components (entry name, size, sha256 of the file and of the payload, evidence verdict).
 - `source_audit.py` parses an upstream `make_cfw.py` (wh1te4ever or 34306) or a Liter8 fixture set and diffs it against a profile byte by byte: `COVERED`, `PARTIAL`, `MISMATCH`, `REVIEW` (PC-relative sites such as adrp/add redirects are not comparable across builds), `MISSING`, `PROFILE-ONLY`. Reports land in `research/work/`.
 - `liter8_import.py` maps Liter8's reviewed fixture oracles onto our entry names, refuses anything whose payload is not our canonical patch, marks the rest `pending`, and with `--verify-components` re-checks every mapped site against the real binary before writing.
 - `profile_gen.py gaps` prints the per-section matrix and flags profiles whose kernel section came from a board with a different kernelcache component.
 
 ```bash
-python3 fetch_components.py --device iPhone12,3 --ios 27.0b3 --build 24A5380h --extract-payload
+python3 fetch_components.py --profile offsets/iPhone12,3_27.0b3.yaml        # everything it needs
+python3 fetch_components.py --device iPhone12,3 --build 24A5380h --all --jobs 4
 python3 source_audit.py script <usbliter8-fun>/work-27.0b3/make_cfw.py offsets/iPhone12,3_27.0b3.yaml
 python3 liter8_import.py --fixtures Liter8/fixtures --build 24A435 --board n104ap \
     --model iPhone12,1 --ios 27.0 --verify-components research/extracted/iPhone121_27.0_24A437 --write
@@ -261,6 +264,36 @@ Auditing the iPhone 11 Pro profiles against the upstream scripts and the real b2
 
 `kernel.Kernel identity string 1/2` (the `/RELEASE_ARM64_T8030` to `/PATCHED_ARM64_T8030` rename both upstream projects do) was missing entirely and is now part of the kernel section, and `cfw_builder.py` writes ASCII payloads for string patches as well as hex.
 
+## Sending data back
+
+When offsets actually get verified (guided setup finished, the device answers over SSH after a boot, or `preflight --record` wrote evidence) the toolkit asks one question:
+
+```
+  Send this back?
+    profile: iPhone12,1_27.0.yaml (45 entries, not committed yet)
+    device: iPhone 11 iPhone12,1 iOS 27.0 (24A437)
+    components: ibec, ibss, txm (sizes + sha256)
+    verification: review (16 match, 0 changed)
+    environment: Linux / python 3.13.5 / usbliter8 0.2.0-beta
+    log: last 25 warning/error line(s)
+    redacted: 5 identifier(s) (/home/<user>)
+    no UDID, serial, ECID, username, hostname or local path leaves the machine
+
+  Send this to kaffeindecaf/usbliter8-arctic as an issue? [y/N/never]:
+```
+
+Nothing is sent without that yes. `never` is remembered, `./usbliter8 share on` turns it back on, and `UL8_NO_SHARE=1` skips it for one run. Without a terminal it does not prompt at all: it says which command would send it and moves on. Offsets are what make the next person's install work first try, so the bundle is the useful part: device and board, the profile and its entry count, component sha256 values, the verification counts, your OS and the toolkit version, and the recent warnings. Identifiers are replaced with `<redacted-*>` before anything is shown or sent.
+
+```bash
+./usbliter8 share status      # on or off, destination, what was sent last
+./usbliter8 share preview     # build the bundle, print exactly what would go
+./usbliter8 share send        # ask, then open the issue
+./usbliter8 share off         # never ask again
+python3 share.py preview --json   # the raw bundle, for scripting
+```
+
+It goes out as an issue on the project repo (via `gh`, if it is installed and logged in). Without `gh` the bundle lands in `contribute/inbox/` and you get the link to attach it to by hand. That is the same information as `./usbliter8 contribute pr`, just without needing a profile someone else can already build.
+
 ## CLI usage
 
 Every verb works through any entry point. `ul8.py <verb>` is the shortest one, and modules can still be run directly when you only want that piece.
@@ -270,6 +303,8 @@ python3 ul8.py menu                                   # the TUI (default with no
 
 python3 ul8.py logs --tail 20 --level ERROR           # what went wrong, from usbliter8.log
 python3 ul8.py logs --grep ipad12p --json             # machine-readable
+python3 ul8.py logs --summary                         # what recent runs cost, slowest steps
+python3 ul8.py share preview                          # what would be sent back, scrubbed
 
 python3 device_offsets.py list                        # available offset profiles
 python3 device_offsets.py validate offsets/iPhone12,3_27.0b2.yaml
@@ -314,8 +349,11 @@ In practice: a crash prints `Something went wrong: <type>: <message>` plus the l
 
 Every error and warning that reaches the screen is appended to `usbliter8.log` in the repo root, tagged with the module and line that produced it. The file is gitignored, capped at 2 MB and rotated to `.1`, `.2`, `.3`.
 
+Every run ends with one line in the log saying what it cost (steps, warnings, errors, wall time, exit code), so `python3 ul8.py logs --summary` can show the recent runs and the slowest steps without reading the raw entries.
+
 ```bash
 python3 ul8.py logs                            # header plus the last 60 entries
+python3 ul8.py logs --summary                  # recent runs, durations, slowest steps
 python3 ul8.py logs --since 2026-09-21T14 --grep sandbox
 python3 ul8.py logs --path                     # just the file path
 python3 ul8.py logs --json | python3 -m json.tool
@@ -362,7 +400,8 @@ usbliter8-arctic/
 ├── cli.py                # the verb table: one dispatcher for every subcommand
 ├── main.py               # TUI: banner, menu, build/flash/boot flows
 ├── ul8.py                # standalone launcher (shim around cli.py)
-├── contribute.py         # offset contribution helper (new/status/pr)
+├── contribute.py         # offset contribution helper (new/status/pr/share)
+├── share.py              # the ask-before-sending flow (bundles, scrubs, opens an issue)
 ├── toolchain.py          # bundled tool paths (Mach-O aware) + command runner
 ├── boot_chain.py         # boot / restore / SSH / post-boot utilities
 ├── cfw_builder.py        # CFW patching pipeline (per-section patch manifest)
@@ -427,6 +466,8 @@ The wizard asks for the model and iOS version, creates the profile from the temp
 | `deps` says a package is missing but `pip list` shows it | different interpreter: the line above the packages says which Python is in use |
 | `deps` reports `libusb-1.0 missing` on Linux | install it (`sudo apt install libusb-1.0-0`) and run `sudo ldconfig` |
 | a prompt vanished or said "input ended" | stdin is not a terminal (piped or CI). Prompts that could erase the device stop instead of assuming an answer |
+| a "Send this back?" prompt in a script or CI | it must not appear: `UL8_NO_SHARE=1` (or `share off`) disables it, and it never prompts without a terminal |
+| `logs --summary` shows a run with no summary | that run was killed, or it is the reader itself: the summary is written when the process exits |
 | offsets look unchanged but the device panics | kernel offsets are per `kernelcache.release.*` component. `python3 profile_gen.py gaps` shows a profile whose kernel section came from another board |
 
 ## Warnings

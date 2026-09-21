@@ -310,3 +310,123 @@ def test_retry_loops_then_succeeds(isolated_log):
     assert flaky() == "ok"
     assert attempts["n"] == 3
     assert "attempt 1/3 failed" in isolated_log.read_text()
+
+
+# ── step timings and the run summary ────────────────────────────────
+
+def test_timed_logs_a_start_and_finish_pair(tmp_path):
+    import log_utils
+    log_utils.configure(path=tmp_path / "t.log", level="STEP", enabled=True)
+    log_utils._reset_run_counters()
+
+    with log_utils.timed("fetch", "ibss"):
+        pass
+
+    body = (tmp_path / "t.log").read_text()
+    assert "[fetch] ibss: start" in body
+    assert "ibss: done in" in body
+    assert "s" in body.split("ibss: done in")[1][:8]
+    log_utils.configure(path=log_utils.DEFAULT_LOG_FILE, level="WARN", enabled=True)
+    log_utils._state["explicit"] = False
+
+
+def test_timed_records_failures_and_reraises(tmp_path):
+    import log_utils
+    log_utils.configure(path=tmp_path / "t.log", level="STEP", enabled=True)
+    log_utils._reset_run_counters()
+
+    with pytest.raises(RuntimeError):
+        with log_utils.timed("build", "patch"):
+            raise RuntimeError("nope")
+
+    timings = log_utils.run_timings()
+    assert timings and timings[0][0] == "build: patch" and timings[0][2] is False
+    assert "patch: failed in" in (tmp_path / "t.log").read_text()
+    log_utils.configure(path=log_utils.DEFAULT_LOG_FILE, level="WARN", enabled=True)
+    log_utils._state["explicit"] = False
+
+
+def test_run_summary_counts_and_exit_code(tmp_path, monkeypatch):
+    import log_utils
+    log_utils.configure(path=tmp_path / "t.log", level="WARN", enabled=True)
+    log_utils.install(path=tmp_path / "t.log", level="WARN")
+    log_utils._state["installed"] = False
+
+    log_utils.log_warn("something to report", module="t")
+    log_utils.log_error("something broke", module="t")
+    with log_utils.timed("step", "work"):
+        pass
+    summary = log_utils.run_summary()
+
+    assert summary["warn"] == 1 and summary["error"] == 1 and summary["steps"] == 1
+    assert summary["exit"] == 0
+    body = (tmp_path / "t.log").read_text()
+    assert "run summary:" in body and "1 warning(s)" in body and "exit 0" in body
+
+    log_utils._state["exit_code"] = 2
+    assert log_utils.run_summary()["exit"] == 2
+    log_utils.configure(path=log_utils.DEFAULT_LOG_FILE, level="WARN", enabled=True)
+    log_utils._state["explicit"] = False
+    log_utils._state["installed"] = False
+
+
+def test_bookkeeping_lines_survive_a_warn_level(tmp_path):
+    """The header and the summary are bookkeeping: a WARN filter must keep them."""
+    import log_utils
+    log_utils.configure(path=tmp_path / "t.log", level="WARN", enabled=True)
+    log_utils._state["installed"] = False
+    log_utils._state["counts"] = {}
+    log_utils.install(path=tmp_path / "t.log", level="WARN")
+    log_utils.run_summary()
+
+    body = (tmp_path / "t.log").read_text()
+    assert "run start" in body                       # forced INFO despite level=WARN
+    assert "run summary:" in body
+    log_utils.configure(path=log_utils.DEFAULT_LOG_FILE, level="WARN", enabled=True)
+    log_utils._state["explicit"] = False
+    log_utils._state["installed"] = False
+
+
+def test_run_history_and_slow_steps_parse_the_log(tmp_path):
+    import log_utils
+    log_utils.configure(path=tmp_path / "t.log", level="STEP", enabled=True)
+    log_utils._state["installed"] = False
+    log_utils._state["counts"] = {}
+    log_utils.install(path=tmp_path / "t.log", level="STEP")
+    with log_utils.timed("fetch", "kernelcache"):
+        pass
+    log_utils.log_warn("a warning", module="t")
+    log_utils.run_summary()
+
+    runs = log_utils.run_history(tmp_path / "t.log")
+    assert runs and runs[0]["summary"]
+    assert runs[0]["levels"].get("WARN") == 1
+    steps = log_utils.slow_steps(tmp_path / "t.log")
+    assert steps and steps[0][0] == "fetch: kernelcache"
+    log_utils.configure(path=log_utils.DEFAULT_LOG_FILE, level="WARN", enabled=True)
+    log_utils._state["explicit"] = False
+    log_utils._state["installed"] = False
+
+
+def test_logs_summary_cli(tmp_path, capsys, monkeypatch):
+    import log_utils
+    log_utils.configure(path=tmp_path / "t.log", level="STEP", enabled=True)
+    log_utils._state["installed"] = False
+    log_utils._state["counts"] = {}
+    log_utils.install(path=tmp_path / "t.log", level="STEP")
+    with log_utils.timed("fetch", "ibss"):
+        pass
+    log_utils.run_summary()
+    monkeypatch.setattr(log_utils, "log_path", lambda *a, **k: tmp_path / "t.log")
+
+    assert log_utils.main(["--summary"]) == 0
+    out = capsys.readouterr().out
+    assert "log summary" in out and "recent runs" in out and "slowest steps" in out
+    assert "fetch: ibss" in out                       # the step that ran
+
+    assert log_utils.main(["--summary", "--json"]) == 0
+    payload = __import__("json").loads(capsys.readouterr().out)
+    assert payload["runs"] and payload["slowest"]
+    log_utils.configure(path=log_utils.DEFAULT_LOG_FILE, level="WARN", enabled=True)
+    log_utils._state["explicit"] = False
+    log_utils._state["installed"] = False

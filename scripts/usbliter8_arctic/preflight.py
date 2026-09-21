@@ -44,10 +44,10 @@ from pathlib import Path
 
 import yaml
 
+import log_utils
 from colors import C, err, info, ok, section, warn
 from device_offsets import _hex_to_bytes, pending_entries, validate_offsets
 from profile_gen import DEVICE_DB
-import log_utils
 
 ROOT = Path(__file__).parent
 OFFSETS_DIR = ROOT / "offsets"
@@ -404,81 +404,81 @@ def _value_len(value) -> int:
 def run_preflight(profile_path: Path, *, components: Path | None = None,
                   ipsw: Path | None = None, url: str = "", fetch: bool = False,
                   device: str = "", record: bool = False) -> Report:
-    profile = yaml.safe_load(profile_path.read_text()) or {}
-    report = Report(profile=profile_path.name,
-                    model=str(profile.get("model", "")),
-                    ios=str(profile.get("ios_version", "")),
-                    build=str(profile.get("build", "")))
+    with log_utils.timed('preflight', 'run_preflight'):
+        profile = yaml.safe_load(profile_path.read_text()) or {}
+        report = Report(profile=profile_path.name,
+                        model=str(profile.get("model", "")),
+                        ios=str(profile.get("ios_version", "")),
+                        build=str(profile.get("build", "")))
 
-    passed, failed, errors = validate_offsets(profile_path)
-    report.profile_errors = list(errors) if failed else []
-    report.pending = pending_entries(profile_path)
-    report.structure = structure_checks(profile)
+        passed, failed, errors = validate_offsets(profile_path)
+        report.profile_errors = list(errors) if failed else []
+        report.pending = pending_entries(profile_path)
+        report.structure = structure_checks(profile)
 
-    # a local IPSW is a complete source: do not go to the network behind the
-    # user's back (offline builds matter, and the fetch writes into research/)
-    comp_dir = components
-    raw_components: dict = {}
-    if fetch or url:
-        model = report.model or device
-        raw_components, fetched_dir = fetch_components_for(profile, model, url)
-        if fetched_dir:
-            comp_dir = fetched_dir
-        if not raw_components:
-            report.profile_errors.append("no components fetched")
-    elif comp_dir is None and ipsw is None:
-        comp_dir = discovered_component_dir(profile)
-    if comp_dir is not None and not comp_dir.is_dir():
-        comp_dir = None
+        # a local IPSW is a complete source: do not go to the network behind the
+        # user's back (offline builds matter, and the fetch writes into research/)
+        comp_dir = components
+        raw_components: dict = {}
+        if fetch or url:
+            model = report.model or device
+            raw_components, fetched_dir = fetch_components_for(profile, model, url)
+            if fetched_dir:
+                comp_dir = fetched_dir
+            if not raw_components:
+                report.profile_errors.append("no components fetched")
+        elif comp_dir is None and ipsw is None:
+            comp_dir = discovered_component_dir(profile)
+        if comp_dir is not None and not comp_dir.is_dir():
+            comp_dir = None
 
-    decode_notes: dict[str, str] = {}
-    raw_by_section: dict[str, tuple[str, bytes]] = {}
-    if comp_dir:
-        raw_by_section, decode_notes = read_component_dir(comp_dir)
-    if ipsw is not None:
-        ipsw_components, ipsw_notes = read_components_from_ipsw(ipsw, profile)
-        raw_by_section.update(ipsw_components)
-        decode_notes.update(ipsw_notes)
+        decode_notes: dict[str, str] = {}
+        raw_by_section: dict[str, tuple[str, bytes]] = {}
+        if comp_dir:
+            raw_by_section, decode_notes = read_component_dir(comp_dir)
+        if ipsw is not None:
+            ipsw_components, ipsw_notes = read_components_from_ipsw(ipsw, profile)
+            raw_by_section.update(ipsw_components)
+            decode_notes.update(ipsw_notes)
 
-    ident_errors, ident_notes = component_identity(comp_dir, profile)
-    report.profile_errors += ident_errors
-    report.structure += ident_notes
+        ident_errors, ident_notes = component_identity(comp_dir, profile)
+        report.profile_errors += ident_errors
+        report.structure += ident_notes
 
-    recorded = load_evidence(profile_path).get("entries", {})
+        recorded = load_evidence(profile_path).get("entries", {})
 
-    for sec_name, data in profile.get("patches", {}).items():
-        label = SECTION_COMPONENT.get(sec_name, (sec_name, sec_name, "unknown component"))[1]
-        raw_entry = raw_by_section.get(sec_name)
-        if raw_entry is None:
-            note = decode_notes.get(sec_name) or SECTION_COMPONENT.get(
-                sec_name, ("", "", "no component"))[2]
-            report.sites.append(Site(sec_name, "*", 0, "skipped",
-                                     f"no usable {label} to check ({note})"))
-            continue
-        comp_path, raw = raw_entry
-        report.components[sec_name] = {"path": comp_path, "size": len(raw)}
-        for name, entry in _iter_entries(sec_name, data):
-            site = check_site(sec_name, name, entry, raw,
-                              recorded.get(f"{sec_name}.{name}"), label)
-            report.sites.append(site)
+        for sec_name, data in profile.get("patches", {}).items():
+            label = SECTION_COMPONENT.get(sec_name, (sec_name, sec_name, "unknown component"))[1]
+            raw_entry = raw_by_section.get(sec_name)
+            if raw_entry is None:
+                note = decode_notes.get(sec_name) or SECTION_COMPONENT.get(
+                    sec_name, ("", "", "no component"))[2]
+                report.sites.append(Site(sec_name, "*", 0, "skipped",
+                                         f"no usable {label} to check ({note})"))
+                continue
+            comp_path, raw = raw_entry
+            report.components[sec_name] = {"path": comp_path, "size": len(raw)}
+            for name, entry in _iter_entries(sec_name, data):
+                site = check_site(sec_name, name, entry, raw,
+                                  recorded.get(f"{sec_name}.{name}"), label)
+                report.sites.append(site)
 
-    if record:
-        write_evidence(profile_path, profile, report, raw_by_section)
+        if record:
+            write_evidence(profile_path, profile, report, raw_by_section)
 
-    try:
-        import log_utils
-        log_utils.log("ERROR" if report.verdict == "blocked"
-                      else "WARN" if report.verdict == "review" else "INFO",
-                      f"preflight {profile_path.name}: {report.verdict} "
-                      f"({report.count('match', 'plausible')} checked, "
-                      f"{report.count('fail')} bad, {report.pending} pending)", module="preflight")
-        for site in report.sites:
-            if site.severity == "fail":
-                log_utils.log_warn(f"preflight {site.section}.{site.entry}: {site.detail}",
-                                   module="preflight")
-    except Exception:                                        # noqa: BLE001
-        pass
-    return report
+        try:
+            log_utils.log("ERROR" if report.verdict == "blocked"
+                          else "WARN" if report.verdict == "review" else "INFO",
+                          f"preflight {profile_path.name}: {report.verdict} "
+                          f"({report.count('match', 'plausible')} checked, "
+                          f"{report.count('fail')} bad, {report.pending} pending)", module="preflight")
+            for site in report.sites:
+                if site.severity == "fail":
+                    log_utils.log_warn(f"preflight {site.section}.{site.entry}: {site.detail}",
+                                       module="preflight")
+        except Exception:                                        # noqa: BLE001
+            pass
+        return report
 
 
 def read_components_from_ipsw(ipsw: Path, profile: dict) -> tuple[dict[str, tuple[str, bytes]],
@@ -666,6 +666,13 @@ def main(argv: list[str] | None = None) -> int:
             path = evidence_path(profile_path)
             if path.exists():
                 print(ok(f"evidence recorded: {path}"))
+                # verified bytes are worth sharing: ask, never assume
+                if not args.json:
+                    try:
+                        import share
+                        share.offer("preflight", profile_path=profile_path)
+                    except Exception as exc:                       # noqa: BLE001
+                        log_utils.log_debug(f"share prompt unavailable: {exc}", module="preflight")
 
     if report.verdict == "blocked":
         return log_utils.EXIT_BLOCKED
@@ -684,6 +691,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    import log_utils
     log_utils.install()          # usbliter8.log + unhandled-exception logging
     sys.exit(log_utils.guard(main))

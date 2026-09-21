@@ -130,46 +130,47 @@ def _download_once(url: str, dst: Path) -> tuple[bool, str]:
 
 def download_firmware(board_id: str, retries: int = 3) -> bool:
     """Download RP2350 firmware UF2 from community repo, with retries and validation."""
-    fname = UF2_FILES.get(board_id)
-    if not fname:
-        print(err(f"Unknown board ID: {board_id}"))
-        log_error(f"Unknown board ID for firmware: {board_id}")
-        return False
+    with log_utils.timed('firmware', 'download_firmware'):
+        fname = UF2_FILES.get(board_id)
+        if not fname:
+            print(err(f"Unknown board ID: {board_id}"))
+            log_error(f"Unknown board ID for firmware: {board_id}")
+            return False
 
-    url = f"{FW_REPO}/{fname}"
-    dst = FW_DIR / fname
-    tmp = FW_DIR / f"{fname}.part"
-    FW_DIR.mkdir(parents=True, exist_ok=True)
+        url = f"{FW_REPO}/{fname}"
+        dst = FW_DIR / fname
+        tmp = FW_DIR / f"{fname}.part"
+        FW_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(info(f"Downloading {fname}..."))
-    print(f"    {C.DIM}{url}{C.NC}")
-    log_step(f"Downloading UF2: {url}")
+        print(info(f"Downloading {fname}..."))
+        print(f"    {C.DIM}{url}{C.NC}")
+        log_step(f"Downloading UF2: {url}")
 
-    socket.setdefaulttimeout(30)
-    try:
-        for attempt in range(1, retries + 1):
-            if attempt > 1:
-                delay = 1.5 * (attempt - 1)
-                print(info(f"Retry {attempt}/{retries} in {delay:.1f}s..."))
-                time.sleep(delay)
+        socket.setdefaulttimeout(30)
+        try:
+            for attempt in range(1, retries + 1):
+                if attempt > 1:
+                    delay = 1.5 * (attempt - 1)
+                    print(info(f"Retry {attempt}/{retries} in {delay:.1f}s..."))
+                    time.sleep(delay)
 
-            success, msg = _download_once(url, tmp)
-            if success:
-                tmp.replace(dst)
-                size = dst.stat().st_size
-                print(ok(f"Downloaded + verified {fname} ({size:,} bytes)"))
-                log_info(f"Firmware downloaded: {fname} ({size} bytes)")
-                return True
+                success, msg = _download_once(url, tmp)
+                if success:
+                    tmp.replace(dst)
+                    size = dst.stat().st_size
+                    print(ok(f"Downloaded + verified {fname} ({size:,} bytes)"))
+                    log_info(f"Firmware downloaded: {fname} ({size} bytes)")
+                    return True
 
-            tmp.unlink(missing_ok=True)
-            print(warn(f"Attempt {attempt}/{retries} failed: {msg}"))
-            log_warn(f"UF2 download attempt {attempt}/{retries} failed: {msg}")
+                tmp.unlink(missing_ok=True)
+                print(warn(f"Attempt {attempt}/{retries} failed: {msg}"))
+                log_warn(f"UF2 download attempt {attempt}/{retries} failed: {msg}")
 
-        print(err(f"All {retries} download attempts failed — check your internet connection"))
-        log_error(f"UF2 download failed after {retries} attempts: {url}")
-        return False
-    finally:
-        socket.setdefaulttimeout(None)
+            print(err(f"All {retries} download attempts failed — check your internet connection"))
+            log_error(f"UF2 download failed after {retries} attempts: {url}")
+            return False
+        finally:
+            socket.setdefaulttimeout(None)
 
 
 def show_wiring(board: dict):
@@ -445,10 +446,22 @@ def _guided_setup_impl():
     print()
     show_troubleshooting()
 
+    # Step 6 - the one time this device's data is worth a question
+    _offer_contribution("guided")
+
     try:
         log_utils.safe_input(prompt("Press Enter to return to menu..."))
     except (EOFError, KeyboardInterrupt):
         print()
+
+
+def _offer_contribution(trigger: str) -> None:
+    """Ask whether to send this device's data back. Silent when there is nothing."""
+    try:
+        import share
+        share.offer(trigger)
+    except Exception as exc:                                  # noqa: BLE001
+        log_utils.log_debug(f"share prompt unavailable: {exc}", module="hardware_guide")
 
 
 # Backward-compatible alias

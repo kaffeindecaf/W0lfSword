@@ -586,49 +586,50 @@ def apply_offsets(target_path: Path, all_results: dict[str, list[MatchResult]],
 
 
 def cli_main(args: list[str]):
-    p = argparse.ArgumentParser(prog="profile_gen.py migrate",
-                                description="Migrate patch offsets across beta builds")
-    p.add_argument("base", help="Base offset profile YAML (e.g. offsets/iPhone12,3_27.0b2.yaml)")
-    p.add_argument("target", help="Target profile YAML, or iOS version string for a new build")
-    p.add_argument("--build", help="Build number for a new target profile")
-    p.add_argument("--comp-dir", type=Path, help="Directory with base/ and target/ raw components")
-    p.add_argument("--fetch", action="store_true", help="Run work-dir get_fw.py to fetch components")
-    p.add_argument("--auto", action="store_true", help="Write migrated offsets into the target profile")
-    p.add_argument("--report", type=Path, default=None, help="Write report to file")
-    p.add_argument("--force-low", dest="force_low", action="store_true",
-                   help="write entries below the 0.90 confidence floor too (NOT recommended)")
-    a = p.parse_args(args)
+    with log_utils.timed('migrate', 'migrate'):
+        p = argparse.ArgumentParser(prog="profile_gen.py migrate",
+                                    description="Migrate patch offsets across beta builds")
+        p.add_argument("base", help="Base offset profile YAML (e.g. offsets/iPhone12,3_27.0b2.yaml)")
+        p.add_argument("target", help="Target profile YAML, or iOS version string for a new build")
+        p.add_argument("--build", help="Build number for a new target profile")
+        p.add_argument("--comp-dir", type=Path, help="Directory with base/ and target/ raw components")
+        p.add_argument("--fetch", action="store_true", help="Run work-dir get_fw.py to fetch components")
+        p.add_argument("--auto", action="store_true", help="Write migrated offsets into the target profile")
+        p.add_argument("--report", type=Path, default=None, help="Write report to file")
+        p.add_argument("--force-low", dest="force_low", action="store_true",
+                       help="write entries below the 0.90 confidence floor too (NOT recommended)")
+        a = p.parse_args(args)
 
-    base_path = Path(a.base)
-    if not base_path.exists():
-        print(err(f"Base profile not found: {base_path}"))
-        return
+        base_path = Path(a.base)
+        if not base_path.exists():
+            print(err(f"Base profile not found: {base_path}"))
+            return
 
-    try:
-        base_profile = _load_yaml(base_path)
-    except ValueError as e:
-        print(err(f"Invalid base profile: {e}"))
-        return
+        try:
+            base_profile = _load_yaml(base_path)
+        except ValueError as e:
+            print(err(f"Invalid base profile: {e}"))
+            return
 
-    if Path(a.target).exists():
-        target_path = Path(a.target)
-    else:
-        model = base_profile.get("model", "unknown")
-        target_path = OFFSETS_DIR / f"{model}_{a.target}.yaml"
-        if not target_path.exists():
-            from profile_gen import generate_profile
-            profile = generate_profile(model, a.target, a.build or "unknown")
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(target_path, "w") as f:
-                yaml.dump(profile, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-            print(ok(f"Created target skeleton: {target_path.name}"))
+        if Path(a.target).exists():
+            target_path = Path(a.target)
+        else:
+            model = base_profile.get("model", "unknown")
+            target_path = OFFSETS_DIR / f"{model}_{a.target}.yaml"
+            if not target_path.exists():
+                from profile_gen import generate_profile
+                profile = generate_profile(model, a.target, a.build or "unknown")
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(target_path, "w") as f:
+                    yaml.dump(profile, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                print(ok(f"Created target skeleton: {target_path.name}"))
 
-    if a.force_low:
-        print(warn("--force-low: writing entries below 0.90 — a wrong offset rated HIGH "
-                   "is a brick risk, review the report first"))
-    run_migration(base_path, target_path, comp_dir=a.comp_dir, fetch=a.fetch,
-                  auto=a.auto, report_path=a.report,
-                  min_confidence=0.0 if a.force_low else 0.90)
+        if a.force_low:
+            print(warn("--force-low: writing entries below 0.90 — a wrong offset rated HIGH "
+                       "is a brick risk, review the report first"))
+        run_migration(base_path, target_path, comp_dir=a.comp_dir, fetch=a.fetch,
+                      auto=a.auto, report_path=a.report,
+                      min_confidence=0.0 if a.force_low else 0.90)
 
 
 if __name__ == "__main__":

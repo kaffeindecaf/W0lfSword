@@ -270,6 +270,29 @@ def check_shadowed_imports(files: list[str]) -> list[str]:
                 problems.append(
                     f"{rel}: {func.name}() shadows the imported '{name}' and calls it "
                     f"(rename the local or the import)")
+
+            # A function-local import makes the name local for the WHOLE
+            # function, so using it *above* that line raises UnboundLocalError.
+            # Only the combination is a bug: an inner import used earlier.
+            # (preflight.run_preflight and main.py's dispatcher both shipped it.)
+            uses: dict[str, list[int]] = {}
+            for node in ast.walk(func):
+                if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                    uses.setdefault(node.value.id, []).append(node.lineno)
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    uses.setdefault(node.func.id, []).append(node.lineno)
+            for node in ast.walk(func):
+                if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                    continue
+                for alias in node.names:
+                    name = (alias.asname or alias.name).split(".")[0]
+                    earlier = [line for line in uses.get(name, []) if line < node.lineno]
+                    if earlier and name in imported:
+                        problems.append(
+                            f"{rel}: {func.name}() imports '{name}' on line {node.lineno} "
+                            f"but uses it on line {earlier[0]} (drop the inner import: it "
+                            f"makes the name local and the earlier use raises "
+                            f"UnboundLocalError)")
     return problems
 
 

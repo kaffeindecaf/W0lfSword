@@ -523,6 +523,7 @@ def menu_normal_boot():
 
 def menu_postboot():
     """Sub-menu: post-exploit configuration."""
+    did_something = False
     while True:
         print(header("Post-Boot Setup"))
         print()
@@ -544,12 +545,15 @@ def menu_postboot():
         if choice == "1":
             from boot_chain import setup_usb_network
             setup_usb_network()
+            did_something = True
         elif choice == "2":
             from boot_chain import setup_vnc
             setup_vnc()
+            did_something = True
         elif choice == "3":
             from boot_chain import ssh_connect
             ssh_connect()
+            did_something = True
             break  # exec'd into SSH
         elif choice == "4":
             print(info("Bootstrap instructions:"))
@@ -562,6 +566,11 @@ def menu_postboot():
 
         log_utils.safe_input(f"\n  {C.DIM}── Press Enter to continue ──{C.NC}")
         clear()
+
+    if did_something:
+        # the device answers now, so its offsets can be checked: offer once
+        import share
+        share.offer("postboot")
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -7446,7 +7446,7 @@ main() {
     # through the root gate in its dispatch branch below. Keep this list in step
     # with the verb table in scripts/usbliter8_arctic/cli.py.
     if [ "$cmd" = "usbliter8" ] || [ "$cmd" = "ul8" ]; then
-        UL8_READONLY=" preflight verify gaps coverage offsets audit explain health doctor deps contribute logs version help -h --help "
+        UL8_READONLY=" preflight verify gaps coverage offsets audit explain health doctor deps contribute share logs version help -h --help "
         if [ "$EUID" -ne 0 ] && [[ "$UL8_READONLY" == *" ${args[0]:-} "* ]]; then
             shift
             run_usbliter8 "$@"

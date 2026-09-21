@@ -104,6 +104,7 @@ COMMAND_FEATURES: dict[str, tuple[str, ...]] = {
     "fetch": ("profiles", "fetch"),
     "migrate": ("profiles", "migrate"),
     "contribute": ("profiles",),
+    "share": ("profiles",),
     "logs": (),
     "version": (),
     "explain": (),
