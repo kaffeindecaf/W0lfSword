@@ -78,8 +78,18 @@
 #     _term_theme_crossfade_ms).
 #   * `app_static_symbols` grew the term_anim symbols, the two new selector
 #     strings and the bundled-art comparison (`cmp` against
-#     scripts/wolf_art.txt here - a drift between the shipped art and the tested
-#     art now fails the entry rather than passing quietly).
+#     scripts/wolf_art.txt) so a bundle that ships stale art fails the suite.
+#   * the ANIM.4 pass (the live status pill) moved both lint hashes (31 -> 38
+#     checks, 36 -> 43 mutations: a pill that takes touches, a telemetry timer
+#     that runs when there is nothing to sample, a pulse that ignores Reduce
+#     Motion, a detail line that stops coming from term_anim.c, a cancel that
+#     stops marking the pill, a verdict badge that never leaves, and the view
+#     reading the engine header for itself) and the anim harness to 66 checks.
+#     `term_anim_host_test` moved with them. `app_ipa_build` moved because the
+#     app was rebuilt (new view code, version label 0.21 -> 0.22), and
+#     `app_binary` / `app_static_symbols` with it (725384bd... -> cc282d3d...).
+#     The ANIM.4 symbols and the pill's own strings are in the nm/strings lists
+#     below, so the shipped binary is proved to carry what the host test drives.
 #
 # Re-pin only with a reason like the above: a count that changes is a code
 # change, not a flake.
@@ -158,16 +168,16 @@ check kwrite_counter         "$ROOT" 0 1dc9c1d4b0e35b86e23667ff627e4b57bb7f6ec83
 # the tweak build ship, so a drift between tested and shipped fails at entry 12f.
 check tweak_log_throttle     "$ROOT" 0 d59cd9fd7d8be99c390a569e1c7430af0b37a8023433fc4beaf5806b530653ab raw \
     'bash scripts/run_tweak_log_throttle_host_test.sh'
-check scan_budget_cancel     "$ROOT" 0 10ea294ebad7da40895743c79dc01205dfae68bf2733c28aecb7f182a677b4cd raw \
+check scan_budget_cancel     "$ROOT" 0 d459f2adeb4f0a8d573998d8e513a74852fddb03dbb1c6266a037b8c930e1732 raw \
     'python3 scripts/check_scan_budget_cancel_writes.py'
-check scan_budget_cancel_self "$ROOT" 0 ddd180c1285b4e7c98abd84070ec5baa97e0649c3a7815ff386af4a22521327e raw \
+check scan_budget_cancel_self "$ROOT" 0 7074304979ce5747dd8d0664e7c7e67807f25bc2ab9a91e87bd7c331764f12f3 raw \
     'python3 scripts/check_scan_budget_cancel_writes.py --selftest'
 # ANIM.1 / ANIM.3: the launch animations' decisions (term_anim.c) - the caret
 # blink rule and the boot sequence's budget arithmetic. The app compiles the same
 # file (app entry term_anim.c in the W0lfTerm Makefile) and the harness reads the
 # art from this tree, which is the art the Makefile copies into the bundle, so
 # the sequence the test prices is the sequence the device draws.
-check term_anim_host_test    "$ROOT" 0 1681da1cdb64330efdd51236453a1110b2273e7f84289fbf48e76eec43cfcf07 raw \
+check term_anim_host_test    "$ROOT" 0 d42d5594940634cfbd963e764cd0fc3cde0f3df4a3846f5e1b0aba06f7130eea raw \
     'bash "$TERM_SRC/scripts/run_term_anim_host_test.sh"'
 
 # --- the rest of regression.sh's host half (run directly, never the whole file) ---
@@ -226,18 +236,17 @@ if [ "$WITH_BUILDS" = 1 ]; then
         fi
         # 2) app build: the log varies only in compile order + zip mtimes (canon
         #    mode); the linked binary is the assertion, so hash it directly.
-        check app_ipa_build "$TERM_SRC" 0 81c1969c99ef64565d8373c499af5387f545ee69e6d7df1ceead4ba70525ca29 canon \
-            'bash scripts/build_ipa.sh sideload 0.21'
+        check app_ipa_build "$TERM_SRC" 0 24e3346a9876b5afad428c67b2165b39eef61a3a3bc4ef20c8f03fc765d790bf canon \
+            'bash scripts/build_ipa.sh sideload 0.22'
         got_bin=$(sha256sum "$TERM_SRC/dist/Payload/W0lfTerm.app/W0lfTerm" | cut -d' ' -f1)
-        # Re-pinned 2026-09-18 (BUG.7): the app links the rebuilt engine archive,
-        # so the binary moved with it. Same build (0.20), no source change on the
-        # app side.
-        if [ "$got_bin" = 725384bdae6e9585af5472739b503cace83f8a5782c8e2e2957062d4442bc01d ]; then
+        # Re-pinned 2026-09-22 (ANIM.4): the app gained the status pill (new view
+        # code, new version label 0.22), so the linked binary moved.
+        if [ "$got_bin" = cc282d3dc5e478194217c79043c04a7e28263a041cbdedbd326c1e39b17b6740 ]; then
             printf 'ok   %-34s %s\n' "app_binary" "${got_bin:0:16}..."
             PASS=$((PASS + 1))
         else
             printf 'BAD  %-34s sha256=%s\n     want %s\n' "app_binary" "$got_bin" \
-                725384bdae6e9585af5472739b503cace83f8a5782c8e2e2957062d4442bc01d
+                cc282d3dc5e478194217c79043c04a7e28263a041cbdedbd326c1e39b17b6740
             FAIL=$((FAIL + 1))
         fi
         # 3) the app-side static check (llvm-nm: GNU nm cannot read Mach-O)
@@ -246,9 +255,9 @@ if [ "$WITH_BUILDS" = 1 ]; then
         #    shipped app is proved to link the zone-bucket chain the host test
         #    drives - not just to compile it.
         # shellcheck disable=SC2016  # eval'd command string: the expansion is the point
-        check app_static_symbols "$TERM_SRC" 0 a6d06dbfdd710c2f2911c3a96a2190c1d613ca44ca7a644b4c37fa3ed2d81a84 raw \
+        check app_static_symbols "$TERM_SRC" 0 f8d6c67423a132014f476d296191e4967a251e9dfc4e49adba763f6d82ef6a0e raw \
             'BIN=dist/Payload/W0lfTerm.app/W0lfTerm
-             { echo "W0lfTerm app-side static check (linked binary produced by the 0.21 rebuild)"
+             { echo "W0lfTerm app-side static check (linked binary produced by the 0.22 rebuild)"
                echo "binary: $BIN"
                echo "sha256: $(sha256sum "$BIN" | cut -d" " -f1)"
                echo
@@ -258,8 +267,11 @@ if [ "$WITH_BUILDS" = 1 ]; then
                echo "== nm: ANIM.1/ANIM.2/ANIM.3 decisions (term_anim.c is inside the app) =="
                llvm-nm-19 "$BIN" | grep -E " _term_caret_blinks| _term_caret_blink_interval| _term_boot_tick| _term_boot_handover| _term_boot_duration_ms| _term_boot_budget_ms| _term_boot_fits| _term_line_fade_ms| _term_line_should_fade| _term_line_fade_frame_rate| _term_clear_scroll_ms| _term_theme_crossfade_ms| _term_settings_slide| _term_should_animate"
                echo
+               echo "== nm: ANIM.4 pill decisions (term_anim.c) + the bridge it reads through =="
+               llvm-nm-19 "$BIN" | grep -E " _term_pill_state_for| _term_pill_visible| _term_pill_title| _term_pill_detail| _term_pill_pulses| _term_pill_pulse_secs| _term_pill_pulse_floor| _term_pill_refresh_secs| _term_bridge_pill_telemetry| _term_bridge_pill_note_cancel| _kexploit_scan_offset"
+               echo
                echo "== strings markers (count) =="
-               for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter" beginBootSequence skipBootSequence wolf_art fadeTick endLineFade; do
+               for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter" beginBootSequence skipBootSequence wolf_art fadeTick endLineFade CANCELLED "no position yet" "no read landed" "pillPulse"; do
                    printf "  %-34s %s\n" "$m" "$(strings -a "$BIN" | grep -cF "$m")"
                done
                echo

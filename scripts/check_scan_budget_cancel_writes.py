@@ -85,6 +85,11 @@ APP_FILES = [
     "Makefile",
     "scripts/run_term_anim_host_test.sh",
     "tests/term_anim_host_test.c",
+    # ANIM.4: the status pill. The view draws it, the bridge reads the engine's
+    # telemetry (and owns the per-attempt clock), term_anim.c decides what the
+    # pill may claim - so all four files are read here.
+    "term_bridge.h",
+    "TerminalViewController.h",
 ]
 
 CHECKS = []
@@ -178,6 +183,8 @@ class Src:
         self.app_makefile = self.app["Makefile"]
         self.anim_run = self.app["scripts/run_term_anim_host_test.sh"]
         self.anim_test = self.app["tests/term_anim_host_test.c"]
+        self.b_h = self.app["term_bridge.h"]
+        self.vc_h = self.app["TerminalViewController.h"]
 
 
 def all_sources_present(src):
@@ -724,6 +731,17 @@ def _objc_method(text, signature):
     return None
 
 
+def _c_function(text, signature):
+    """A plain C function's body: from its signature to the closing brace in
+    column 0. _objc_method cannot see these (it looks for -/+ headers), and the
+    bridge is where the engine reads and the cancel marker live."""
+    idx = text.find(signature)
+    if idx < 0:
+        return None
+    end = text.find("\n}", idx)
+    return text[idx:end + 2] if end >= 0 else None
+
+
 @check("ANIM.1 app: one gate owns the caret timer and it asks the shipped decision")
 def c_anim_caret_gate(src):
     code = strip_comments(src.vc_m)
@@ -936,6 +954,220 @@ def c_anim_transitions(src):
            "sheet-slides=%s presentation-gated=%s dismissal-gated=%s"
            % (gated, scrolls, paced, ends_in_a_wipe, wipe_cancels, guarded, theme_only,
               crossfade, straight_path, slides, present_gated, dismiss_gated))
+    return ok
+
+
+# ===========================================================================
+# ANIM.4 - the live status pill
+# ===========================================================================
+# The pill's decisions (what it may claim, and whether it may move) are in
+# term_anim.c, where the host test drives them. What is left to check here is the
+# WIRING, which is where this item can fail quietly in four different ways:
+# a pill that eats a touch, a telemetry timer that outlives the run it samples, a
+# cancel that passes as an idle run, and a verdict badge that never leaves.
+@check("ANIM.4 app: the pill shows the engine's numbers, over the output, and takes no touches")
+def c_anim_pill_placement(src):
+    code = strip_comments(src.vc_m)
+
+    # It floats over the OUTPUT (a sibling of the text view), not inside the input
+    # bar: that row already carries the prompt, the field, the cancel control and
+    # SET, and the pill must not move any of them.
+    creators = [b for b in _objc_blocks(code) if "TERM_PILL_W, TERM_PILL_H)]" in b
+                or ("self.statusPill = " in b and "UIView" in b)]
+    over_output = "[self.view addSubview:pill];" in code
+    in_the_bar = "self.inputBar addSubview:self.statusPill" in code or "[self.inputBar addSubview:pill]" in code
+
+    # No touches, no VoiceOver storm: it updates five times a second while a run
+    # is live, and a label announced at that rate is noise.
+    quiet = "pill.userInteractionEnabled = NO;" in code
+    not_an_element = "pill.isAccessibilityElement = NO;" in code and "pill.accessibilityElementsHidden = YES;" in code
+
+    # The two lines come from the shipped decisions, and the numbers come from the
+    # bridge - the view must not include the engine header to read atomics itself.
+    title_from_anim = "stringWithUTF8String:term_pill_title(st)" in code
+    detail_from_anim = "term_pill_detail(term_pill_state_for(" in code
+    via_bridge = "term_bridge_pill_telemetry()" in code
+    no_engine_header = "kexploit" not in code and "kexploit_opa334.h" not in src.vc_h
+    # The engine header is what the bridge is for; the struct it hands over is
+    # declared in term_bridge.h.
+    header = "TermPillTelemetry" in src.b_h and "term_bridge_pill_telemetry" in src.b_h
+
+    ok = (bool(creators) and over_output and not in_the_bar and quiet and not_an_element
+          and title_from_anim and detail_from_anim and via_bridge and no_engine_header and header)
+    report(ok, "ANIM.4 app: the pill shows the engine's numbers, over the output, and takes no touches",
+           "created=%d over-output=%s in-the-bar=%s takes-no-touches=%s silent-for-VO=%s "
+           "title-from-anim=%s detail-from-anim=%s via-bridge=%s view-has-no-engine-header=%s "
+           "header-declares-telemetry=%s"
+           % (len(creators), over_output, in_the_bar, quiet, not_an_element, title_from_anim,
+              detail_from_anim, via_bridge, no_engine_header, header))
+    return ok
+
+
+@check("ANIM.4 app: one gate owns the pill's timer and it runs only while a run is in flight")
+def c_anim_pill_timer(src):
+    code = strip_comments(src.vc_m)
+    gate = _objc_method(code, "- (void)pillGate")
+    if gate is None:
+        report(False, "ANIM.4 app: one gate owns the pill's timer and it runs only while a run is in flight",
+               "no -pillGate in TerminalViewController.m")
+        return False
+
+    # Created in exactly one place, and that place is the gate (the ANIM.1 rule:
+    # a timer made anywhere else outlives the state it was made for).
+    creators = [b for b in _objc_blocks(code)
+                if "scheduledTimerWithTimeInterval:term_pill_refresh_secs()" in b]
+    gate_creates = bool(creators) and creators[0] == gate
+    # Only a run in flight samples: a frozen verdict is a still image.
+    scanning_only = "if (st == TERM_PILL_SCANNING) {" in gate
+    # And the gate stops the old timer before it can start a new one.
+    stops = gate.find("self.pillTimer = nil")
+    starts = gate.find("scheduledTimerWithTimeInterval")
+    stop_first = 0 <= stops < starts
+    # The first sample happens now, not 200 ms from now, so the pill never appears
+    # blank over a run that is already moving.
+    first_sample = "[self pillTick:nil];" in gate
+    # The refresh rate is term_anim.c's number, not a literal here.
+    literal_rate = re.search(r"scheduledTimerWithTimeInterval:\s*[0-9]", gate) is not None
+    # Hiding it is the gate's job too, so the alpha and the timer cannot disagree
+    # about whether the pill is live.
+    hides = "hidePill" in gate
+
+    ok = (gate_creates and scanning_only and stop_first and first_sample
+          and not literal_rate and hides)
+    report(ok, "ANIM.4 app: one gate owns the pill's timer and it runs only while a run is in flight",
+           "gate-creates-timer=%s scanning-only=%s stop-before-start=%s first-sample=%s "
+           "literal-refresh=%s gate-hides=%s"
+           % (gate_creates, scanning_only, stop_first, first_sample, literal_rate, hides))
+    return ok
+
+
+@check("ANIM.4 app: the pill may only move a run in flight, and only when motion is allowed")
+def c_anim_pill_motion(src):
+    code = strip_comments(src.vc_m)
+    # The pulse is the shipped decision, asked with the app's one Reduce Motion
+    # gate - a local `if` in the view is what shipped the wrong way around once.
+    asks = code.count("term_pill_pulses(")
+    gated = "term_pill_pulses(st, [[self class] reduceMotion] ? 1 : 0)" in code
+    # Duration and floor come from term_anim.c.
+    duration = "p.duration = term_pill_pulse_secs();" in code
+    floor = "numberWithFloat:term_pill_pulse_floor()" in code
+    # ... and the pulse's own block carries no literal alpha: the run-state dot's
+    # 0.25 is that widget's business, the pill's floor is term_anim.c's.
+    gate = _objc_method(code, "- (void)pillGate") or ""
+    no_literal = re.search(r"numberWithFloat:0\.[0-9]", gate) is None
+    # The pulse belongs to the dot, never to the text: a label that dims is a
+    # label the reader cannot read, and the numbers are the point of the pill.
+    on_the_dot = "self.pillDot.layer addAnimation:p forKey:@\"pillPulse\"" in code
+    removed = "self.pillDot.layer removeAnimationForKey:@\"pillPulse\"" in code
+    # Leaving is the same rule: Reduce Motion means it is simply gone.
+    hide = _objc_method(code, "- (void)hidePill")
+    hide_gated = hide is not None and "reduceMotion" in hide
+
+    ok = (asks >= 1 and gated and duration and floor and no_literal
+          and on_the_dot and removed and hide_gated)
+    report(ok, "ANIM.4 app: the pill may only move a run in flight, and only when motion is allowed",
+           "pulses-asked=%d reduce-motion-gated=%s duration-from-anim=%s floor-from-anim=%s "
+           "no-literal-alpha=%s on-the-dot=%s pulse-removed=%s hide-gated=%s"
+           % (asks, gated, duration, floor, no_literal, on_the_dot, removed, hide_gated))
+    return ok
+
+
+@check("ANIM.4 app: a cancelled run says CANCELLED instead of passing as idle")
+def c_anim_pill_cancel(src):
+    bridge = strip_comments(src.b_m)
+    code = strip_comments(src.vc_m)
+
+    # The marker is set where the REQUEST is made (the dot or the `cancel`
+    # command), not where the run happens to end, so the verdict does not depend
+    # on the engine reaching its stop check.
+    cancel = _c_function(bridge, "void term_bridge_cancel(void)")
+    marks = cancel is not None and "term_bridge_pill_note_cancel();" in cancel
+    hops = _c_function(bridge, "void term_bridge_pill_note_cancel(void)")
+    hop_ok = (hops is not None and "dispatch_get_main_queue()" in hops
+              and "[g_vc noteRunCancelled];" in hops)
+    # The view owns the rest: the marker, the re-ask, and a clean slate for the
+    # next run (a stale marker would paint a whole run cancelled).
+    note = _objc_method(code, "- (void)noteRunCancelled")
+    note_ok = note is not None and "self.pillCancelled = 1;" in note and "pillGate" in note
+    cleared = "if (state == 1) self.pillCancelled = 0;" in code
+    declared = "noteRunCancelled" in src.vc_h
+
+    ok = marks and hop_ok and note_ok and cleared and declared
+    report(ok, "ANIM.4 app: a cancelled run says CANCELLED instead of passing as idle",
+           "cancel-marks=%s hop-to-main=%s view-notes=%s next-run-clears=%s declared-in-header=%s"
+           % (marks, hop_ok, note_ok, cleared, declared))
+    return ok
+
+
+@check("ANIM.4 app: the badge leaves - it is a verdict, not permanent furniture")
+def c_anim_pill_dismiss(src):
+    code = strip_comments(src.vc_m)
+    dismiss = _objc_method(code, "- (void)pillDismiss")
+    if dismiss is None:
+        report(False, "ANIM.4 app: the badge leaves - it is a verdict, not permanent furniture",
+               "no -pillDismiss in TerminalViewController.m")
+        return False
+    # A run in flight keeps its pill: that one is the device's state, not a verdict.
+    keeps_live = "if (self.runState == 1) return;" in dismiss
+    gate_owns = "pillGate" in dismiss
+    # The two ways a reader moves on: typing, and wiping the buffer.
+    typing = "pillDismiss" in (_objc_method(code, "- (void)inputChanged:") or "")
+    clearing = "pillDismiss" in (_objc_method(code, "- (void)clearScreenImmediately") or "")
+    # And a new run re-shows it (the dismissal is not a permanent veto).
+    reshown = "if (self.runState == 1) self.pillDismissed = 0;" in code
+
+    ok = keeps_live and gate_owns and typing and clearing and reshown
+    report(ok, "ANIM.4 app: the badge leaves - it is a verdict, not permanent furniture",
+           "keeps-a-live-run=%s gate-owns=%s dismissed-on-typing=%s dismissed-on-clear=%s "
+           "next-run-reshows=%s" % (keeps_live, gate_owns, typing, clearing, reshown))
+    return ok
+
+
+@check("ANIM.4 app: the pill is themed and laid out from its enum, never from literals")
+def c_anim_pill_theme_layout(src):
+    code = strip_comments(src.vc_m)
+    layout = _objc_method(code, "- (void)viewDidLayoutSubviews")
+    from_enum = layout is not None and "TERM_PILL_W" in layout and "TERM_PILL_PAD_R" in layout
+    apply = _objc_method(code, "- (void)applySettingsNow")
+    themed = apply is not None and "self.statusPill.backgroundColor" in apply
+    regated = apply is not None and "pillGate" in apply
+    detail_colour = apply is not None and "self.pillDetail.textColor" in apply
+    # The width is the sum of its parts at compile time, so a part cannot be
+    # changed without the assert saying so.
+    enumerated = "_Static_assert(TERM_PILL_W ==" in code
+    # The detail shrinks rather than clips: a truncated hex address is a wrong
+    # number on screen, which is worse than a small one.
+    shrinks = "pdetail.adjustsFontSizeToFitWidth = YES;" in code
+
+    ok = from_enum and themed and regated and detail_colour and enumerated and shrinks
+    report(ok, "ANIM.4 app: the pill is themed and laid out from its enum, never from literals",
+           "frame-from-enum=%s themed=%s re-gated=%s detail-colour=%s width-asserted=%s "
+           "detail-shrinks=%s" % (from_enum, themed, regated, detail_colour, enumerated, shrinks))
+    return ok
+
+
+@check("ANIM.4: the pill's decisions are in term_anim.c and the host test pins the strings")
+def c_anim_pill_decisions(src):
+    header_ok = all(name in src.anim_h for name in (
+        "term_pill_state_for", "term_pill_visible", "term_pill_title", "term_pill_detail",
+        "term_pill_pulses", "term_pill_pulse_secs", "term_pill_pulse_floor",
+        "term_pill_refresh_secs"))
+    impl_ok = all(name in src.anim_c for name in (
+        "TERM_PILL_PULSE_SECS", "TERM_PILL_PULSE_FLOOR", "TERM_PILL_REFRESH_SECS",
+        "snprintf(out, n, \"0x%llX | %llus/%llus\""))
+    # The four titles and the two strings that could lie are asserted by the host
+    # test, so the text on the device is the text that was checked.
+    pins = all(s in src.anim_test for s in (
+        '"SCAN"', '"LANDED"', '"NO LAND"', '"CANCELLED"', '"0x1F20000 | 12s/600s"',
+        '"no position yet"', '"12 writes"', 'term_pill_pulses'))
+    # The budget is SECONDS (BUG.3's knob), so the detail must not be built as an
+    # offset/address fraction - that is the lie this item had to avoid.
+    honest = "%llus/%llus" in src.anim_c and "0x%llX / 0x%llX" not in src.anim_c
+
+    ok = header_ok and impl_ok and pins and honest
+    report(ok, "ANIM.4: the pill's decisions are in term_anim.c and the host test pins the strings",
+           "header=%s impl=%s host-test-pins=%s no-fake-fraction=%s"
+           % (header_ok, impl_ok, pins, honest))
     return ok
 
 
@@ -1154,6 +1386,43 @@ def selftest(root, wolfterm):
         return _mutate(text, "[presenter dismissViewControllerAnimated:animate completion:NULL];",
                              "[presenter dismissViewControllerAnimated:YES completion:NULL];")
 
+    # --- ANIM.4 ------------------------------------------------------------
+    def mut_pill_takes_touches(text):
+        # A pill that swallows a keystroke or a scroll is worse than no pill.
+        return _mutate(text, "    pill.userInteractionEnabled = NO;", "    pill.userInteractionEnabled = YES;")
+
+    def mut_pill_timer_runs_when_idle(text):
+        # The telemetry timer created for every state (the ANIM.1 regression, one
+        # widget over): a frozen verdict that keeps sampling is a timer with
+        # nothing behind it.
+        return _mutate(text, "    if (st == TERM_PILL_SCANNING) {", "    if (true) {")
+
+    def mut_pill_pulse_ignores_reduce_motion(text):
+        return _mutate(text, "term_pill_pulses(st, [[self class] reduceMotion] ? 1 : 0)",
+                             "term_pill_pulses(st, 0)")
+
+    def mut_pill_detail_is_a_view_literal(text):
+        # The text stops coming from the host-tested file and becomes whatever the
+        # view says - the point of the item.
+        return _mutate(text, "    term_pill_detail(term_pill_state_for(", "    pill_detail_disabled(term_pill_state_for(")
+
+    def mut_cancel_stops_marking_the_pill(text):
+        return _mutate(text, "        term_bridge_pill_note_cancel();\n", "")
+
+    def mut_badge_never_leaves(text):
+        # The verdict stays over the output for the rest of the session.
+        return _mutate(text,
+                       "    // ANIM.4: and a verdict badge over an empty screen is stale by definition. This\n"
+                       "    // is the shared tail of `clear` (animated or not) and of output that arrived\n"
+                       "    // mid-clear, so one call covers every path that wipes the buffer.\n"
+                       "    [self pillDismiss];\n", "")
+
+    def mut_pill_reads_the_engine_itself(text):
+        # The view reaching into the engine header is how the app grows a second
+        # copy of the telemetry rules.
+        return _mutate(text, '#include "term_anim.h"',
+                             '#include "term_anim.h"\n#include "kexploit/kexploit_opa334.h"')
+
     mutations = [
         ("engine budget default back to 120", "engine", "kexploit/kexploit_opa334.m", mut_engine_budget_120),
         ("app budget default back to 120", "app", "term_settings.m", mut_app_budget_120),
@@ -1191,6 +1460,13 @@ def selftest(root, wolfterm):
         ("every settings tick cross-fades (the slider strobes)", "app", "TerminalViewController.m", mut_every_settings_tick_crossfades),
         ("the settings sheet stops sliding", "app", "TerminalViewController.m", mut_sheet_stops_sliding),
         ("the sheet dismissal animates under Reduce Motion", "app", "SettingsViewController.m", mut_dismissal_ignores_reduce_motion),
+        ("the pill takes touches", "app", "TerminalViewController.m", mut_pill_takes_touches),
+        ("the pill's timer runs when there is nothing to sample", "app", "TerminalViewController.m", mut_pill_timer_runs_when_idle),
+        ("the pill pulses under Reduce Motion", "app", "TerminalViewController.m", mut_pill_pulse_ignores_reduce_motion),
+        ("the pill's detail stops coming from term_anim.c", "app", "TerminalViewController.m", mut_pill_detail_is_a_view_literal),
+        ("a cancel stops marking the pill", "app", "term_bridge.m", mut_cancel_stops_marking_the_pill),
+        ("the verdict badge never leaves", "app", "TerminalViewController.m", mut_badge_never_leaves),
+        ("the view reads the engine header for itself", "app", "TerminalViewController.m", mut_pill_reads_the_engine_itself),
     ]
 
     tmp = tempfile.mkdtemp(prefix="bug345_lint_selftest_")

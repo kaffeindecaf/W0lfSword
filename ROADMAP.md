@@ -3323,3 +3323,24 @@ proved, in order of importance:
   walked in 120 s with the socket table full (27.4k-27.5k sockets, errno 23),
   1 GB dirtied per pass, 98% CPU. A full walk on this device needs ~8.5 min, so
   the 600 s setting is the next thing worth a run.
+
+### W0lfTerm `ANIM.4` (the live status pill) - host half landed here, 2026-09-22
+
+The app-side item is W0lfTerm's; what lives in THIS tree is the lint and the
+suite, so the sync is recorded here. `check_scan_budget_cancel_writes.py` grew
+seven ANIM.4 checks and seven matching mutations (`38 check(s) passed, 0 failed`
+/ `selftest: all mutations caught`, 43/43): the pill floats over the output and
+takes no touches, only a run in flight owns the telemetry timer, a frozen verdict
+does not pulse and does not sample, the detail line comes from the host-tested
+`term_anim.c` instead of the view, a cancelled run cannot pass as an idle one, the
+badge leaves when the reader types or clears, and the view never includes the
+engine header to read the atomics for itself (the bridge does).
+`check_host_verification.sh --with-builds` -> `23 ok, 0 drift` after re-pinning
+six hashes (both lint hashes, the anim harness, and `app_ipa_build` 0.21 -> 0.22
+with `app_binary` and `app_static_symbols`); the static entry now also greps the
+pill's symbols and strings out of the shipped binary, and all eight
+`_term_pill_*` symbols plus `CANCELLED`, `no position yet`, `no read landed` and
+`pillPulse` are present. The one decision worth knowing from this side: the pill
+does NOT show `offset / budget` - `kexploit_scan_budget()` is wall-clock SECONDS
+(BUG.3's row), so the app shows the walk position and the attempt's clock against
+that budget, and says `no position yet` rather than printing `0x0` as progress.
