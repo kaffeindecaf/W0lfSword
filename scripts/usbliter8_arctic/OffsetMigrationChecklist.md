@@ -149,8 +149,9 @@ verifies them before the build.
 
 ### Still open
 - [ ] **4.9** kernelcache verification needs the wiki IV+key: fetch the decrypted `kernelcache.raw` and preflight will verify the kernel section the same way
-- [ ] **4.10** `--json` for `migrate` itself (coverage/gaps/list/preflight are done)
+- [x] **4.10** `--json` for `migrate` itself (coverage/gaps/list/preflight are done): one JSON object on stdout (per-section entries, counts, `review`, `conflicts`, `wrote`, `not_written`, `validation`), no prompt and no ANSI in that mode, and the exit code is the verdict (`0` ready, `2` review required or a refused checkpoint, `1` bad input). Verified on the real b2/b3 components: `ibss.boot_args_adrp 176060 -> 176372`, `txm.query_module0 236720 -> 236712`, exit 2 with 15 HIGH, 23 unresolved (no kernelcache/ramdisk component)
 - [ ] **4.11** the 8 A13 sibling profiles whose kernel sections were propagated from `iphone12` (iPhone12,1/12,8, iPad12,1/12,2 b2+b3) should be re-discovered from their own kernelcache component; `profile_gen.py gaps` lists them
+- [x] **4.12** resumable runs (`checklist.md` M2.3): `--checkpoint [FILE]` writes every section as it finishes and `--resume [FILE]` reuses them instead of re-running the search. The checkpoint carries the base/target identity (path + sha256 of both profiles) and a checkpoint from another pair is refused with exit 2. Measured on the real b2/b3 components: 1.59s full run, 0.14s resumed, byte-identical JSON
 
 ---
 

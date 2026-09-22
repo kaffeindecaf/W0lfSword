@@ -6,8 +6,10 @@ kernel/txm/ramdisk) and require the engine to reproduce the verified b3
 offsets with high confidence and no wrong-HIGH results.
 """
 
+import json
 import random
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -488,3 +490,273 @@ def test_apply_offsets_upserts_missing_entries(b2b3_profiles, ibss_pair, ibec_pa
     oracle = {k: v["offset"] for k, v in b3["patches"]["txm"].items()}
     for name, entry in txm.items():
         assert entry["offset"] == oracle[name], f"txm.{name} upserted with wrong offset"
+
+
+# ── 4.10 / M2.3: --json output + resumable runs ─────────────────────
+
+SITE_NOP = b"\x1f\x20\x03\xd5"          # the site instruction used by these fixtures
+
+
+def _write_profile(path: Path, offset: int, ios: str) -> Path:
+    """A minimal valid profile whose only entry is NOT in CHECKM8_KEY_MAP, so
+    the canonical cross-check stays quiet and the verdict is about the search."""
+    profile = {
+        "device": "iPhone 14", "model": "iPhone12,8", "ios_version": ios,
+        "patches": {"ibss": {"synthetic_site": {"offset": offset, "value": "1f2003d5"}}},
+    }
+    path.write_text(yaml.dump(profile, default_flow_style=False, sort_keys=False))
+    return path
+
+
+@pytest.fixture
+def migrate_cli(tmp_path):
+    """Base/target profile pair + raw components: base site 0x1000 -> 0x1010."""
+    comp_dir = tmp_path / "comps"
+    (comp_dir / "base").mkdir(parents=True)
+    (comp_dir / "target").mkdir(parents=True)
+    (comp_dir / "base" / "ibss.raw").write_bytes(
+        _make_component({"synthetic_site": (0x1000, SITE_NOP)}))
+    (comp_dir / "target" / "ibss.raw").write_bytes(
+        _make_component({"synthetic_site": (0x1010, SITE_NOP)}))
+    return (_write_profile(tmp_path / "iPhone12,8_27.0b2.yaml", 0x1000, "27.0b2"),
+            _write_profile(tmp_path / "iPhone12,8_27.0b3.yaml", 0x1010, "27.0b3"),
+            comp_dir)
+
+
+def _empty_comp_dir(tmp_path) -> Path:
+    """base/ + target/ present but no components: every entry ends up skipped."""
+    empty = tmp_path / "no-comps"
+    (empty / "base").mkdir(parents=True)
+    (empty / "target").mkdir()
+    return empty
+
+
+def test_result_dict_roundtrip():
+    from fingerprint import MatchResult
+    from migrate import result_from_dict, result_to_dict
+    r = MatchResult("ibss.site", 0x1000, 0x1010, 0x10, "pattern", 0.95, True,
+                    "42214091", "422d4091", [0x1010], True, "422d4091")
+    assert result_from_dict(result_to_dict(r)) == r
+    assert json.loads(json.dumps(result_to_dict(r)))["target_offset"] == 0x1010
+    failed = MatchResult("ibss.site", 0x1000, None, None, "failed", 0.0, False, "", "")
+    assert result_from_dict(result_to_dict(failed)).target_offset is None
+
+
+def test_summarize_agrees_with_report_verdict(migrate_cli):
+    """One verdict string for both shapes: the markdown report and --json must
+    never tell different stories about the same results."""
+    from migrate import format_report, run_migration, summarize
+    base, target, comp_dir = migrate_cli
+    run = run_migration(base, target, comp_dir=comp_dir, json_out=True)
+    report = format_report(base, target, run.results, run.conflicts)
+    assert f"**VERDICT: {run.stats['verdict']}**" in report
+    assert run.as_dict()["verdict"] == report.splitlines()[2].split("VERDICT: ")[1].rstrip("**")
+    assert summarize({})["ready"] is True
+    assert summarize({})["total"] == 0
+
+
+def test_skipped_entries_count_as_review_not_failed(migrate_cli):
+    """No components = skipped, and skipped is not the same as a failed search:
+    --json must not report missing data as a migration failure."""
+    from migrate import summarize
+    from fingerprint import MatchResult
+    results = {"ibss": [MatchResult("ibss.a", 0x10, None, None, "skipped", 0.0, False, "", "")]}
+    stats = summarize(results)
+    assert stats["skipped"] == 1 and stats["failed"] == 0
+    assert stats["ready"] is False and "REVIEW REQUIRED" in stats["verdict"]
+
+
+def test_checkpoint_roundtrip_and_resume(tmp_path, migrate_cli, monkeypatch):
+    """A resumed run reuses finished sections instead of searching again: the
+    checkpoint is enough to rebuild the results, with no components at all."""
+    import migrate
+    base, target, comp_dir = migrate_cli
+    checkpoint = tmp_path / "cp.json"
+
+    run1 = migrate.run_migration(base, target, comp_dir=comp_dir, json_out=True)
+    assert run1.results["ibss"][0].target_offset == 0x1010
+    assert run1.ready is True
+    assert run1.as_dict()["counts"]["high"] == 1
+
+    migrate.checkpoint_write(checkpoint, base, target, run1.results, remaining=[],
+                             complete=True)
+    payload = json.loads(checkpoint.read_text())
+    assert payload["schema"] == migrate.CHECKPOINT_SCHEMA
+    assert payload["complete"] is True and payload["remaining"] == []
+    assert payload["sections"]["ibss"][0]["target_offset"] == 0x1010
+
+    searched = []
+    real = migrate.migrate_section
+
+    def spy(profile, section, comps):
+        searched.append(section)
+        return real(profile, section, comps)
+
+    monkeypatch.setattr(migrate, "migrate_section", spy)
+    run2 = migrate.run_migration(base, target, comp_dir=_empty_comp_dir(tmp_path),
+                                 json_out=True, resume=checkpoint)
+    assert "ibss" not in searched             # the resumed section was not searched
+    assert searched == ["ibec", "restoreramdisk", "txm", "kernel"]  # empty sections only
+    assert run2.resumed == ["ibss"]
+    assert run2.results["ibss"][0].target_offset == 0x1010
+    assert run2.results["ibss"][0].confidence == 0.95
+    assert run2.as_dict()["sections"]["ibss"]["entries"][0]["method"] == "pattern"
+
+
+def test_checkpoint_refuses_a_different_pair(tmp_path, migrate_cli, capsys):
+    """Offsets from another build are a brick risk, not a shortcut: a stale
+    checkpoint is refused in the open, never silently reused."""
+    import migrate
+    base, target, comp_dir = migrate_cli
+    checkpoint = tmp_path / "cp.json"
+    run = migrate.run_migration(base, target, comp_dir=comp_dir, json_out=True)
+    migrate.checkpoint_write(checkpoint, base, target, run.results, remaining=[])
+
+    other = _write_profile(tmp_path / "iPhone12,8_27.0b4.yaml", 0x2000, "27.0b4")
+    with pytest.raises(migrate.CheckpointMismatch) as exc:
+        migrate.checkpoint_read(checkpoint, base, other)
+    assert "different target profile" in str(exc.value)
+
+    capsys.readouterr()                         # drop the first run's payload
+    code = migrate.cli_main([str(base), str(other), "--comp-dir", str(comp_dir),
+                             "--resume", str(checkpoint), "--json"])
+    assert code == 2                            # refusal, not a clean run
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ready"] is False and "different target profile" in payload["error"]
+
+
+def test_checkpoint_rejects_broken_and_unknown_files(tmp_path, migrate_cli):
+    import migrate
+    base, target, _ = migrate_cli
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    with pytest.raises(ValueError):
+        migrate.checkpoint_read(broken, base, target)
+    future = tmp_path / "future.json"
+    future.write_text(json.dumps({"schema": 99, "sections": {}}))
+    with pytest.raises(ValueError):
+        migrate.checkpoint_read(future, base, target)
+    missing = tmp_path / "nope.json"
+    assert migrate.cli_main([str(base), str(target), "--resume", str(missing)]) == 1
+
+
+def test_json_output_is_one_clean_object(migrate_cli, capsys):
+    """--json is a pipe contract: one parsable object, no banner, no table and
+    no ANSI escape may reach stdout."""
+    import migrate
+    base, target, comp_dir = migrate_cli
+    code = migrate.cli_main([str(base), str(target), "--comp-dir", str(comp_dir),
+                             "--json"])
+    out = capsys.readouterr().out
+    assert "\x1b" not in out                       # no color codes in the pipe
+    assert out.count("{") and out.lstrip().startswith("{")
+    payload = json.loads(out)                      # raises on any extra output
+    assert code == 0
+    assert payload["ready"] is True and payload["counts"]["high"] == 1
+    assert payload["counts"]["total"] == 1
+    assert payload["base"]["sha256"] and payload["target"]["sha256"]
+    entry = payload["sections"]["ibss"]["entries"][0]
+    assert entry["name"] == "ibss.synthetic_site"
+    assert entry["base_offset"] == 0x1000 and entry["target_offset"] == 0x1010
+    assert entry["confidence"] == 0.95 and entry["method"] == "pattern"
+    assert payload["review"] == [] and payload["conflicts"] == []
+
+
+def test_json_exit_code_is_the_verdict(tmp_path, migrate_cli, capsys):
+    """A machine consumer gets the verdict as an exit code too: 2 means the
+    report says REVIEW REQUIRED, so `migrate --json && ...` cannot ignore it."""
+    import migrate
+    base, target, _ = migrate_cli
+    code = migrate.cli_main([str(base), str(target), "--comp-dir",
+                             str(_empty_comp_dir(tmp_path)), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 2 and payload["ready"] is False
+    assert payload["counts"]["skipped"] == 1
+    assert "REVIEW REQUIRED" in payload["verdict"]
+
+
+def test_json_never_prompts(migrate_cli, monkeypatch, capsys):
+    """No terminal, no question: under --json the apply step is opt-in via
+    --auto, and the payload says a write did not happen."""
+    import migrate
+    base, target, comp_dir = migrate_cli
+    before = target.read_text()
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("--json must not prompt")
+
+    monkeypatch.setattr(migrate.log_utils, "safe_input", boom)
+    code = migrate.cli_main([str(base), str(target), "--comp-dir", str(comp_dir),
+                             "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["wrote"] is False
+    assert target.read_text() == before           # nothing written without --auto
+
+
+def test_json_auto_write_respects_the_confidence_floor(migrate_cli, capsys):
+    """--auto --json writes and reports what the floor kept out, instead of
+    only printing it."""
+    import migrate
+    base, target, comp_dir = migrate_cli
+    run = migrate.run_migration(base, target, comp_dir=comp_dir, auto=True,
+                                json_out=True, min_confidence=0.90)
+    payload = run.as_dict()
+    assert run.wrote is True and payload["not_written"] == []
+    assert payload["validation"]["valid"] is True
+    assert payload["validation"]["passed"] >= 1 and payload["validation"]["failed"] == 0
+    assert yaml.safe_load(target.read_text())["patches"]["ibss"]["synthetic_site"]["offset"] == 0x1010
+
+    run2 = migrate.run_migration(base, target, comp_dir=comp_dir, auto=True,
+                                 json_out=True, min_confidence=0.99)
+    assert run2.wrote is True and run2.not_written == ["ibss.synthetic_site (conf 0.95)"]
+    assert run2.as_dict()["not_written"] == ["ibss.synthetic_site (conf 0.95)"]
+    capsys.readouterr()
+
+
+def test_human_path_still_prints_the_report(migrate_cli, monkeypatch, capsys):
+    """The two output branches rot independently: without --json the report and
+    the verdict must still be on screen (and JSON must not be)."""
+    import migrate
+    base, target, comp_dir = migrate_cli
+    monkeypatch.setattr(migrate.log_utils, "safe_input", lambda *_a, **_k: "n")
+    code = migrate.cli_main([str(base), str(target), "--comp-dir", str(comp_dir)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "# Offset Migration Report" in out and "VERDICT: READY" in out
+    assert '"sections"' not in out                # no JSON in the human path
+
+
+def test_missing_base_profile_is_not_a_silent_success(tmp_path, capsys):
+    """A missing input used to report success (exit 0): exit 1, and in --json
+    mode a parsable error object instead of a prose line."""
+    import migrate
+    missing = tmp_path / "nope.yaml"
+    assert migrate.cli_main([str(missing), "27.0b3"]) == 1
+    capsys.readouterr()                           # drop the human error line
+    assert migrate.cli_main([str(missing), "27.0b3", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ready"] is False and "not found" in payload["error"]
+
+
+def test_real_entry_point_propagates_the_exit_code(tmp_path, migrate_cli):
+    """`profile_gen.py migrate` dropped cli_main's return value, so a JSON run
+    exited 0 whatever the verdict said. Run the real launcher, not the function."""
+    base, target, comp_dir = migrate_cli
+    root = Path(__file__).resolve().parent.parent
+
+    def run(*args):
+        return subprocess.run([sys.executable, "profile_gen.py", "migrate",
+                               str(base), str(target), *args],
+                              cwd=root, capture_output=True, text=True)
+
+    ready = run("--comp-dir", str(comp_dir), "--json")
+    assert ready.returncode == 0
+    assert json.loads(ready.stdout)["ready"] is True
+
+    review = run("--comp-dir", str(_empty_comp_dir(tmp_path)), "--json")
+    assert review.returncode == 2
+    payload = json.loads(review.stdout)
+    assert payload["ready"] is False and payload["counts"]["skipped"] == 1
+
+    assert run("--comp-dir", str(comp_dir), "--resume",
+               str(tmp_path / "missing.json")).returncode == 1

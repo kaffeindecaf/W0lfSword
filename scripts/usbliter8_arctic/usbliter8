@@ -392,7 +392,7 @@ run_menu() {
             o|offsets)          cmd_offsets list ;;
             c|coverage)         cmd_coverage ;;
             u|ul8)              cmd_ul8 ;;
-            m|migrate)          printf "  ${C_DIM}Usage: migrate <base.yaml> <target.yaml|iOS> [--comp-dir DIR] [--auto]${NC}\n"; cmd_migrate ;;
+            m|migrate)          printf "  ${C_DIM}Usage: migrate <base.yaml> <target.yaml|iOS> [--comp-dir DIR] [--auto] [--json] [--checkpoint|--resume [FILE]]${NC}\n"; cmd_migrate ;;
             p|propagate)        printf "  ${C_DIM}Usage: propagate <base.yaml> <Model> [--comp-dir DIR] [--force]${NC}\n"; cmd_propagate ;;
             t|contribute)       cmd_contribute ;;
             i|deps)             cmd_deps ;;

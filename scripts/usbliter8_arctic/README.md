@@ -2,7 +2,7 @@
 
 The usbliter8 tethered jailbreak, wrapped in something you can actually operate. One TUI walks the whole chain, offsets live in validated YAML profiles, and nothing gets flashed before the profile has been checked against the real firmware bytes.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-345%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB) ![Tests](https://img.shields.io/badge/tests-358%20passing-2ea44f) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-5272A8) ![Exploit](https://img.shields.io/badge/exploit-usbliter8_%E2%80%A2_RP2350-8B5CF6)
 
 Upstream usbliter8 is a folder of shell scripts and offsets you edit by hand. One wrong number and the device panics on boot. This repo keeps the same exploit (rav000's RP2350 firmware) and rebuilds the parts that hurt:
 
@@ -201,11 +201,38 @@ Re-discovers patch offsets for a new beta. AArch64 instructions are fingerprinte
 - confidence: 0.95 unique plus class match, 0.90 unique string site, 0.60 ambiguous, 0.30 multi-hit or delta-inferred
 - output: `migrate_report.md` with a per-entry table, site hexdump, and `REVIEW REQUIRED` plus `CANONICAL CONFLICTS` sections. `--auto` writes the target profile with `migrated:` metadata and post-write validation
 - safety: nothing under 0.90 gets written automatically, and delta inference is LOW by design
+- resumable: `--checkpoint [FILE]` records every section as it finishes, `--resume [FILE]` continues from it. A checkpoint only carries offsets for the exact base/target pair it was made from (path plus sha256 of both profiles); anything else is refused with exit 2 instead of reusing offsets from another build. Bare `--checkpoint`/`--resume` use `research/work/migrate_checkpoint.json`
+- machine-readable: `--json` prints exactly one JSON object on stdout (no banner, no table, no prompt, no ANSI) and the exit code is the verdict: `0` ready, `2` review required or a refused checkpoint, `1` bad input
 
 ```bash
 python3 profile_gen.py migrate offsets/iPhone12,3_27.0b2.yaml offsets/iPhone12,3_27.0b3.yaml \
     --comp-dir extracted/ --report migrate_report.md
 python3 profile_gen.py migrate offsets/iPhone12,3_27.0b3.yaml 27.0b4 --auto   # bootstrap a new beta
+
+# one JSON object for a script, exit 2 while anything is below the floor
+python3 profile_gen.py migrate offsets/iPhone12,3_27.0b2.yaml offsets/iPhone12,3_27.0b3.yaml \
+    --comp-dir research/comp-dir --json > migrate.json
+
+# a killed run resumes instead of searching the same sections again
+python3 profile_gen.py migrate ... --checkpoint research/work/mig_ck.json
+python3 profile_gen.py migrate ... --resume research/work/mig_ck.json
+```
+
+The JSON shape (offsets are decimal ints, `review` and `not_written` carry the entries a human has to look at):
+
+```json
+{
+  "schema": 1,
+  "verdict": "REVIEW REQUIRED: 25 entries below 0.90, 23 unresolved, 2 canonical conflict(s)",
+  "ready": false,
+  "counts": {"total": 40, "high": 15, "below": 25, "failed": 0, "skipped": 23, "unresolved": 23, "conflicts": 2},
+  "base": {"path": "offsets/iPhone12,3_27.0b2.yaml", "sha256": "..."},
+  "target": {"path": "offsets/iPhone12,3_27.0b3.yaml", "sha256": "..."},
+  "sections": {"ibss": {"counts": {...}, "entries": [{"name": "ibss.boot_args_adrp", "base_offset": 176060, "target_offset": 176372, "confidence": 0.95, "method": "pattern", "value_changed": false, "candidates": [176372]}]}},
+  "review": ["ibss.boot_args_string (conf 0.30, method pattern)"],
+  "conflicts": ["ibss.boot_args_string: canonical 27_0b3 block says 0xD3960 but migration found 0x1E0"],
+  "resumed_sections": [], "checkpoint": null, "wrote": false, "not_written": [], "validation": {}
+}
 ```
 
 ## Preflight: verify before you flash
@@ -489,6 +516,10 @@ The wizard asks for the model and iOS version, creates the profile from the temp
 - Tethered jailbreak: the device does not boot without the RP2350 exploit applied on every cold start
 - Flashing CFW erases all data, so keep a backup
 - Kernel exploit: a wrong offset can panic or brick the device. This is a research tool for people who understand that
+
+## License
+
+MIT, see `LICENSE`. It covers the tooling here; it ships no Apple code, no keys and no decrypted firmware.
 
 ## Credits
 

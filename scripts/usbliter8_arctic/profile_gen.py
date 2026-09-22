@@ -789,6 +789,7 @@ def _cli() -> int:
         print(f"    {C.EYE}propagate{C.NC} <base.yaml> <Model> [--ios V] [--build B] [--comp-dir DIR] [--overwrite] [--force]")
         print(f"    {C.EYE}diff{C.NC}      <base.yaml> <updated.yaml>")
         print(f"    {C.EYE}migrate{C.NC}   <base.yaml> <target.yaml|iOS> [--comp-dir DIR] [--auto] [--report FILE]")
+        print(f"                [--json] [--checkpoint [FILE]] [--resume [FILE]]  (2 = review required)")
         print(f"    {C.EYE}coverage{C.NC}  Show per-device profile status [--json]")
         print(f"    {C.EYE}gaps{C.NC}      Per-profile, per-section gap matrix [--json]")
         print(f"    {C.EYE}list{C.NC}      Show all known devices [--json]")
@@ -808,7 +809,9 @@ def _cli() -> int:
         cmd_diff(args)
     elif cmd == "migrate":
         from migrate import cli_main
-        cli_main(args)
+        # the exit code is the contract (2 = REVIEW REQUIRED), so it must
+        # survive: dropping it made every run look like a clean success
+        return cli_main(args)
     elif cmd == "coverage":
         cmd_coverage(json_out="--json" in args)
     elif cmd == "gaps":
