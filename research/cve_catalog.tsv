@@ -1,0 +1,54 @@
+# W0lfSword CVE catalog  -  the ONE source the `cve` command renders (AUD.4).
+#
+# fields (TAB separated, exactly 6):
+#   id        CVE id, or the repo's own finding tag (BB-032, bad_query, bl_sbx, ...)
+#   class     short bug class shown in the "Class" column
+#   component the component/technique shown in the "Component" column
+#   fixed_in  the release that fixes it ("unpatched" / "kernel-gated" when it applies)
+#   live_on   where it is still reachable (the "Live on" column)
+#   groups    comma separated filter names, from: kernel,userspace,sandbox,tcc,ssv,live
+#             (`cve <name>` selects the rows carrying that group; `cve live` is
+#             the cross cutting "still reachable today" set)
+#
+# file order = display order. `cve all` prints every row below; each filter prints
+# its own subset in the same order.
+#
+# rules for editing this file:
+#   - append a row, do not reorder  -  `cve all` output is diffed in review
+#   - a row here must have a write-up somewhere the audit can find it: research/,
+#     BUG_BOUNTY.md, pocs/, README.md or ROADMAP.md. scripts/cli_consistency.py
+#     fails the audit on an orphan row (a CVE nobody has evidence for).
+#   - no tabs inside a field, no empty field, id unique
+#
+CVE-2025-43520	kernel R/W	DarkSword/ICMPv6	18.7.2/26.1	LIVE ≤26.0.1	kernel
+CVE-2025-46285	kernel LPE	xnu timestamps	26.2/18.7.3	26.1 + 18.4.1 (research)	kernel,live
+CVE-2026-20626	root LPE	missing authz	26.3	26.1–26.2	kernel
+CVE-2026-20687	kernel UAF	AppleJPEGDriver	26.4	26.1–26.3 (A19)	kernel
+CVE-2026-28951	root LPE	incorrect authz	26.5	26.1–26.4.x	kernel,live
+CVE-2026-28972	kernel write	OOB write	26.5	26.1–26.4.x	kernel
+CVE-2026-43724	kernel OOB R/W	dyld slide v5	26.5.2	26.0–26.5.1 (macOS PoC)	kernel
+CVE-2026-39868	kernel corrupt	input validation	26.5.2	26.1–26.5.1	kernel
+CVE-2026-43805	kernel write	IOKit race	26.6	26.1–26.5.2	kernel
+CVE-2026-43778	kernel write	UAF	26.6	26.1–26.5.2	kernel
+CVE-2026-64747	kernel CODE EXEC	AVEVideoEncoder bof	26.6	26.1–26.5.x	kernel,live
+CVE-2026-64751	kernel write	UAF	26.6.1	26.1–26.6.0	kernel
+CVE-2025-31200	OOB R/W	APAC audio	18.4.1	patched	userspace
+CVE-2025-43400	OOB write	FontParser	18.7.1	LIVE 18.4.1	userspace,live
+CVE-2024-54529	type conf.	coreaudiod	15.2	macOS	userspace
+CVE-2026-28990	int ovf	EXR ImageIO	26.5	≤26.4.2	userspace,live
+CVE-2025-24203	file R/W	vm_behavior_set	?	17–26 (research)	userspace
+CVE-2025-43329	escape	Sandbox perms	26.0 (not 18.x)	LIVE 18.4.1	sandbox,live
+CVE-2025-43407	escape	Assets entitlements	26.1	LIVE 18.4.1	sandbox
+CVE-2025-43448	escape	CloudKit symlink	26.1	LIVE 18.4.1	sandbox
+CVE-2025-14174	escape	ANGLE WebGL	26.2	LIVE 18.4.1 (ITW)	sandbox,live
+CVE-2026-20628	escape	Sandbox perms	26.3	≤26.2.x	sandbox
+CVE-2026-28995	escape	App Intents	26.5	≤26.4.x	sandbox
+CVE-2026-28973	escape	libc int ovf	26.6	18.4.1 + ≤26.5	sandbox,live
+bad_query	escape	containermanagerd	unpatched	26.0–26.6.1	sandbox
+MCM/mha	escape	MobileHouseArrest	unpatched	18–27b	sandbox
+bl_sbx	write-esc	itunesstored/bookassetd	unpatched	≤26.2b1 (BB-041)	sandbox,live
+BB-032	escape	container traversal	unpatched	26.0–26.6.1	sandbox
+CVE-2025-43530	TCC bypass	scrod private API	26.2	LIVE 18.4.1	tcc
+CVE-2026-20677	TCC class	symlink race	26.3	LIVE 18.4.1/≤26.2	tcc
+BB-007	TCC bypass	TCC.db	kernel-gated	17.0–26.0.1	tcc
+BB-003	SSV bypass	vnode swap	kernel-gated	17.0–26.0.1	ssv

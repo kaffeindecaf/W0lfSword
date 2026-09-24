@@ -4,6 +4,8 @@
 
 **Verification legend:** `[V]` = verified against primary source (Apple security page / NVD / vendor blog). `[U]` = unverified / third-party claim, no primary confirmation.
 
+**Catalog note:** the kernel rows `./W0lfSword cve kernel` prints come from `research/cve_catalog.tsv` (AUD.4). This file is the write-up behind them - a release table plus the deep dives - and the audit fails if a catalog id has no write-up anywhere in the repo.
+
 ---
 
 ## 1. Release map (builds & xnu)

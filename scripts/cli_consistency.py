@@ -13,6 +13,13 @@ table renders. So the matrix rows must be well formed (a row with a missing
 field silently shifts every value the shell reads from it) and every row id
 the selector references must exist.
 
+AUD.4 moved the `cve` catalog out of cmd_cve into research/cve_catalog.tsv
+(the rows were repeated in four case blocks and `all` was a hand-kept
+shortlist 14 rows behind them). This check keeps that honest: the TSV rows
+must be well formed (6 tab separated fields, unique id, known group names,
+every group populated) and every id must be traceable to a write-up in the
+repo  -  a row nobody has evidence for is how a catalog starts inventing bugs.
+
 Usage:
     python3 scripts/cli_consistency.py [path/to/W0lfSword]
 
@@ -21,6 +28,7 @@ The last line is always `findings: N` so cmd_audit can parse it, and
 `commands: N` / `keys: N` give the counts the audit report shows.
 """
 
+import os
 import re
 import sys
 
@@ -43,6 +51,84 @@ MATRIX_FIELDS = 7
 MATRIX_STATUSES = {"implemented", "pending", "research", "blocked"}
 ROW_REF = re.compile(r"\bmatrix_row\s+([A-Za-z0-9_.-]+)")
 CAND_REF = re.compile(r"\bchain_candidate\s+[A-Za-z]\s+([A-Za-z0-9_.-]+)")
+
+# AUD.4: the `cve` catalog data file, the groups cmd_cve can filter on, and the
+# places a catalog id must be documented (the TSV itself never counts).
+CVE_TSV = "research/cve_catalog.tsv"
+CVE_FIELDS = ["id", "class", "component", "fixed_in", "live_on", "groups"]
+CVE_GROUPS = ["kernel", "userspace", "sandbox", "tcc", "ssv", "live"]
+CVE_FUNC = re.compile(r"^cmd_cve\(\)\s*\{")
+CVE_REF = re.compile(r'\bcatalog="[^"]*research/cve_catalog\.tsv"')
+# ...and the file must be handed to a reader, not merely named: `[ -f "$catalog" ]`
+# is an existence test, so a line matching this is not evidence of a render (the
+# awk that actually reads the file is the line that lacks it).
+CVE_EXTEST = re.compile(r'-[fder]\s+"\$catalog"')
+CVE_INLINE = re.compile(r'"(CVE-\d{4}-\d+|BB-\d{3}|bad_query|MCM/mha|bl_sbx)"')
+EVIDENCE_FILES = ["README.md", "ROADMAP.md", "CONTEXT.md", "BUG_BOUNTY.md",
+                  "DEBUG_TRACKING.md", "AUDIT_REPORT.md"]
+EVIDENCE_DIRS = ["research", "pocs", "docs", "scripts"]
+EVIDENCE_EXTS = (".md", ".py", ".h", ".c", ".m", ".sh")
+EVIDENCE_SKIP_DIRS = {".git", "referenceforAI", "__pycache__", ".theos",
+                      ".gitnexus", ".w0lfsword", "verification", "packages"}
+
+
+def parse_cve_catalog(root):
+    """Rows of research/cve_catalog.tsv as (lineno, fields).
+
+    The shell reads each row with `IFS=$'\\t' read -r id cls comp fixed live
+    groups`, so a row with a missing field shifts every value after the gap
+    (and a row with fewer than 6 fields is skipped entirely by the renderer's
+    `NF < 6` guard  -  a silently dropped CVE). Parse it here to catch both.
+    """
+    path = os.path.join(root, CVE_TSV)
+    rows, errors = [], []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return rows, [f"catalog data file {CVE_TSV} is missing "
+                      f"(cmd_cve renders from it now, not from its own rows)"]
+    for n, raw in enumerate(lines, 1):
+        if not raw.strip() or raw.startswith("#"):
+            continue
+        fields = raw.split("\t")
+        if len(fields) != len(CVE_FIELDS):
+            errors.append(f"{CVE_TSV} line {n}: row has {len(fields)} fields, "
+                          f"expected {len(CVE_FIELDS)} "
+                          f"({'|'.join(CVE_FIELDS)}): {raw.strip()[:60]}")
+            continue
+        rows.append((n, fields))
+    if not rows and not errors:
+        errors.append(f"{CVE_TSV} has no data rows")
+    return rows, errors
+
+
+def evidence_files(root):
+    """Paths -> text of every file a catalog id may be documented in."""
+    out = {}
+    for name in EVIDENCE_FILES:
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            out[path] = read_text(path)
+    for name in EVIDENCE_DIRS:
+        for dirpath, dirnames, filenames in os.walk(os.path.join(root, name)):
+            dirnames[:] = [d for d in dirnames if d not in EVIDENCE_SKIP_DIRS]
+            for fn in filenames:
+                if not fn.endswith(EVIDENCE_EXTS):
+                    continue
+                path = os.path.join(dirpath, fn)
+                text = read_text(path)
+                if text is not None:
+                    out[path] = text
+    return out
+
+
+def read_text(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return None
 
 
 def strip_heredocs(lines):
@@ -390,6 +476,88 @@ def main():
         findings.append("select_best_chain() references no exploit_matrix() "
                         "row (AUD.6: the selector must read the matrix)")
 
+    # ---- cve catalog <-> research docs (AUD.4) ---------------------------
+    # cmd_cve renders research/cve_catalog.tsv instead of carrying the rows, so
+    # the file is now load-bearing: a malformed row is a silently dropped CVE,
+    # a made-up group name is a filter that renders nothing, and an id nobody
+    # documented is a catalog entry with no evidence behind it.
+    root = os.path.dirname(os.path.abspath(path)) or "."
+    cve_rows, cve_errors = parse_cve_catalog(root)
+    findings.extend(cve_errors)
+    cve_groups = {}
+    cve_ids = {}
+    for lineno, fields in cve_rows:
+        cid = fields[0]
+        if not cid:
+            findings.append(f"{CVE_TSV} line {lineno}: empty id")
+        elif cid in cve_ids:
+            findings.append(f"{CVE_TSV} line {lineno}: duplicate id '{cid}' "
+                            f"(also line {cve_ids[cid]})")
+        cve_ids[cid] = lineno
+        for idx, value in enumerate(fields):
+            if not value.strip():
+                findings.append(f"{CVE_TSV} line {lineno}: empty "
+                                f"{CVE_FIELDS[idx]} field ('{cid}')")
+        groups = fields[5].split(",")
+        for group in groups:
+            if group not in CVE_GROUPS:
+                findings.append(f"{CVE_TSV} line {lineno}: unknown group "
+                                f"'{group}' on '{cid}' "
+                                f"(known: {', '.join(CVE_GROUPS)})")
+            else:
+                cve_groups[group] = cve_groups.get(group, 0) + 1
+    for group in CVE_GROUPS:
+        if group not in cve_groups:
+            findings.append(f"{CVE_TSV}: no row carries the '{group}' group "
+                            f"- `cve {group}` would render an empty table")
+
+    # cmd_cve must still READ the file, and must not carry rows again: the
+    # inlined copies are exactly what AUD.4 removed.
+    in_cve, cve_reads_tsv, cve_uses_var = False, False, False
+    for n, line, in_heredoc in strip_heredocs(lines):
+        if in_heredoc:
+            continue
+        if not in_cve:
+            if CVE_FUNC.match(line):
+                in_cve = True
+            continue
+        if line.startswith("}"):
+            break
+        code = line.split("#", 1)[0]
+        if CVE_REF.search(code):
+            cve_reads_tsv = True
+        if '"$catalog"' in code and not CVE_EXTEST.search(code):
+            cve_uses_var = True
+        match = CVE_INLINE.search(code)
+        if match:
+            findings.append(f"line {n}: cmd_cve carries the catalog row "
+                            f"{match.group(1)} inline again (move it to "
+                            f"{CVE_TSV})")
+    if not in_cve:
+        findings.append("could not find cmd_cve() to check the catalog wiring")
+    elif not cve_reads_tsv:
+        findings.append(f"cmd_cve() no longer points at {CVE_TSV} "
+                        f"(AUD.4: it renders the catalog file)")
+    elif not cve_uses_var:
+        findings.append(f"cmd_cve() names {CVE_TSV} but never reads from it "
+                        f"($catalog is unused)")
+
+    # every id needs a write-up somewhere (a row with no evidence is a guess).
+    # Evidence is the whole working tree, gitignored local research included -
+    # that is where this repo keeps most of its knowledge (research/attack_chains.md,
+    # referenceforAI/). Known consequence: two rows (CVE-2025-43448,
+    # CVE-2026-28995) are documented only in research/userspace_escapes.md, so a
+    # FRESH CLONE reports them until that write-up is committed. That is the real
+    # gap showing, not a broken check - do not silence it by widening the search.
+    if cve_ids:
+        evidence = evidence_files(root)
+        for cid, lineno in sorted(cve_ids.items()):
+            if not any(cid in text for text in evidence.values()):
+                findings.append(f"{CVE_TSV} line {lineno}: '{cid}' is in no "
+                                f"write-up this checkout has "
+                                f"({'/'.join(EVIDENCE_DIRS)}, "
+                                f"{', '.join(EVIDENCE_FILES)})")
+
     # ---- report ---------------------------------------------------------
     print(f"  registry rows:        {len(rows)}")
     print(f"  keys (name+slot+...): {key_count}")
@@ -398,6 +566,8 @@ def main():
     print(f"  handlers + functions: {len(functions)}")
     print(f"  sections (map):       {len(banners)}")
     print(f"  exploit matrix rows:  {len(matrix_rows)} (selector refs: {len(refs)})")
+    print(f"  cve catalog rows:     {len(cve_rows)} ({len(cve_groups)} groups, "
+          f"{sum(cve_groups.values())} group tags)")
     if script_version:
         print(f"  version (script):     {script_version}")
     for finding in findings:

@@ -2899,87 +2899,47 @@ EOF
 # ═══════════════════════════════════════════════════════════════
 
 cmd_cve() {
-    local filter="${1:-all}"
+    local filter="${1:-all}" catalog="$PROJECT_DIR/research/cve_catalog.tsv"
+    # AUD.4: the rows live in research/cve_catalog.tsv and are rendered from
+    # there. They used to be repeated inside this function - and `all` was a
+    # hand-kept shortlist of them, 14 rows behind the group filters, which is
+    # the drift this replaced. Never inline a catalog row again: add it to the
+    # TSV (scripts/cli_consistency.py fails the audit on a malformed row, a
+    # duplicate id, an unknown group, or an id no research doc mentions).
+    filter=$(printf '%s' "$filter" | tr '[:upper:]' '[:lower:]')
+    case "$filter" in
+        k) filter="kernel" ;;
+        u) filter="userspace" ;;
+        s) filter="sandbox" ;;
+    esac
     show_header
     echo ""
     section "CVE Catalog (C5.1/C5.2)  -  filter: ${filter}"
+    if [ ! -f "$catalog" ]; then
+        err "catalog data file missing: research/cve_catalog.tsv"
+        hint "restore it from git - the rows are no longer carried in this script"
+        echo ""
+        return 1
+    fi
     printf "  ${C_FROST}%-18s${NC} %-12s %-14s %-22s %s\n" "CVE" "Class" "Component" "Fixed in" "Live on"
     printf "  ${C_DIM}%s${NC}\n" "$(repeat_char '─' 96)"
-    case "$filter" in
-        kernel|k)
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43520" "kernel R/W" "DarkSword/ICMPv6" "18.7.2/26.1" "LIVE ≤26.0.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-46285" "kernel LPE" "xnu timestamps" "26.2/18.7.3" "26.1 + 18.4.1 (research)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20626" "root LPE" "missing authz" "26.3" "26.1–26.2"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20687" "kernel UAF" "AppleJPEGDriver" "26.4" "26.1–26.3 (A19)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28951" "root LPE" "incorrect authz" "26.5" "26.1–26.4.x"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28972" "kernel write" "OOB write" "26.5" "26.1–26.4.x"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43724" "kernel OOB R/W" "dyld slide v5" "26.5.2" "26.0–26.5.1 (macOS PoC)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-39868" "kernel corrupt" "input validation" "26.5.2" "26.1–26.5.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43805" "kernel write" "IOKit race" "26.6" "26.1–26.5.2"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43778" "kernel write" "UAF" "26.6" "26.1–26.5.2"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-64747" "kernel CODE EXEC" "AVEVideoEncoder bof" "26.6" "26.1–26.5.x"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-64751" "kernel write" "UAF" "26.6.1" "26.1–26.6.0"
-            ;;
-        userspace|u)
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-31200" "OOB R/W" "APAC audio" "18.4.1" "patched"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43400" "OOB write" "FontParser" "18.7.1" "LIVE 18.4.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2024-54529" "type conf." "coreaudiod" "15.2" "macOS"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28990" "int ovf" "EXR ImageIO" "26.5" "≤26.4.2"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-24203" "file R/W" "vm_behavior_set" "?" "17–26 (research)"
-            ;;
-        sandbox|s)
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43329" "escape" "Sandbox perms" "26.0 (not 18.x)" "LIVE 18.4.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43407" "escape" "Assets entitlements" "26.1" "LIVE 18.4.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43448" "escape" "CloudKit symlink" "26.1" "LIVE 18.4.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-14174" "escape" "ANGLE WebGL" "26.2" "LIVE 18.4.1 (ITW)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20628" "escape" "Sandbox perms" "26.3" "≤26.2.x"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28995" "escape" "App Intents" "26.5" "≤26.4.x"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28973" "escape" "libc int ovf" "26.6" "18.4.1 + ≤26.5"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "bad_query" "escape" "containermanagerd" "unpatched" "26.0–26.6.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "MCM/mha" "escape" "MobileHouseArrest" "unpatched" "18–27b"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "bl_sbx" "write-esc" "itunesstored/bookassetd" "unpatched" "≤26.2b1 (BB-041)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "BB-032" "escape" "container traversal" "unpatched" "26.0–26.6.1"
-            ;;
-        tcc)
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43530" "TCC bypass" "scrod private API" "26.2" "LIVE 18.4.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20677" "TCC class" "symlink race" "26.3" "LIVE 18.4.1/≤26.2"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "BB-007" "TCC bypass" "TCC.db" "kernel-gated" "17.0–26.0.1"
-            ;;
-        ssv)
-            printf "  %-18s %-12s %-14s %-22s %s\n" "BB-003" "SSV bypass" "vnode swap" "kernel-gated" "17.0–26.0.1"
-            ;;
-        live|LIVE)
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43329" "escape" "Sandbox perms" "26.0 (not 18.x)" "LIVE 18.4.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43400" "OOB write" "FontParser" "18.7.1" "LIVE 18.4.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-14174" "escape" "ANGLE WebGL" "26.2" "LIVE 18.4.1 (ITW)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28990" "int ovf" "EXR ImageIO" "26.5" "≤26.4.2"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28973" "escape" "libc int ovf" "26.6" "18.4.1 + ≤26.5"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28951" "root LPE" "incorrect authz" "26.5" "26.1–26.4.x"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-64747" "kernel CODE EXEC" "AVEVideoEncoder bof" "26.6" "26.1–26.5.x"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "bl_sbx" "write-esc" "itunesstored/bookassetd" "unpatched" "≤26.2b1 (BB-041)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-46285" "kernel LPE" "xnu timestamps" "26.2/18.7.3" "26.1 + 18.4.1 (research)"
-            ;;
-        all|*)
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43520" "kernel R/W" "DarkSword/ICMPv6" "18.7.2/26.1" "LIVE ≤26.0.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-46285" "kernel LPE" "xnu timestamps" "26.2/18.7.3" "26.1 + 18.4.1 (research)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28951" "root LPE" "incorrect authz" "26.5" "26.1–26.4.x"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-20687" "kernel UAF" "AppleJPEGDriver" "26.4" "26.1–26.3 (A19)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43724" "kernel OOB R/W" "dyld slide v5" "26.5.2" "26.0–26.5.1 (macOS PoC)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-64747" "kernel CODE EXEC" "AVEVideoEncoder bof" "26.6" "26.1–26.5.x"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-43778" "kernel write" "UAF" "26.6" "26.1–26.5.2"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-31200" "OOB R/W" "APAC audio" "18.4.1" "patched"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43400" "OOB write" "FontParser" "18.7.1" "LIVE 18.4.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2024-54529" "type conf." "coreaudiod" "15.2" "macOS"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28990" "int ovf" "EXR ImageIO" "26.5" "≤26.4.2"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-24203" "file R/W" "vm_behavior_set" "?" "17–26 (research)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-43329" "escape" "Sandbox perms" "26.0 (not 18.x)" "LIVE 18.4.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2025-14174" "escape" "ANGLE WebGL" "26.2" "LIVE 18.4.1 (ITW)"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "CVE-2026-28973" "escape" "libc int ovf" "26.6" "18.4.1 + ≤26.5"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "bad_query" "escape" "containermanagerd" "unpatched" "26.0–26.6.1"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "MCM/mha" "escape" "MobileHouseArrest" "unpatched" "18–27b"
-            printf "  %-18s %-12s %-14s %-22s %s\n" "bl_sbx" "write-esc" "itunesstored/bookassetd" "unpatched" "≤26.2b1 (BB-041)"
-            ;;
-    esac
+    # group filter: the 6th field is a comma separated list of filter names.
+    # `all` (and an unknown filter, as before) prints every row in file order.
+    local rows
+    rows=$(awk -F'\t' -v want="$filter" '
+        /^#/ { next }
+        NF < 6 { next }
+        want == "all" || want == "" { print; next }
+        {
+            n = split($6, g, ",")
+            for (i = 1; i <= n; i++) if (g[i] == want) { print; next }
+        }
+    ' "$catalog")
+    local id cls comp fixed live
+    while IFS=$'\t' read -r id cls comp fixed live _; do
+        [ -n "$id" ] || continue
+        printf "  %-18s %-12s %-14s %-22s %s\n" "$id" "$cls" "$comp" "$fixed" "$live"
+    done <<< "$rows"
     echo ""
     echo -e "  ${C_DIM}filters: kernel|k userspace|u sandbox|s tcc ssv live. Full catalog: research/attack_chains.md${NC}"
     echo ""
