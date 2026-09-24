@@ -91,6 +91,29 @@
 #     The ANIM.4 symbols and the pill's own strings are in the nm/strings lists
 #     below, so the shipped binary is proved to carry what the host test drives.
 #
+# Pins re-taken 2026-09-24 (one entry, and the mask it needed):
+#
+#   * `trm_shell_host_test` came up BAD with no harness change in between:
+#     `git diff f999d55..HEAD -- terminal tests/trm_shell_host_test.c
+#     scripts/run_trm_host_test.sh` is empty, yet the canon hash had moved. The
+#     cause was the host: the Parrot kernel update of 2026-09-22 (7.0.13 ->
+#     7.1.13) changed the one line the mask did not cover, `uname | [sh] Linux
+#     7.0.13+parrot7-amd64 ... `. Proof, not assumption: feeding today's log
+#     through the OLD mask with only that string put back to its pre-update value
+#     reproduces the old pin exactly (89e5f65f...).
+#   * so the mask now covers host identity (the kernel string, the caller's
+#     uid/euid/gid/egid, SHELL, the machine type `cpu` prints) and `canon-trm`
+#     also drops the compiler's own diagnostic preamble - run_trm_host_test.sh
+#     compiles with $CC every run, and gcc's wording is the toolchain's, not this
+#     tree's evidence (rc proves the compile). A new `canon_mask` check pins the
+#     claim from both sides: two logs that differ only in host identity hash the
+#     same, a changed verdict still moves the hash.
+#   * `engine_lib_archive` printed a different expected hash than the one it
+#     compares against (the pre-BUG.7 value), so a real drift would have reported
+#     the wrong "want". Rebuilt to confirm which is live: `make libengine` ->
+#     808K / 53 objects, 9acea996... - the value the check compares and now also
+#     the value its failure path prints.
+#
 # Re-pin only with a reason like the above: a count that changes is a code
 # change, not a flake.
 set -uo pipefail
@@ -111,13 +134,35 @@ FAIL=0
 # in "canon" mode: the trm_shell harness runs real commands and prints the live
 # system state (date, df, loadavg, its own pid and its random temp dir), and the
 # Theos build prints its parallel compile order plus the zip's mtimes.
+#
+# The next four are host identity rather than run identity: `uname` prints THIS
+# machine's kernel string, `id` the caller's uid/gid, `env` its SHELL and `cpu`
+# its machine type. They move when the host moves - a kernel upgrade did exactly
+# that on 2026-09-22 and looked like drift until the cause was proved - and BAD
+# must mean "the tree moved", nothing else.
 CANON_SED='
   s#/tmp/trm_shell_test_[A-Za-z0-9]+#/tmp/trm_shell_test_TMPDIR#g
   s/pid=[0-9]+ ppid=[0-9]+/pid=N ppid=N/
+  s/uid=[0-9]+ euid=[0-9]+ gid=[0-9]+ egid=[0-9]+/uid=N euid=N gid=N egid=N/
+  s#\| \[sh\] Linux [^|]*#| [sh] UNAME#
+  s#\| \[sh\] SHELL=[^|]*#| [sh] SHELL=N#
+  s#\| \[sh\] model +[A-Za-z0-9_-]+$#| [sh] model ARCH#
   s#\| \[sh\] [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8} [+-][0-9]{4}#| [sh] DATE#
   s#\| \[sh\] load +[0-9.]+ [0-9.]+ [0-9.]+#| [sh] loadavg N N N#
   s#total=[0-9]+MB free=[0-9]+MB avail=[0-9]+MB#total=NMB free=NMB avail=NMB#
   s/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}/DATE TIME/g'
+
+# canon-trm: CANON_SED plus a drop of the compiler's diagnostic preamble.
+# run_trm_host_test.sh compiles with $CC on every run, so gcc's own wording and
+# the line numbers it quotes sit in the log before the report starts; that text
+# belongs to the toolchain, not this tree, and every line here carries a verdict
+# prefix ("rc=", "ok", "BAD", "[") that the drop cannot touch.
+CANON_SED_TRM="$CANON_SED
+  /^In file included from /d
+  /:[0-9]+:[0-9]+: warning: /d
+  /:[0-9]+:[0-9]+: error: /d
+  /^[[:space:]]*[0-9]+ \|/d
+  /^[[:space:]]*\|/d"
 
 # check <name> <cwd> <expected-rc> <expected-hash> <raw|canon> <command>
 check() {
@@ -126,10 +171,12 @@ check() {
     ( cd "$dir" && eval "$cmd" ) >"$log" 2>&1
     local rc=$?
     local got
-    if [ "$mode" = canon ]; then
-        got=$(sed -E "$CANON_SED" "$log" | sort | sha256sum | cut -d' ' -f1)
-    else
+    if [ "$mode" = raw ]; then
         got=$(sha256sum <"$log" | cut -d' ' -f1)
+    elif [ "$mode" = canon-trm ]; then
+        got=$(sed -E "$CANON_SED_TRM" "$log" | sort | sha256sum | cut -d' ' -f1)
+    else
+        got=$(sed -E "$CANON_SED" "$log" | sort | sha256sum | cut -d' ' -f1)
     fi
     if [ "$rc" = "$erc" ] && [ "$got" = "$ehash" ]; then
         printf 'ok   %-34s rc=%s %s (%s)\n' "$name" "$rc" "${got:0:16}..." "$(wc -c <"$log") bytes"
@@ -201,9 +248,43 @@ check pressure_budget_self   "$ROOT" 0 98be7a751526bbd282f158c2d0522a78acedb4f8f
 check test_chain_select      "$ROOT" 0 9a596a45ef210f9b0238c8c2fc595887a88b66e8b260818a02798e2d2092fbc6 raw \
     'bash scripts/test_chain_select.sh'
 # The trm_shell harness is the one host check whose raw output cannot be byte
-# stable (it prints live df/date/loadavg/pid): rc + canonical hash instead.
-check trm_shell_host_test    "$ROOT" 0 89e5f65f65e23cc4ad9b9b499bf30e5c4de0c2af32b1c2cdbe33eee87af8fc6e canon \
+# stable (it prints live df/date/loadavg/pid AND host identity): rc + the
+# canonical hash instead, with the compiler preamble dropped (canon-trm).
+check trm_shell_host_test    "$ROOT" 0 15062e0546725b0d302879afba7f545343b5ef46030281d3f15971147900301f canon-trm \
     'bash scripts/run_trm_host_test.sh'
+
+# The mask is only worth what it proves, so pin it from both sides: two logs
+# that differ ONLY in host identity (kernel string, caller creds, SHELL, machine
+# type) must hash the same, and a changed verdict must still move the hash. Fails
+# if a mask rule above is deleted, or if a new host line starts leaking into the
+# trm pin (the way the kernel string did until 2026-09-24).
+mask_probe=$(printf '%s\n' \
+    '  rc=0  uname                                  | [sh] Linux 7.0.13+parrot7-amd64 #1 SMP (2026-07-12) x86_64' \
+    '  rc=0  id                                     | [sh] uid=1000 euid=1000 gid=1002 egid=1002 pid=17 ppid=16' \
+    '  rc=0  env                                    | [sh] SHELL=/bin/bash' \
+    '  rc=0  cpu                                    | [sh] model      x86_64' \
+    | sed -E "$CANON_SED" | sort | sha256sum | cut -d' ' -f1)
+mask_probe_other=$(printf '%s\n' \
+    '  rc=0  uname                                  | [sh] Linux 7.1.13+parrot7-amd64 #1 SMP (2026-09-12) aarch64' \
+    '  rc=0  id                                     | [sh] uid=501 euid=501 gid=20 egid=20 pid=4821 ppid=4819' \
+    '  rc=0  env                                    | [sh] SHELL=/bin/zsh' \
+    '  rc=0  cpu                                    | [sh] model      arm64' \
+    | sed -E "$CANON_SED" | sort | sha256sum | cut -d' ' -f1)
+mask_probe_verdict=$(printf '%s\n' \
+    '  rc=1  uname                                  | [sh] Linux 7.1.13+parrot7-amd64 #1 SMP (2026-09-12) x86_64' \
+    '  rc=0  id                                     | [sh] uid=1000 euid=1000 gid=1002 egid=1002 pid=17 ppid=16' \
+    '  rc=0  env                                    | [sh] SHELL=/bin/bash' \
+    '  rc=0  cpu                                    | [sh] model      x86_64' \
+    | sed -E "$CANON_SED" | sort | sha256sum | cut -d' ' -f1)
+if [ "$mask_probe" = "$mask_probe_other" ] && [ "$mask_probe_verdict" != "$mask_probe" ]; then
+    printf 'ok   %-34s host identity masked, a verdict change still moves the hash\n' "canon_mask"
+    PASS=$((PASS + 1))
+else
+    printf 'BAD  %-34s host identity masked=%s, verdict still hashes the same=%s\n' \
+        "canon_mask" "$([ "$mask_probe" = "$mask_probe_other" ] && echo yes || echo no)" \
+        "$([ "$mask_probe_verdict" = "$mask_probe" ] && echo yes || echo no)"
+    FAIL=$((FAIL + 1))
+fi
 check py_compile             "$ROOT" 0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 raw \
     'python3 -m py_compile scripts/check_scan_budget_cancel_writes.py scripts/check_bug2_release_paths.py scripts/check_pressure_budget.py scripts/probe_restore_e2e_selftest.py'
 check bash_syntax            "$ROOT" 0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 raw \
@@ -231,7 +312,7 @@ if [ "$WITH_BUILDS" = 1 ]; then
             PASS=$((PASS + 1))
         else
             printf 'BAD  %-34s sha256=%s\n     want %s\n' "engine_lib_archive" "$got_ar" \
-                32f6af7e665ab15d58031528d4e9cd912c6ba5b94ee4aab05345fddc44c411e5
+                9acea9964e08984d43c9805c0d01247c1a55044479674b8620dd8e0129d7b035
             FAIL=$((FAIL + 1))
         fi
         # 2) app build: the log varies only in compile order + zip mtimes (canon
