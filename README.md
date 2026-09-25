@@ -195,7 +195,7 @@ actually use:
 | `safe on|off` | turn the kernel part off or on remotely | `./W0lfSword safe on` |
 | `toggle on|off` | enable or disable the tweak entirely | `./W0lfSword toggle off` |
 | `log [n]` / `monitor` | pull the tweak log / watch it live with colors | `./W0lfSword log 100` |
-| `targets (t)` / `exploits (e)` | supported apps; the technique matrix — `exploits <model>` adds that phone's method verdict | `./W0lfSword exploits iPhone14,7` |
+| `targets (t)` / `exploits (e)` | supported apps; the technique matrix — `exploits <model> [ios]` adds that phone's method verdict | `./W0lfSword exploits iPhone14,7 26.0.1` |
 | `chains [a-g|best]` | attack-chain catalog; `best` picks for the connected phone | `./W0lfSword chains best` |
 | `cve [filter]` | CVE tracker: kernel, userspace, sandbox, tcc, ssv, live | `./W0lfSword cve live` |
 | `offsets [ver]` | offset coverage per iOS version | `./W0lfSword offsets 26.0` |
