@@ -330,7 +330,7 @@ W0LF_COMMANDS=(
     "mha|-|-|-|safety|-|re-sign Filza as MobileHouseArrest (K4.12)|-|1|-"
     # ── catalogs ──────────────────────────────────────────────────
     "tweaks|-|tw|-|catalog|-|tweak catalog  -  'tweaks install <id>' builds + deploys|-|1|-"
-    "exploits|-|e|-|catalog|-|exploit technique matrix (K1.5)|-|1|-"
+    "exploits|-|e|-|catalog|-|exploit technique matrix (K1.5), <model> for per-device compat|-|1|-"
     "cve|-|-|-|catalog|-|CVE tracker: kernel, userspace, sandbox, tcc, ssv, live|-|1|-"
     # ── housekeeping ──────────────────────────────────────────────
     "setup|-|-|install|housekeeping|-|install build tools for your OS|root|1|-"
@@ -1059,40 +1059,104 @@ select_exploit() {
     esac
 }
 
+# K1.8 - quiet compatibility verdict for ONE exploit-method pick: prints the
+# reason and returns 1 when this model cannot run it, prints nothing and returns
+# 0 when it can ("auto" always can). The device-specific half of the sentence is
+# the caller's job, so the family rules live here exactly once and both the loud
+# validator below and the picker rows render from the same string.
+# puaf-* are A9-A11 only and unported (F1.x) - the reason says so even when the
+# family matches, because "can't run here" and "not built yet" are different.
+exploit_method_gap() {
+    local method="${1:-}" model="${2:-}"
+    local want
+    [ -n "$method" ] || { echo "no method given"; return 1; }
+    [ "$method" = "auto" ] && return 0
+    want=$(select_exploit "$model")
+    case "$method" in
+        puaf-physpuppet|puaf-smith|puaf-landa|pe_v1|pe_v2) ;;
+        *) echo "unknown method"; return 1;;
+    esac
+    if [ "$want" = "mte" ]; then
+        echo "A19/M5 - Memory Tagging kills this exploit class"; return 1
+    fi
+    case "$method" in
+        puaf-physpuppet|puaf-smith|puaf-landa)
+            [ "$want" = "puaf" ] && return 0; echo "A9-A11 only"; return 1;;
+        pe_v1)
+            [ "$want" = "pe_v1" ] && return 0; echo "needs A12-A17/M1-M4"; return 1;;
+        pe_v2)
+            [ "$want" = "pe_v2" ] && return 0; echo "needs A18"; return 1;;
+    esac
+    echo "unknown method"; return 1
+}
+
 # K1.6 - validate an exploit-method pick against a device model.
 # Returns 0 when the method matches select_exploit()'s mapping for the model
 # (or is "auto"), 1 when it mismatches - printing a C_AMB warning first. The
 # caller decides whether to keep the pick (confirm) or fall back to "auto".
-# puaf-physpuppet / puaf-smith / puaf-landa are A10-A11 only and are NOT
+# puaf-physpuppet / puaf-smith / puaf-landa are A9-A11 only and are NOT
 # ported yet (ROADMAP F1.x) - never fabricate a kfd backend.
 exploit_method_valid() {
     local method="${1:-}" model="${2:-}"
-    local want family
+    local gap
     [ -n "$method" ] || return 1
     [ "$method" = "auto" ] && return 0
-    want=$(select_exploit "$model")
-    family=$(soc_family "$model")
-    case "$method" in
-        puaf-physpuppet|puaf-smith|puaf-landa)
-            [ "$want" = "puaf" ] && return 0
-            warn "kfd puaf backend not ported (F1.x); '$method' is A9-A11 only but this device is '$family' - family mismatch"
-            return 1
-            ;;
-        pe_v1)
-            [ "$want" = "pe_v1" ] && return 0
-            warn "'pe_v1' needs A12-A17/M1-M4 but this device is '$family' - family mismatch"
-            return 1
-            ;;
-        pe_v2)
-            [ "$want" = "pe_v2" ] && return 0
-            warn "'pe_v2' needs A18 but this device is '$family' - family mismatch"
-            return 1
-            ;;
+    if gap=$(exploit_method_gap "$method" "$model"); then return 0; fi
+    case "$gap" in
+        "unknown method")
+            warn "unknown exploit method '$method' - falling back to 'auto'";;
         *)
-            warn "unknown exploit method '$method' - falling back to 'auto'"
-            return 1
-            ;;
+            warn "'$method' cannot run here - $gap, this device is $(soc_family "$model") ($model)";;
     esac
+    return 1
+}
+
+# K1.8 - the annotated method list: one row per pick, the method this model's
+# SoC selects marked, everything that cannot run here dimmed with its reason.
+# The adderall picker renders it BEFORE the question (so a guaranteed-to-fail
+# pick is visible as such instead of being accepted and then questioned) and
+# `exploits <model>` renders it on demand - one implementation, both surfaces.
+# Three "nothing is usable here" cases get their own footer, because the next
+# step differs: MTE (userspace only), A9-A11 (kfd puaf is the path but the
+# backend is unported - F1.x), unknown model (identify the SoC first).
+# Colours stay in the printf FORMAT and the caller owns the sink.
+exploit_method_rows() {
+    local model="${1:-}"
+    local want; want=$(select_exploit "$model")
+    local family; family=$(soc_family "$model")
+    local m gap usable=0 note col
+    printf "  ${C_DIM}exploit methods for %s (%s):${NC}\n" "${model:-<unknown model>}" "$family"
+    for m in auto pe_v1 pe_v2 puaf-physpuppet puaf-smith puaf-landa; do
+        if gap=$(exploit_method_gap "$m" "$model"); then
+            note="can run here"; col="$C_DIM"
+            case "$m" in
+                auto)    note="let the device decide";;
+                puaf-*)  note="family matches, kfd backend not ported (F1.x)";;
+                *)       usable=$((usable + 1));;
+            esac
+            if [ "$m" = "$want" ]; then
+                note="$note  <- this device"; col="$C_GRN"
+            fi
+            [ "$m" = "auto" ] && usable=$((usable + 1))
+            printf "  ${C_FROST}%-18s${NC} ${col}%s${NC}\n" "$m" "$note"
+        else
+            printf "  ${C_DIM}%-18s %s${NC}\n" "$m" "$gap"
+        fi
+    done
+    if [ "$usable" -le 1 ]; then
+        case "$want" in
+            mte)
+                printf "  ${C_AMB}%s${NC}\n" "MTE device  -  the kernel route is closed, userspace only"
+                printf "  ${C_DIM}%s${NC}\n" "next: ./W0lfSword chains best $model (bad_query / MCM route)";;
+            puaf)
+                printf "  ${C_AMB}%s${NC}\n" "kfd PUAF is this SoC's path, but the backend is not ported yet (F1.x / K5.3)"
+                printf "  ${C_DIM}%s${NC}\n" "for now: ./W0lfSword chains best $model (bootchain route) or adderall --safe";;
+            *)
+                printf "  ${C_AMB}%s${NC}\n" "no kernel method applies to this model yet"
+                printf "  ${C_DIM}%s${NC}\n" "identify the SoC first: ./W0lfSword kernelcache (pull + XPF), then doctor";;
+        esac
+    fi
+    return 0
 }
 
 # K5.9  -  auto-select the best attack chain for a device (iOS version + model).
@@ -2718,6 +2782,7 @@ cmd_targets() {
 # ═══════════════════════════════════════════════════════════════
 
 cmd_exploits() {
+    local model="${1:-}"
     show_header
     echo ""
     section "Exploit Technique Matrix"
@@ -2742,6 +2807,15 @@ cmd_exploits() {
     echo -e "  ${C_DIM}green = deployable today · yellow = in progress · research = reference PoC in${NC}"
     echo -e "  ${C_DIM}referenceforAI/moreprojects (deep dive: research/moreprojects_deep_dive.md)${NC}"
     echo -e "  ${C_DIM}Panic-PoC catalog: ${C_FROST}./W0lfSword poc list${NC}"
+    # K1.8  -  the per-device half of this view. `exploits <model>` answers the
+    # question the menu cannot ("can THIS phone run it?"); no model = the plain
+    # matrix the menu has always shown.
+    if [ -n "$model" ]; then
+        section "Exploit Method Compat"
+        exploit_method_rows "$model"
+    else
+        echo -e "  ${C_DIM}Per-device compat: ${C_FROST}./W0lfSword exploits <model>${NC} ${C_DIM}(e.g. iPhone14,7)${NC}"
+    fi
     echo ""
 }
 
@@ -5598,6 +5672,12 @@ EOF
     fi
 
     if [ "$EXPLOIT_METHOD" = "auto" ]; then
+        # K1.8  -  render the compatibility picture BEFORE the question, so a
+        # pick this device cannot run is visibly dimmed with its reason instead
+        # of being accepted here and questioned afterwards (K1.6's validate +
+        # confirm below stays as the backstop for a typed or profile-carried
+        # pick). Menu text goes to stderr like every other prompt in this phase.
+        exploit_method_rows "$DEV_MODEL" >&2
         EXPLOIT_METHOD=$(ask_choice "Exploit method" "auto" "auto pe_v1 pe_v2 puaf-physpuppet puaf-smith puaf-landa")
     fi
     # K1.6 - validate the chosen method against this device's SoC family.
@@ -6883,6 +6963,10 @@ exploits  -  the technique matrix (K1.5).
   referenceforAI/moreprojects: AppleJPEGDriver UAF (CVE-2026-20687),
   dyld slide (CVE-2026-43724), EXR ImageIO (CVE-2026-28990), SEP
   exhaustion. Each row: iOS range, SoC, bug class, status.
+  'exploits <model>' (K1.8) adds the per-device verdict below the table:
+  every exploit method, dimmed with the reason it cannot run on that model
+  and the one the model's SoC selects marked. Models are the identifiers
+  the phone reports (hw.machine / ProductType), e.g. iPhone14,7, iPad13,1.
 EOF
             ;;
         chains)
@@ -7315,7 +7399,7 @@ cmd_help() {
     printf "  ${C_EYE}%-14s${NC} %s\n" "doctor"       "Check environment"
     printf "  ${C_EYE}%-14s${NC} %s\n" "offsets"      "iOS version coverage"
     printf "  ${C_EYE}%-14s${NC} %s\n" "config (g)"   "Menu behavior: animations, colors, wolf, prompt  -  show | set <k> <v> | edit | reset"
-    printf "  ${C_EYE}%-14s${NC} %s\n" "exploits (e)" "Exploit technique matrix (K1.5)"
+    printf "  ${C_EYE}%-14s${NC} %s\n" "exploits (e)" "Exploit technique matrix (K1.5)  -  <model> adds that device's compat verdict"
     printf "  ${C_EYE}%-14s${NC} %s\n" "chains"       "Attack chain catalog + stages (C5.3)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "cve [filter]" "CVE tracker: kernel|userspace|sandbox|tcc|ssv|live (C5.1/C5.2)"
     printf "  ${C_EYE}%-14s${NC} %s\n" "poclab (o)"   "PoC lab: test found-but-unimplemented bugs  -  list | test <alac|libxml2-diff> (C6)"

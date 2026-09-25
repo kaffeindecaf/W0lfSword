@@ -41,6 +41,9 @@ if bash scripts/test_chain_select.sh >/dev/null 2>&1; then ok "test_chain_select
 section "CVE catalog render test (AUD.4)"
 if bash scripts/test_cve_catalog.sh >/dev/null 2>&1; then ok "test_cve_catalog.sh"; else bad "test_cve_catalog.sh"; fi
 
+section "Per-device exploit-method compat grid (K1.8)"
+if bash scripts/test_exploit_choice.sh >/dev/null 2>&1; then ok "test_exploit_choice.sh"; else bad "test_exploit_choice.sh"; fi
+
 section "BUG.1 host tests (zone-writer clamp + probe restore policy)"
 # BUG.1 (2026-09-11 SE panic) is a 32-byte block written past the end of a
 # kalloc.96 object and a corrupted live inpcb left behind on a probe exit. Both
