@@ -157,6 +157,16 @@ else
     note "check_scan_budget_cancel_writes.py missing — skipping"
 fi
 
+section "ROADMAP STATS table (AUD.12)"
+# The table is generated from the file, and the audit fails while the two
+# disagree; this proves the check can fail (fixture mutations, incl. the real
+# drift shape: a checkbox ticked with the table left alone).
+if python3 scripts/roadmap_stats.py --selftest >/tmp/regression_roadmap_stats.log 2>&1; then
+    ok "roadmap_stats.py ($(grep -c '^  ok' /tmp/regression_roadmap_stats.log) mutations caught)"
+else
+    bad "roadmap_stats.py --selftest — see /tmp/regression_roadmap_stats.log"
+fi
+
 section "Audit"
 if [ "$(./W0lfSword audit 2>&1 | grep -c 'AUDIT PASSED')" -gt 0 ]; then ok "audit"; else bad "audit"; fi
 

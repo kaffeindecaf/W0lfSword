@@ -2418,10 +2418,27 @@ print(b,p)
         cc_rows=$(printf '%s\n' "$cc_out" | awk '/^  registry rows:/{print $3; exit}')
         cc_find=${cc_find:-0}; cc_rows=${cc_rows:-0}
     fi
+    # -- ROADMAP STATS table (AUD.12). The status table at the bottom of
+    #    ROADMAP.md was hand-maintained and drifted weeks behind the file (it
+    #    claimed 290 items / 150 done against 377 rows / 249 done). It is
+    #    generated from the file now (scripts/roadmap_stats.py) and this step
+    #    fails the moment the two disagree - which is exactly the shape of the
+    #    old drift: a checkbox ticked, the table never touched. Fix with
+    #    `python3 scripts/roadmap_stats.py --write ROADMAP.md` (--selftest
+    #    proves the check can fail: 11 fixture mutations).
+    local rs_find=0 rs_items=0 rs_rows=0 rs_out=""
+    if [ -f scripts/roadmap_stats.py ]; then
+        rs_out=$(python3 scripts/roadmap_stats.py 2>&1)
+        rs_find=$(printf '%s\n' "$rs_out" | awk '/^findings:/{print $2; exit}')
+        rs_items=$(printf '%s\n' "$rs_out" | awk '/^  items:/{print $2; exit}')
+        rs_rows=$(printf '%s\n' "$rs_out" | awk '/^  table rows:/{print $3; exit}')
+        rs_find=${rs_find:-0}; rs_items=${rs_items:-0}; rs_rows=${rs_rows:-0}
+    fi
     # --json (J6.2): machine-readable audit result
     if $JSON_MODE; then
         printf '%s' "$results" | SC_WARNS="$sc_warns" DF_DEFS="$df_defs" DF_DEAD="$df_dead" \
-            SYN_N="$syn_n" SYN_BAD="$syn_bad" CC_ROWS="$cc_rows" CC_FIND="$cc_find" python3 -c '
+            SYN_N="$syn_n" SYN_BAD="$syn_bad" CC_ROWS="$cc_rows" CC_FIND="$cc_find" \
+            RS_ITEMS="$rs_items" RS_ROWS="$rs_rows" RS_FIND="$rs_find" python3 -c '
 import sys, json, os, shutil
 rows = []
 for line in sys.stdin.read().splitlines():
@@ -2434,13 +2451,17 @@ syn_n = int(os.environ.get("SYN_N", "0"))
 syn_bad = int(os.environ.get("SYN_BAD", "0"))
 cc_rows = int(os.environ.get("CC_ROWS", "0"))
 cc_find = int(os.environ.get("CC_FIND", "0"))
-issues = sum(1 for r in rows if not r["ok"]) + sc_w + df_dead + syn_bad + cc_find
+rs_items = int(os.environ.get("RS_ITEMS", "0"))
+rs_rows = int(os.environ.get("RS_ROWS", "0"))
+rs_find = int(os.environ.get("RS_FIND", "0"))
+issues = sum(1 for r in rows if not r["ok"]) + sc_w + df_dead + syn_bad + cc_find + rs_find
 print(json.dumps({"files": rows, "issues": issues,
                   "passed": issues == 0,
                   "shellcheck": {"installed": shutil.which("shellcheck") is not None, "warnings": sc_w, "ok": sc_w == 0},
                   "dead_fn": {"scan": os.path.exists("scripts/dead_fn_scan.py"), "defs": df_defs, "dead": df_dead, "ok": df_dead == 0},
                   "script_syntax": {"checked": syn_n, "failed": syn_bad, "ok": syn_bad == 0},
-                  "cli_consistency": {"check": os.path.exists("scripts/cli_consistency.py"), "registry_rows": cc_rows, "findings": cc_find, "ok": cc_find == 0}},
+                  "cli_consistency": {"check": os.path.exists("scripts/cli_consistency.py"), "registry_rows": cc_rows, "findings": cc_find, "ok": cc_find == 0},
+                  "roadmap_stats": {"check": os.path.exists("scripts/roadmap_stats.py"), "items": rs_items, "rows": rs_rows, "findings": rs_find, "ok": rs_find == 0}},
                  indent=2))
 '
         return 0
@@ -2484,6 +2505,18 @@ print(json.dumps({"files": rows, "issues": issues,
         fi
     else
         echo -e "  ${C_DIM}─${NC} CLI consistency ${C_DIM}(scripts/cli_consistency.py missing - optional step, skipped)${NC}"
+    fi
+    if [ -f scripts/roadmap_stats.py ]; then
+        if [ "$rs_find" -eq 0 ]; then
+            ok "ROADMAP.md (STATS table matches: $rs_rows rows over $rs_items items)"
+        else
+            echo -e "  ${C_RED}✗${NC} ROADMAP.md ${C_RED}(STATS table: $rs_find line(s) behind the file)${NC}"
+            printf '%s\n' "$rs_out" | sed -n '/^  ERROR/p' | sed 's/^/      /'
+            printf '%s\n' "$rs_out" | sed -n '/^regenerate:/p' | sed 's/^/      /'
+            issues=$((issues + rs_find))
+        fi
+    else
+        echo -e "  ${C_DIM}─${NC} ROADMAP STATS ${C_DIM}(scripts/roadmap_stats.py missing - optional step, skipped)${NC}"
     fi
     if [ "$issues" -eq 0 ]; then
         echo ""; echo -e "  ${C_GRN}${B}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  AUDIT PASSED${NC}"
