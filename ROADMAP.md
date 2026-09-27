@@ -3382,3 +3382,54 @@ pill's symbols and strings out of the shipped binary, and all eight
 does NOT show `offset / budget` - `kexploit_scan_budget()` is wall-clock SECONDS
 (BUG.3's row), so the app shows the walk position and the attempt's clock against
 that budget, and says `no position yet` rather than printing `0x0` as progress.
+
+## 0.14 - findings from the 2026-09-27 SE2 session (BUG.8, staged)
+
+### BUG.8 - imo_remref panic: a pointer field was closed over an unproven restore
+
+The evidence, from the device rather than from this tree: two panics the same
+afternoon, `panic-full-2026-09-27-133643.0002.ips` and
+`panic-full-2026-09-27-141829.0002.ips`, byte-identical verdict in both -
+`imo_remref: imo 0xffffffde15d23d20 negative refcnt @ip_output.c:2949`, panicked
+task = the app, ~1 min after the write probe. The app's own log (fsync per line,
+so it survives a panic) ends 57 s earlier with the probe refusing to promote and
+its restore never confirming.
+
+What the write path was doing: the staged probe retargets a live inpcb's
+`inp6_icmp6filt` at the next inpcb's filt slot so that a write to that socket's
+filt lands on the next socket's field - a POINTER, in a field the kernel
+dereferences and frees. The engine saved both fields it touched (filt + the
+`inp6_chksum` qword at +8) and had a restore path for them, but on the device the
+put-back could never be re-read as the saved value (`probe restore verify: OOB
+re-read failed kr=1`, all 5 tries, on both runs) - and the run released the spray
+anyway. The release closes ~27k sockets; closing is where the kernel walks a
+clobbered filt field, and that is the panic.
+
+Two halves, both in `kexploit/probe_restore_policy.c` (compiled for the host test
+too, driven by `tests/krw_zone_write_host_test.c`):
+
+1. `probe_pointer_write_for()` - the pointer write is refused unless a scalar
+   write to the SAME page has been put back and RE-READ as the saved value first,
+   and a restore source exists. Order matters: an available fd pair is what makes
+   a put-back possible, not what makes it confirmed, and on both device runs both
+   sources were available while the confirmation never came. The probe now does
+   the inert-field round trip right after the inert-field write and stops on it
+   when it cannot be confirmed, so an attempt can no longer end on a pointer the
+   engine cannot take back.
+2. `probe_release_may_close()` - when a pointer WAS written (either alias exit,
+   including the one where the verify failed but the write may have landed) and
+   the put-back is not confirmed, `sockets_release()` does not close the spray at
+   all: it leaks it on purpose, logs the count and the reason, and sets
+   `g_kernel_state_poisoned`. A leaked socket is a leak; a closed one was a reboot.
+
+`kexploit_state_poisoned()` exports that bit; the app refuses further runs while
+it is set (W0lfTerm `term_bridge_state_poisoned()`), because nothing else in a
+process that could not put the kernel back is safe to do.
+
+Verification on the host: `run_krw_zone_write_host_test.sh` -> 124 checks, 0
+failures (eight of them BUG.8's - every input combination of both decisions, so
+"no combination lets a pointer be written or a socket closed without a confirmed
+round trip" is a test and not a sentence); the lint gained two checks and six
+mutations (44 checks, 60 mutations, all caught). What is NOT verified is the
+device: this fix has never run on the SE2, and the honest claim is only that the
+panicking path is refused by construction now - staged still touches the kernel.

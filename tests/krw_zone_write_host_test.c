@@ -593,6 +593,37 @@ static void case_staged_minus5_restore_is_reachable(void)
           "a pair opened for an earlier save is refused (no write through a foreign socket)");
 }
 
+// BUG.8 (2026-09-27 SE2 panic: imo_remref negative refcnt @ip_output.c:2949,
+// panicked task = the app, twice, ~1 min after the probe): the two decisions
+// that keep a pointer field's put-back from being assumed. Both are exhaustive
+// over their inputs - the point of the case is that NO input combination lets a
+// pointer be written or a socket be closed without a CONFIRMED round trip.
+static void case_pointer_write_and_release_reachability(void)
+{
+    // 1. The retarget needs the PROOF. On the SE2 both restore sources were
+    //    available and the put-back still could not be re-read, so an available
+    //    fallback on its own must never be enough.
+    check(probe_pointer_write_for(false, true) == PROBE_POINTER_WRITE_REFUSED,
+          "a round trip that could not be confirmed refuses the pointer write, even with a fallback fd pair");
+    check(probe_pointer_write_for(false, false) == PROBE_POINTER_WRITE_REFUSED,
+          "no round trip and no way back refuses the pointer write");
+    // 2. The one allowed combination: proven round trip AND a way to write back.
+    check(probe_pointer_write_for(true, true) == PROBE_POINTER_WRITE_ALLOWED,
+          "a verified round trip plus a live fd pair allows the retarget");
+    check(probe_pointer_write_for(true, false) == PROBE_POINTER_WRITE_REFUSED,
+          "a verified round trip with no fd pair to write through still refuses it");
+    // 3. The release decision: closing is allowed only when nothing pointer-shaped
+    //    was written, or when the put-back came back re-read as the saved value.
+    check(probe_release_may_close(false, false) == true,
+          "no pointer written: the spray is closed as usual (an unconfirmed scalar restore is not a leak)");
+    check(probe_release_may_close(false, true) == true,
+          "no pointer written, restore confirmed: still closed");
+    check(probe_release_may_close(true, true) == true,
+          "pointer written and put-back re-read: closing is safe, the field is back");
+    check(probe_release_may_close(true, false) == false,
+          "pointer written and put-back NOT confirmed: the sockets MUST be leaked, not closed (the SE2 panic)");
+}
+
 // sweep: for every dst/len with dst inside the declared object, the verdict is
 // OK exactly when the range fits, and no emitted block ever leaves the object
 static void case_sweep(void)
@@ -667,6 +698,8 @@ int main(void)
     case_restore_action_for_every_exit();
     case_restore_fd_source();
     case_staged_minus5_restore_is_reachable();
+    printf("\nBUG.8: a pointer write and a socket close both need a confirmed round trip:\n");
+    case_pointer_write_and_release_reachability();
 
     printf("\nchecks=%d failures=%d\n", g_checks, g_failures);
     if (g_failures == 0) {

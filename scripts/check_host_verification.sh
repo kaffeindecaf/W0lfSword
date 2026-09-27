@@ -44,6 +44,24 @@
 #     the interleave moved between runs. tests/trm_shell_host_test.c now line-
 #     buffers stdout, and the canon hash is byte-stable over repeated runs.
 #
+# Pins re-taken 2026-09-27 (W0lfTerm 0.24, BUG.8; ten entries, all from one cause):
+#
+#   * the BUG.8 fix landed in the engine (probe_restore_policy.c gains
+#     probe_pointer_write_for/probe_release_may_close, kexploit_opa334.m gates the
+#     pointer retarget on the inert-field round trip and leaks the spray instead
+#     of closing it when the put-back is unconfirmed), so every derived artifact
+#     moved: `engine_lib_build`, `engine_lib_archive`, `app_ipa_build` (0.23 ->
+#     0.24), `app_binary` and the addresses in `app_static_symbols`.
+#   * `krw_zone_write` moved because the host test gained BUG.8's case (eight new
+#     checks, 116 -> 124, 0 failed) - a check-count change is a code change, and
+#     this one is the cause.
+#   * `scan_budget_cancel` / `scan_budget_cancel_self` moved with the lint's two
+#     new BUG.8 checks and six new mutations (42 -> 44 checks, 54 -> 60 mutations,
+#     all caught).
+#   * `bug2_release_paths` / `_self` print the src line number of each traced
+#     exit, and the engine edits moved them; the check count is unchanged (56, 0
+#     failed) and the two new lines are the gate and the release decision.
+#
 # Pins re-taken 2026-09-20 (W0lfTerm ANIM.1/ANIM.2/ANIM.3, six entries): the
 # app-side launch work moved the app and everything derived from it, and one new
 # entry joined the suite.
@@ -193,13 +211,17 @@ echo "raw logs: $OUT"
 echo
 
 # --- the three named harnesses (ROADMAP 0.12 BUG.1 / BUG.3 / BUG.5) ---
-check krw_zone_write         "$ROOT" 0 1386b0b6e393b4923dc3ad9cd69547b8e9471e78f2c904688b5a09cc3b0ea5be raw \
+check krw_zone_write         "$ROOT" 0 49f3dc3aa16d9674f65628be2c4f5fb5d35f2de1005d9cffcbe0a863d2367f0d raw \
     'bash scripts/run_krw_zone_write_host_test.sh'
 # BUG.7: the window the clamp is given is the kalloc bucket read out of the zone
 # (pcb -> inpcbinfo.ipi_zone -> z_elem_size), including the refusal verdict for an
 # object whose bucket contradicts the field table. Same decision file the engine
 # archive compiles (kexploit/krw_zone_size.c).
-check krw_zone_size          "$ROOT" 0 5d1e08cffa5f28acedeec7fadd7e567a5493b8a8c75b1ccbeb2ded3715627725 raw \
+# re-pinned 2026-09-27 (the 0x67 wrap): the canonical-pointer guard in
+# kexploit/krw_zone_size.c now refuses the all-ones poison that passed the old
+# test and then wrapped into a read at 0x67 (the device log's 'kaddr isn't
+# valid' spam), so the harness prints one more check.
+check krw_zone_size          "$ROOT" 0 0a5414e616200aafc94e0b4c7956bda8e5c264ad105bfc6ea2367635d62512e7 raw \
     'bash scripts/run_krw_zone_size_host_test.sh'
 # BUG.1 end to end: the same two files, driven through the probe's
 # save -> corrupt -> exit -> put-back sequence (the 32-byte overrun injected,
@@ -215,16 +237,22 @@ check kwrite_counter         "$ROOT" 0 1dc9c1d4b0e35b86e23667ff627e4b57bb7f6ec83
 # the tweak build ship, so a drift between tested and shipped fails at entry 12f.
 check tweak_log_throttle     "$ROOT" 0 d59cd9fd7d8be99c390a569e1c7430af0b37a8023433fc4beaf5806b530653ab raw \
     'bash scripts/run_tweak_log_throttle_host_test.sh'
-check scan_budget_cancel     "$ROOT" 0 d459f2adeb4f0a8d573998d8e513a74852fddb03dbb1c6266a037b8c930e1732 raw \
+# re-pinned 2026-09-27 (ICON.1 / KB.1): the lint gained the icon-set check and
+# the three keyboard checks (38 -> 42 checks, 43 -> 54 mutations), so both
+# hashes moved.
+check scan_budget_cancel     "$ROOT" 0 5ae245c7786ed68314abe18700b7865602753d6dbbaf613467d9552cb58fa97d raw \
     'python3 scripts/check_scan_budget_cancel_writes.py'
-check scan_budget_cancel_self "$ROOT" 0 7074304979ce5747dd8d0664e7c7e67807f25bc2ab9a91e87bd7c331764f12f3 raw \
+check scan_budget_cancel_self "$ROOT" 0 6e41cc60b78b4d088751dc7965a97f00db3e8b0510bf50ef1a5ef3cc591eae40 raw \
     'python3 scripts/check_scan_budget_cancel_writes.py --selftest'
 # ANIM.1 / ANIM.3: the launch animations' decisions (term_anim.c) - the caret
 # blink rule and the boot sequence's budget arithmetic. The app compiles the same
 # file (app entry term_anim.c in the W0lfTerm Makefile) and the harness reads the
 # art from this tree, which is the art the Makefile copies into the bundle, so
 # the sequence the test prices is the sequence the device draws.
-check term_anim_host_test    "$ROOT" 0 d42d5594940634cfbd963e764cd0fc3cde0f3df4a3846f5e1b0aba06f7130eea raw \
+# re-pinned 2026-09-27 (KB.1): the harness gained the keyboard's geometry - the
+# three sizes, their row heights and per-row key widths, against the system
+# keyboard's 216 pt (66 -> 87 checks).
+check term_anim_host_test    "$ROOT" 0 89f328d5bbf57f8f83cfa16407bf636ad07c123f0287542a3234f654a127382d raw \
     'bash "$TERM_SRC/scripts/run_term_anim_host_test.sh"'
 
 # --- the rest of regression.sh's host half (run directly, never the whole file) ---
@@ -232,9 +260,12 @@ check term_anim_host_test    "$ROOT" 0 d42d5594940634cfbd963e764cd0fc3cde0f3df4a
 # mutations for them (the bucket read delegated to the tested chain, the injected
 # reader, the field-span floor, the refused-window branch), so both hashes moved:
 # 55 checks / 19 mutations before, 61 / 23 after.
-check bug2_release_paths     "$ROOT" 0 68e092eb5bd3c215350d03f93f1912f527fdaf1b767566753aad0ed668f19161 raw \
+# re-pinned 2026-09-27: this lint PRINTS the engine source line numbers it
+# traces, so the pointer guard's new lines in kexploit_opa334.m moved its
+# output (61 checks / 23 mutations, unchanged).
+check bug2_release_paths     "$ROOT" 0 d215c9831c32277eaaccdf354510ca8fac191608ab85b01b6a551da29b5f1f76 raw \
     'python3 scripts/check_bug2_release_paths.py'
-check bug2_release_paths_self "$ROOT" 0 eb73de27dd79cb551dbf3ad4e4748390ed7fc934dae667d6af00aaab2e6a9b4f raw \
+check bug2_release_paths_self "$ROOT" 0 88768fcc730f5edbf7f6f2231cdb782a8aabdcbe56f1ec9d3dbcd263b5331fcc raw \
     'python3 scripts/check_bug2_release_paths.py --selftest'
 check test_offsets           "$ROOT" 0 eead34fbfc466f966c32ceb1d2e43f1312400ccf97fa2894239a85550f47857d raw \
     'python3 scripts/test_offsets.py'
@@ -304,30 +335,37 @@ if [ "$WITH_BUILDS" = 1 ]; then
         #    warnings, zero errors) and llvm-nm shows the archive defines
         #    _krw_zone_bucket_for_pcb while kexploit_opa334.o references it.
         # shellcheck disable=SC2016  # eval'd command string: the expansion is the point
-        check engine_lib_build "$ROOT" 0 573a137e7bd6f9eb4ab379bfcc6c1ad68ac8a0e152fb042d92b3d037aa0190c2 raw \
+        # re-pinned 2026-09-27: the engine archive gained early_kread's latched refusal
+# and kread_set_origin's breadcrumbs (kexploit_opa334.m, krw.m) and
+# krw_zone_size.c's poison refusal, so the build log AND the archive moved.
+check engine_lib_build "$ROOT" 0 9512ce2f1a32feb6cdd8696bc6d93ee5198504216e6efa3b211a959d791519e3 raw \
             'THEOS=${THEOS:-$HOME/theos} make libengine'
         got_ar=$(sha256sum .theos/libengine/libw0lfengine.a | cut -d' ' -f1)
-        if [ "$got_ar" = 9acea9964e08984d43c9805c0d01247c1a55044479674b8620dd8e0129d7b035 ]; then
+        if [ "$got_ar" = 6d7e10bb1d00830783fe3e5c879f8e0698819de244e41f13ea175bcca47f7781 ]; then
             printf 'ok   %-34s %s\n' "engine_lib_archive" "${got_ar:0:16}..."
             PASS=$((PASS + 1))
         else
             printf 'BAD  %-34s sha256=%s\n     want %s\n' "engine_lib_archive" "$got_ar" \
-                9acea9964e08984d43c9805c0d01247c1a55044479674b8620dd8e0129d7b035
+                6d7e10bb1d00830783fe3e5c879f8e0698819de244e41f13ea175bcca47f7781
             FAIL=$((FAIL + 1))
         fi
         # 2) app build: the log varies only in compile order + zip mtimes (canon
         #    mode); the linked binary is the assertion, so hash it directly.
-        check app_ipa_build "$TERM_SRC" 0 24e3346a9876b5afad428c67b2165b39eef61a3a3bc4ef20c8f03fc765d790bf canon \
-            'bash scripts/build_ipa.sh sideload 0.22'
+        # Re-pinned 2026-09-27 (ICON.1 / KB.1): version label 0.23, the icon set
+        # in the bundle, and the app-side keyboard - so the build log and the
+        # linked binary both moved (and the nm list below grew the _term_kb_*
+        # decisions plus the KB.1 selectors/strings).
+        check app_ipa_build "$TERM_SRC" 0 16eb2834ca6862e9f2660180f45309cd023eacbbc882f025e753e4c6ad787919 canon \
+            'bash scripts/build_ipa.sh sideload 0.24'
         got_bin=$(sha256sum "$TERM_SRC/dist/Payload/W0lfTerm.app/W0lfTerm" | cut -d' ' -f1)
         # Re-pinned 2026-09-22 (ANIM.4): the app gained the status pill (new view
         # code, new version label 0.22), so the linked binary moved.
-        if [ "$got_bin" = cc282d3dc5e478194217c79043c04a7e28263a041cbdedbd326c1e39b17b6740 ]; then
+        if [ "$got_bin" = 4b91ab17e0fcbdaf5a54ceba882ff9160d6ce71f1f55dc0f472f09acd88e4bcc ]; then
             printf 'ok   %-34s %s\n' "app_binary" "${got_bin:0:16}..."
             PASS=$((PASS + 1))
         else
             printf 'BAD  %-34s sha256=%s\n     want %s\n' "app_binary" "$got_bin" \
-                cc282d3dc5e478194217c79043c04a7e28263a041cbdedbd326c1e39b17b6740
+                4b91ab17e0fcbdaf5a54ceba882ff9160d6ce71f1f55dc0f472f09acd88e4bcc
             FAIL=$((FAIL + 1))
         fi
         # 3) the app-side static check (llvm-nm: GNU nm cannot read Mach-O)
@@ -335,10 +373,14 @@ if [ "$WITH_BUILDS" = 1 ]; then
         #    archive, and _krw_zone_bucket_for_pcb was added to the nm list so the
         #    shipped app is proved to link the zone-bucket chain the host test
         #    drives - not just to compile it.
+    #    Re-pinned 2026-09-27 (BUG.8): the 0.24 rebuild moved the binary again, and
+    #    the check now also proves the poisoned-state path is IN the shipped app
+    #    (_kexploit_state_poisoned + _term_bridge_state_poisoned, plus the strings
+    #    a reader of the log sees when the engine refuses to close the spray).
         # shellcheck disable=SC2016  # eval'd command string: the expansion is the point
-        check app_static_symbols "$TERM_SRC" 0 f8d6c67423a132014f476d296191e4967a251e9dfc4e49adba763f6d82ef6a0e raw \
+        check app_static_symbols "$TERM_SRC" 0 abab3d7dc4cd48f20f1934c37688896d3189b00b7167e0aa31fad73630e3df7d raw \
             'BIN=dist/Payload/W0lfTerm.app/W0lfTerm
-             { echo "W0lfTerm app-side static check (linked binary produced by the 0.22 rebuild)"
+             { echo "W0lfTerm app-side static check (linked binary produced by the 0.24 rebuild)"
                echo "binary: $BIN"
                echo "sha256: $(sha256sum "$BIN" | cut -d" " -f1)"
                echo
@@ -351,8 +393,14 @@ if [ "$WITH_BUILDS" = 1 ]; then
                echo "== nm: ANIM.4 pill decisions (term_anim.c) + the bridge it reads through =="
                llvm-nm-19 "$BIN" | grep -E " _term_pill_state_for| _term_pill_visible| _term_pill_title| _term_pill_detail| _term_pill_pulses| _term_pill_pulse_secs| _term_pill_pulse_floor| _term_pill_refresh_secs| _term_bridge_pill_telemetry| _term_bridge_pill_note_cancel| _kexploit_scan_offset"
                echo
+               echo "== nm: KB.1 keyboard decisions (term_anim.c) =="
+               llvm-nm-19 "$BIN" | grep -E " _term_kb_height| _term_kb_row_height| _term_kb_key_width| _term_kb_size_name| _term_kb_row_count| _term_kb_system_height| _term_kb_system_key_height| _term_kb_pad| _term_kb_row_gap"
+               echo
+               echo "== nm: BUG.8 poisoned-state wiring (the engine bit + the bridge call) =="
+               llvm-nm-19 "$BIN" | grep -E " _kexploit_state_poisoned| _term_bridge_state_poisoned"
+               echo
                echo "== strings markers (count) =="
-               for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter" beginBootSequence skipBootSequence wolf_art fadeTick endLineFade CANCELLED "no position yet" "no read landed" "pillPulse"; do
+               for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter" beginBootSequence skipBootSequence wolf_art fadeTick endLineFade CANCELLED "no position yet" "no read landed" "pillPulse" customKbToggled "Custom keyboard" "Keyboard size" SHIFT "sockets LEAKED" "inert-field round trip" "poisoned kernel state" "Reboot the phone to clear it"; do
                    printf "  %-34s %s\n" "$m" "$(strings -a "$BIN" | grep -cF "$m")"
                done
                echo

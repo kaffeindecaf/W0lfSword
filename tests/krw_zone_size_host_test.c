@@ -270,6 +270,29 @@ static void test_chain(void)
           "a non-canonical zone pointer is refused");
     check(g_read_count == 2, "the chain does not read the element size through it");
 
+    // 2026-09-27 SE: a field read back as poison (all ones) passed the
+    // top-16-bits mask, and the next hop's offset WRAPPED it - 0xffff...ffff +
+    // ipi_zone (0x68) == 0x67 - so the primitive was asked for a user address and
+    // refused it (100 refusal lines + 100 backtraces in one run, and the window
+    // for that write became the field span instead of a bucket). The chain must
+    // stop at the poison hop and issue no read at all through it.
+    kmem_wire_chain(0x60);
+    kmem_store64(PCB_ADDR + OFF_PCBINFO, 0xffffffffffffffffULL);
+    check(krw_zone_bucket_for_pcb(PCB_ADDR, OFF_PCBINFO, OFF_IPI_ZONE,
+                                  OFF_ELEM_SIZE, fake_read64) == 0,
+          "an all-ones (poisoned) inpcbinfo pointer is refused");
+    check(g_read_count == 1, "the chain stops at the poison hop instead of following it");
+    check(!g_read_oob, "the wrapped address (0x68 + all-ones -> 0x67) is never read");
+
+    // Same poison one hop later, where it wraps the element-size read instead.
+    kmem_wire_chain(0x60);
+    kmem_store64(PCBINFO_ADDR + OFF_IPI_ZONE, 0xffffffffffffffffULL);
+    check(krw_zone_bucket_for_pcb(PCB_ADDR, OFF_PCBINFO, OFF_IPI_ZONE,
+                                  OFF_ELEM_SIZE, fake_read64) == 0,
+          "an all-ones zone pointer is refused");
+    check(g_read_count == 2, "the chain stops before the z_elem_size read");
+    check(!g_read_oob, "no wrapped address was read for the zone hop either");
+
     // A zone that IS reachable but whose element size is not a class: a wrong
     // zone, a wrong offset, or a zone this tree knows nothing about. All three
     // mean "unknown bucket" (the caller keeps its own field span).

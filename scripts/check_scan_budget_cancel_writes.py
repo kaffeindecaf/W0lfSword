@@ -54,6 +54,10 @@ import tempfile
 # ---------------------------------------------------------------------------
 ENGINE_FILES = [
     "kexploit/kexploit_opa334.m",
+    # BUG.8: the pointer-write / release decision file, and the host test that
+    # drives the very same object the engine compiles (krw_zone_write_host_test).
+    "kexploit/probe_restore_policy.c",
+    "tests/krw_zone_write_host_test.c",
     "kexploit/kexploit_opa334.h",
     "kexploit/krw.m",
     "kexploit/kwrite_counter.c",
@@ -90,6 +94,11 @@ APP_FILES = [
     # pill may claim - so all four files are read here.
     "term_bridge.h",
     "TerminalViewController.h",
+    # ICON.1 / KB.1: the app icon (plist + the generator that makes the PNGs the
+    # Makefile ships) and the app's own keyboard, whose geometry is decided in
+    # term_anim.c and whose rows the view lays out from those numbers.
+    "Resources/Info.plist",
+    "scripts/make_term_icon.py",
 ]
 
 CHECKS = []
@@ -161,6 +170,8 @@ class Src:
         self.engine_missing = [rel for rel in ENGINE_FILES if not read(root, rel)]
         self.app_missing = [rel for rel in APP_FILES if not read(wolfterm, rel)]
         self.e_m = self.engine["kexploit/kexploit_opa334.m"]
+        self.prp_c = self.engine["kexploit/probe_restore_policy.c"]
+        self.krw_write_test = self.engine["tests/krw_zone_write_host_test.c"]
         self.e_h = self.engine["kexploit/kexploit_opa334.h"]
         self.krw_m = self.engine["kexploit/krw.m"]
         self.wc_c = self.engine["kexploit/kwrite_counter.c"]
@@ -185,6 +196,9 @@ class Src:
         self.anim_test = self.app["tests/term_anim_host_test.c"]
         self.b_h = self.app["term_bridge.h"]
         self.vc_h = self.app["TerminalViewController.h"]
+        # ICON.1 / KB.1
+        self.app_plist = self.app["Resources/Info.plist"]
+        self.icon_py = self.app["scripts/make_term_icon.py"]
 
 
 def all_sources_present(src):
@@ -1191,6 +1205,196 @@ def c_anim_build_wiring(src):
 
 
 # ===========================================================================
+# ICON.1 - the app icon
+# ===========================================================================
+
+@check("ICON.1 icon: the plist names the icons the Makefile ships, and the generator makes them")
+def c_icon_wiring(src):
+    # The shipped PNGs are the ones the Makefile copies into the bundle AND the
+    # ones the generator writes - a Makefile listing a name the generator never
+    # produces builds an .ipa with an icon slot empty, which no build fails on.
+    shipped = sorted(re.findall(r"Resources/(AppIcon[\w.@]+\.png)", src.app_makefile))
+    generated = sorted(re.findall(r'\("(AppIcon[\w.@]+\.png)"', src.icon_py))
+    plist = src.app_plist
+    named = ("CFBundleIcons" in plist and "CFBundlePrimaryIcon" in plist
+             and "CFBundleIconFiles" in plist)
+    # iOS resolves the BASE name to @2x/@3x by device scale, so naming a file
+    # that carries its scale in the plist is how an icon goes missing on one of
+    # the two screens (and the @1x slot is never the one a Retina device asks
+    # for). Both keys must name AppIcon60x60, not AppIcon60x60@2x.png.
+    base_named = "AppIcon60x60" in plist and "AppIcon60x60@2x.png" not in plist
+    same_set = shipped == generated and len(shipped) >= 3
+    # Strokes, not a font glyph: a font's weight and side bearings change with the
+    # size, so the same mark would not be the same mark at 60 and 180 pt.
+    vector = "ImageDraw" in src.icon_py and "truetype" not in src.icon_py and "ImageFont" not in src.icon_py
+
+    ok = named and base_named and same_set and vector
+    report(ok, "ICON.1 icon: the plist names the icons the Makefile ships, and the generator makes them",
+           "plist-keys=%s base-name-only=%s makefile==generator=%s (%d files) stroked=%s"
+           % (named, base_named, same_set, len(shipped), vector))
+    return ok
+
+
+# ===========================================================================
+# KB.1 - the app's own keyboard
+# ===========================================================================
+
+@check("KB.1 app: the app's keyboard replaces the system one only when the setting is on")
+def c_kb_install(src):
+    vc = src.vc_m
+    # Both branches must exist: the system keyboard is what the app shipped with,
+    # so turning the setting off has to be able to go back to it.
+    on_branch = "self.input.inputView = self.customKeyboard;" in vc
+    off_branch = "self.input.inputView = nil;" in vc
+    # An inputView is installed by resigning and re-becoming first responder;
+    # setting it under a live keyboard leaves the old one on screen.
+    dance = ("if (wasFirst) [self.input resignFirstResponder];" in vc
+             and "if (wasFirst) [self.input becomeFirstResponder];" in vc)
+    # ...and the settings change must reach the terminal at all.
+    applied = "[self applyKeyboardMode]" in vc
+    # A signature, not a rebuild per call: applySettingsNow runs on every font
+    # tick, and re-installing the input view there would drop and re-raise the
+    # keyboard under the slider.
+    gated = "appliedKeyboardSig" in vc
+
+    ok = on_branch and off_branch and dance and applied and gated
+    report(ok, "KB.1 app: the app's keyboard replaces the system one only when the setting is on",
+           "on-branch=%s off-branch=%s responder-cycle=%s applied-from-settings=%s change-gated=%s"
+           % (on_branch, off_branch, dance, applied, gated))
+    return ok
+
+
+@check("KB.1 app: the keyboard's geometry is term_anim.c's, the rows are centered, keys share one insert path")
+def c_kb_geometry(src):
+    vc = src.vc_m
+    # Every number the view needs comes from the tested file - a literal height
+    # here would be geometry the host test never saw.
+    from_anim = all(name in vc for name in ("term_kb_height(", "term_kb_row_height(",
+                                            "term_kb_key_width(", "term_kb_pad()", "term_kb_row_gap()"))
+    # The layout the item promises: 10 / 9 / 9 / 6 keys.
+    rows = ('@"qwertyuiop"' in vc and '@"asdfghjkl"' in vc and '@"zxcvbnm"' in vc)
+    # A shorter row must be centered, not stretched - that is why the row's own
+    # key width is asked for instead of one width for the whole keyboard.
+    centered = "(w - total) / 2.0" in vc
+    # Every key must take a path the keyboard OWNER owns: the row loops go
+    # through -keyTapped: (the key bar's own insert path), the two modifiers and
+    # the two specials have their own methods, and nothing in here writes to the
+    # field directly. The KB.1 section is checked on its own - the key bar above
+    # it uses the same selector, so a whole-file count would still pass if one
+    # row stopped using it (the selftest mutation proved exactly that).
+    kb_section = vc.split("// --- KB.1: the app's own keyboard")[-1].split("- (void)keyTapped:(UIButton *)b {")[0]
+    shared = (kb_section.count("@selector(keyTapped:)") >= 3
+              and "[self textFieldShouldReturn:self.input]" in kb_section
+              and "self.input.text =" not in kb_section)
+    # SPACE and DEL are the two keys that are not insertText of their title.
+    special = 'insertText:@" "' in vc and "[self.input deleteBackward]" in vc
+    # The host test is where "it is smaller than the system keyboard" is checked.
+    pinned = ("term_kb_height(i) < term_kb_system_height()" in src.anim_test
+              and "term_kb_system_key_height()" in src.anim_test)
+
+    ok = from_anim and rows and centered and shared and special and pinned
+    report(ok, "KB.1 app: the keyboard's geometry is term_anim.c's, the rows are centered, keys share one insert path",
+           "geometry-from-term_anim=%s rows-10/9/9/6=%s rows-centered=%s shared-insert=%s space+del=%s host-pinned=%s"
+           % (from_anim, rows, centered, shared, special, pinned))
+    return ok
+
+
+@check("KB.1 settings: the switch and the size picker exist, persist, and reach the terminal")
+def c_kb_settings(src):
+    s_m, svc = src.s_m, src.svc_m
+    api = all(x in s_m for x in ("+ (BOOL)customKeyboard", "+ (void)setCustomKeyboard:",
+                                 "+ (int)customKeyboardSizeIndex", "+ (void)setCustomKeyboardSizeIndex:",
+                                 "+ (CGFloat)customKeyboardHeight"))
+    # The sizes are term_anim.c's list, not a second copy in the settings.
+    from_anim = "term_kb_size_count()" in s_m and "term_kb_height(" in s_m
+    # The system keyboard stays the default: this feature is opt-in.
+    default_off = "static BOOL g_customKeyboard = NO;" in s_m
+    persisted = all(x in s_m for x in ("#define K_CKB", "#define K_CKBS",
+                                       "[d setBool:g_customKeyboard forKey:K_CKB]",
+                                       "[d setInteger:(NSInteger)g_customKbSize forKey:K_CKBS]"))
+    # Each row's handler must set its setting AND hand the change to the
+    # terminal, INSIDE ITS OWN BODY - a loose search would match the next
+    # handler's apply call and pass while this row's change never lands (the
+    # selftest mutation proved exactly that).
+    toggle_body = _objc_method(svc, "- (void)customKbToggled:")
+    sized_body = _objc_method(svc, "- (void)customKbSizeChanged:")
+    toggle = (toggle_body is not None
+              and "[TermSettings setCustomKeyboard:sw.on];" in toggle_body
+              and "term_bridge_apply_settings();" in toggle_body)
+    sized = (sized_body is not None
+             and "[TermSettings setCustomKeyboardSizeIndex:(int)seg.selectedSegmentIndex];" in sized_body
+             and "term_bridge_apply_settings();" in sized_body)
+    rows = "@selector(customKbToggled:)" in svc and "@selector(customKbSizeChanged:)" in svc
+
+    ok = bool(api and from_anim and default_off and persisted and toggle and sized and rows)
+    report(ok, "KB.1 settings: the switch and the size picker exist, persist, and reach the terminal",
+           "api=%s sizes-from-term_anim=%s default-off=%s persisted=%s toggle-row=%s size-row=%s"
+           % (api, from_anim, default_off, persisted, bool(toggle), bool(sized)))
+    return ok
+
+
+# ===========================================================================
+# BUG.8 - a pointer write and a socket close both need a confirmed round trip
+# ===========================================================================
+
+@check("BUG.8: the engine writes a pointer and closes sockets only after a confirmed round trip")
+def c_bug8_pointer_and_release(src):
+    # The decision file owns both rules, and the host test drives the same object
+    # the engine compiles (tests/krw_zone_write_host_test.c).
+    policy = src.prp_c
+    policy_ok = ("probe_pointer_write_for" in policy and "probe_release_may_close" in policy
+                 and "PROBE_POINTER_WRITE_REFUSED" in policy
+                 and "PROBE_POINTER_WRITE_ALLOWED" in policy
+                 # the branches themselves, not just the names: the proof gates
+                 # the pointer, and a restore that was not confirmed never closes
+                 and "if (!scalarRoundTripConfirmed) {" in policy
+                 and "if (!restoreSourceAvailable) {" in policy
+                 and "if (!pointerWritten) return true;" in policy
+                 and "return restoreConfirmed;" in policy)
+    tested = all(s in src.krw_write_test for s in (
+        "probe_pointer_write_for(false, true) == PROBE_POINTER_WRITE_REFUSED",
+        "probe_pointer_write_for(true, true) == PROBE_POINTER_WRITE_ALLOWED",
+        "probe_release_may_close(true, false) == false",
+        "probe_release_may_close(true, true) == true"))
+    # The engine: the retarget is gated on the inert-field round trip...
+    gate = ("probe_page_write_verify(memoryObject, seekingOffset, readBuffer, writeBuffer,\n"
+            "                                                 chksumPageOff, chksumPageOrig,\n"
+            "                                                 \"inert-field round trip (inp6_chksum put-back)\")" in src.e_m
+            and "if (probe_pointer_write_for(scalarRoundTrip, restoreSource) == PROBE_POINTER_WRITE_REFUSED)" in src.e_m)
+    # ...the fact that a pointer is live is recorded on BOTH alias exits (a failed
+    # verify may still have landed - that is the case that panicked the SE2)...
+    recorded = src.e_m.count("g_probe_pointer_written = true;") >= 2
+    # ...and only the branch that RE-READS the saved values may clear it.
+    confirmed = ("g_probe_restore_confirmed = true;\n                g_probe_pointer_written = false;" in src.e_m)
+    # The release asks the policy instead of closing unconditionally.
+    release = ("if (!probe_release_may_close(g_probe_pointer_written ? true : false,\n"
+               "                                 g_probe_restore_confirmed ? true : false)) {" in src.e_m
+               and "g_kernel_state_poisoned = true;" in src.e_m)
+    ok = policy_ok and tested and gate and recorded and confirmed and release
+    report(ok, "BUG.8: the engine writes a pointer and closes sockets only after a confirmed round trip",
+           "policy=%s host-tested=%s retarget-gated=%s pointer-recorded=%s only-verified-clears=%s release-asks=%s"
+           % (policy_ok, tested, gate, recorded, confirmed, release))
+    return ok
+
+
+@check("BUG.8 app: a poisoned kernel refuses the next run and says why")
+def c_bug8_app_refusal(src):
+    b_m, b_h = src.b_m, src.b_h
+    # The app must not include the engine header for this (the pill rule): it gets
+    # the bit through one bridge call.
+    bridge = ("int term_bridge_state_poisoned(void) {\n    return kexploit_state_poisoned();\n}" in b_m
+              and "int term_bridge_state_poisoned(void);" in b_h)
+    run = _c_function(b_m, "static void term_run_exploit(void)")
+    refused = (run is not None and "if (term_bridge_state_poisoned()) {" in run
+               and "Reboot the phone to clear it" in run
+               and "imo_remref" in run)
+    ok = bridge and refused
+    report(ok, "BUG.8 app: a poisoned kernel refuses the next run and says why",
+           "bridge-one-call=%s refusal-at-the-top-of-the-run=%s" % (bridge, refused))
+    return ok
+
+
+# ===========================================================================
 # selftest: every mutation above must be caught
 # ===========================================================================
 def _mutate(text, old, new, count=1):
@@ -1423,6 +1627,80 @@ def selftest(root, wolfterm):
         return _mutate(text, '#include "term_anim.h"',
                              '#include "term_anim.h"\n#include "kexploit/kexploit_opa334.h"')
 
+    # --- ICON.1 -------------------------------------------------------------
+    def mut_icon_not_shipped(text):
+        # The Makefile names a file the generator never writes: the build stays
+        # green and the .ipa ships an empty icon slot.
+        return _mutate(text, "Resources/AppIcon60x60@2x.png", "Resources/AppIcon60x60x2.png")
+
+    def mut_icon_plist_names_the_file(text):
+        # The scale in the plist instead of the base name iOS resolves.
+        return _mutate_all(text, "AppIcon60x60", "AppIcon60x60@2x.png")
+
+    def mut_icon_uses_a_font(text):
+        return _mutate(text, "    d = ImageDraw.Draw(img)",
+                             "    from PIL import ImageFont\n    d = ImageDraw.Draw(img)\n"
+                             "    _f = ImageFont.truetype('DejaVuSansMono.ttf', 200)")
+
+    # --- KB.1 ---------------------------------------------------------------
+    def mut_kb_install_removed(text):
+        # The setting is stored, the terminal never re-installs: the keyboard
+        # only changes after a relaunch.
+        return _mutate(text, "    // KB.1: the keyboard choice can have changed while the settings sheet was up.\n"
+                             "    [self applyKeyboardMode];\n", "")
+
+    def mut_kb_off_branch_removed(text):
+        # No way back to the system keyboard once the app's one is on.
+        return _mutate(text, "        self.input.inputView = nil;",
+                             "        self.input.inputView = self.customKeyboard;")
+
+    def mut_kb_rows_not_centered(text):
+        return _mutate(text, "        CGFloat x = (w - total) / 2.0;", "        CGFloat x = 0.0;")
+
+    def mut_kb_key_skips_the_shared_path(text):
+        # One letter key with its own insert path instead of -keyTapped:.
+        return _mutate(text, "            [b addTarget:self action:@selector(keyTapped:) forControlEvents:UIControlEventTouchUpInside];\n"
+                             "            [self.kbLetterButtons addObject:b];\n            [keys addObject:b];",
+                             "            [b addTarget:self action:@selector(kbSpace:) forControlEvents:UIControlEventTouchUpInside];\n"
+                             "            [self.kbLetterButtons addObject:b];\n            [keys addObject:b];")
+
+    def mut_kb_default_on(text):
+        return _mutate(text, "static BOOL g_customKeyboard = NO;", "static BOOL g_customKeyboard = YES;")
+
+    def mut_kb_size_not_persisted(text):
+        return _mutate(text, "    [d setInteger:(NSInteger)g_customKbSize forKey:K_CKBS];\n", "")
+
+    def mut_kb_toggle_does_not_set(text):
+        return _mutate(text, "    [TermSettings setCustomKeyboard:sw.on];", "    (void)sw;")
+
+    def mut_kb_size_does_not_reach_the_terminal(text):
+        return _mutate(text, "    [TermSettings setCustomKeyboardSizeIndex:(int)seg.selectedSegmentIndex];\n    term_bridge_apply_settings();",
+                             "    [TermSettings setCustomKeyboardSizeIndex:(int)seg.selectedSegmentIndex];")
+
+    def mut_bug8_no_round_trip_gate(text):
+        return _mutate(text, "    if (probe_pointer_write_for(scalarRoundTrip, restoreSource) == PROBE_POINTER_WRITE_REFUSED) {",
+                             "    if (false && probe_pointer_write_for(scalarRoundTrip, restoreSource) == PROBE_POINTER_WRITE_REFUSED) {")
+
+    def mut_bug8_release_closes_anyway(text):
+        return _mutate(text, "    if (!probe_release_may_close(g_probe_pointer_written ? true : false,",
+                             "    if (false && !probe_release_may_close(g_probe_pointer_written ? true : false,")
+
+    def mut_bug8_policy_allows_unproven(text):
+        return _mutate(text, "    if (!scalarRoundTripConfirmed) {",
+                             "    if (false) {")
+
+    def mut_bug8_policy_closes_unconfirmed(text):
+        return _mutate(text, "    if (!pointerWritten) return true;",
+                             "    if (true) return true;")
+
+    def mut_bug8_app_guard_gone(text):
+        return _mutate(text, "    if (term_bridge_state_poisoned()) {",
+                             "    if (false && term_bridge_state_poisoned()) {")
+
+    def mut_bug8_bridge_stops_translating(text):
+        return _mutate(text, "int term_bridge_state_poisoned(void) {\n    return kexploit_state_poisoned();\n}",
+                             "int term_bridge_state_poisoned(void) {\n    return 0;\n}")
+
     mutations = [
         ("engine budget default back to 120", "engine", "kexploit/kexploit_opa334.m", mut_engine_budget_120),
         ("app budget default back to 120", "app", "term_settings.m", mut_app_budget_120),
@@ -1467,6 +1745,23 @@ def selftest(root, wolfterm):
         ("a cancel stops marking the pill", "app", "term_bridge.m", mut_cancel_stops_marking_the_pill),
         ("the verdict badge never leaves", "app", "TerminalViewController.m", mut_badge_never_leaves),
         ("the view reads the engine header for itself", "app", "TerminalViewController.m", mut_pill_reads_the_engine_itself),
+        ("the Makefile ships an icon the generator never makes", "app", "Makefile", mut_icon_not_shipped),
+        ("the plist names the icon FILE instead of the base name", "app", "Resources/Info.plist", mut_icon_plist_names_the_file),
+        ("the icon is drawn with a font glyph", "app", "scripts/make_term_icon.py", mut_icon_uses_a_font),
+        ("the setting is stored but the terminal never re-installs it", "app", "TerminalViewController.m", mut_kb_install_removed),
+        ("there is no way back to the system keyboard", "app", "TerminalViewController.m", mut_kb_off_branch_removed),
+        ("the short keyboard rows are not centered", "app", "TerminalViewController.m", mut_kb_rows_not_centered),
+        ("a letter key stops using the shared insert path", "app", "TerminalViewController.m", mut_kb_key_skips_the_shared_path),
+        ("the app ships with the custom keyboard on", "app", "term_settings.m", mut_kb_default_on),
+        ("the keyboard size stops being persisted", "app", "term_settings.m", mut_kb_size_not_persisted),
+        ("the custom-keyboard switch stops setting the setting", "app", "SettingsViewController.m", mut_kb_toggle_does_not_set),
+        ("the keyboard size picker stops reaching the terminal", "app", "SettingsViewController.m", mut_kb_size_does_not_reach_the_terminal),
+        ("the pointer is written without the inert-field round trip proving the put-back works", "engine", "kexploit/kexploit_opa334.m", mut_bug8_no_round_trip_gate),
+        ("a pointer is live but the release closes the spray anyway (the SE2 panic)", "engine", "kexploit/kexploit_opa334.m", mut_bug8_release_closes_anyway),
+        ("the policy ignores the failed round trip and allows the pointer write", "engine", "kexploit/probe_restore_policy.c", mut_bug8_policy_allows_unproven),
+        ("the release policy drops the unconfirmed-restore case and closes anyway", "engine", "kexploit/probe_restore_policy.c", mut_bug8_policy_closes_unconfirmed),
+        ("the run guard is gone, a poisoned process starts the next run", "app", "term_bridge.m", mut_bug8_app_guard_gone),
+        ("the bridge stops translating the engine's poisoned bit", "app", "term_bridge.m", mut_bug8_bridge_stops_translating),
     ]
 
     tmp = tempfile.mkdtemp(prefix="bug345_lint_selftest_")
