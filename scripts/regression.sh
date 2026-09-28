@@ -6,6 +6,8 @@
 # any time; nothing here touches the kernel exploit path.
 #
 # Usage: scripts/regression.sh [--ip <device-ip>] [--skip-build]
+#   --skip-build skips every build step: the tweak package, the engine static
+#   lib and the hub app.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -204,6 +206,38 @@ else
         ok "make package ($(ls -t packages/*.deb | head -1 | xargs basename 2>/dev/null))"
     else
         bad "make package — see /tmp/regression_build.log"
+    fi
+fi
+
+section "Engine lib + hub app build (L8.2)"
+# `make package` above builds the TWEAK only. Two other in-tree artifacts are
+# linked from the same engine sources (kexploit/, sandbox_escape.m, SSV/,
+# utils/, kpf/, XPF/) and would otherwise not be compiled until a device day:
+# libw0lfengine.a (linked by pocs/hub_shell and by W0lfTerm) and the hub app
+# itself. A broken engine symbol or a bad -I header path fails here instead.
+# Engine first - the app links the archive. ~10 s for both.
+if $SKIP_BUILD; then
+    note "skipped (--skip-build)"
+else
+    export THEOS="${THEOS:-$HOME/theos}"
+    if make libengine >/tmp/regression_engine_lib.log 2>&1; then
+        ok "make libengine ($(ls -l .theos/libengine/libw0lfengine.a | awk '{print $5}') bytes)"
+    else
+        bad "make libengine — see /tmp/regression_engine_lib.log"
+    fi
+    if ( cd pocs/hub_shell && make >/tmp/regression_hub_app.log 2>&1 ); then
+        hubapp="$(ls -d pocs/hub_shell/.theos/obj/debug/*.app 2>/dev/null | head -1)"
+        # The app is a thin UI over the archive, so "it linked" is the claim
+        # worth checking: the engine symbols must be in the binary, or the
+        # build silently fell back to stubs (strings -a, not nm - host binutils
+        # nm prints nothing for Mach-O and reads as "symbol missing").
+        if [ -n "$hubapp" ] && [ "$(strings -a "$hubapp/W0lfSwordHubShell" | grep -c 'kexploit_opa334')" -gt 0 ]; then
+            ok "hub app build ($(basename "$hubapp"), engine symbol linked)"
+        else
+            bad "hub app built but kexploit_opa334 is not in the binary"
+        fi
+    else
+        bad "hub app build — see /tmp/regression_hub_app.log"
     fi
 fi
 
