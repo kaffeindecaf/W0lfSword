@@ -455,6 +455,59 @@ int main(void) {
         check(changed == 0 && n == 0, "an empty line completes to nothing");
     }
 
+    printf("\n[10] tail + wc\n");
+    {
+        // 5 lines / 5 words / 31 bytes: a known shape, so the three counters are
+        // asserted against a value instead of against "it printed something".
+        FILE *tf = fopen("wc_tail.txt", "w");
+        if (tf) { fputs("alpha\nbravo\ncharlie\ndelta\necho\n", tf); fclose(tf); }
+
+        run("wc wc_tail.txt", "wc (all counters)");
+        check(saw("5 5 31"), "wc reports lines, words and bytes");
+        run("wc -l wc_tail.txt", "wc -l");
+        check(saw("5 wc_tail.txt") && !saw("31"), "wc -l prints the line count only");
+        run("wc -c wc_tail.txt", "wc -c");
+        check(saw("31 wc_tail.txt"), "wc -c prints the byte count only");
+        run("wc -w wc_tail.txt", "wc -w");
+        check(saw("5 wc_tail.txt"), "wc -w prints the word count only");
+
+        run("tail -n 2 wc_tail.txt", "tail -n 2");
+        check(saw("delta") && saw("echo") && !saw("alpha"), "tail keeps the last two lines in order");
+        run("tail wc_tail.txt", "tail (default 10 lines)");
+        check(saw("alpha") && saw("echo"), "tail default shows a file shorter than the count");
+        run("tail -n 0 wc_tail.txt", "tail -n 0");
+        check(g_count == 0, "tail -n 0 prints nothing");
+        run("tail -n 100 wc_tail.txt", "tail above the file length");
+        check(saw("alpha") && saw("echo"), "tail above the length still shows everything");
+
+        // Longer than the tail it asks for, so the ring has to drop earlier lines.
+        FILE *big = fopen("wc_tail_big.txt", "w");
+        if (big) {
+            for (int i = 1; i <= 12; i++) fprintf(big, "line%02d\n", i);
+            fclose(big);
+        }
+        run("tail -n 3 wc_tail_big.txt", "tail -n 3 of 12 lines");
+        check(saw("line10") && saw("line11") && saw("line12") && !saw("line07"),
+              "the ring keeps only the last N lines");
+        run("wc -l wc_tail_big.txt", "wc -l on a longer file");
+        check(saw("12 wc_tail_big.txt"), "wc counts every line of a longer file");
+        run("wc wc_tail.txt wc_tail_big.txt", "wc over two files");
+        check(saw("17 ") && saw("total"), "wc totals multiple files (17 lines)");
+
+        run("tail", "tail with no argument");
+        check(saw("usage"), "tail refuses a missing file argument");
+        run("tail nope_zz.txt", "tail on a missing file");
+        check(saw("errno"), "tail reports errno for a missing file");
+        run("wc", "wc with no argument");
+        check(saw("usage"), "wc refuses a missing file argument");
+        run("wc -x wc_tail.txt", "wc with an unknown flag");
+        check(saw("unknown flag"), "wc rejects an unknown flag");
+        run("wc nope_zz.txt", "wc on a missing file");
+        check(saw("errno"), "wc reports errno for a missing file");
+        run("tail -n 2 nope_zz.txt", "tail -n on a missing file");
+        check(saw("errno"), "tail reports errno with a count too");
+    }
+
     char cmd[PATH_MAX + 32];
     snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
     if (system(cmd) != 0) printf("  (cleanup of %s failed)\n", tmpdir);

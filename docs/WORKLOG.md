@@ -3586,3 +3586,95 @@ things stay open by design: the `so_usecount` writes still go through
 `early_kwrite64` (no field table for `struct socket` in this tree), and the clamp
 still checks a block against the window it is *given*, so address trust remains
 with the canonical-pointer guard plus the live-inpcb value check.
+
+---
+
+## T20 (2026-09-28) - shell `tail`/`wc`, the -Wframe-address build fix, and the Filza ipa they ship in
+
+Scope: one user-facing shell feature (ROADMAP `G3.3`), one compile error that made
+`make mha` impossible at `HEAD` (89773a4), and the re-signed Filza ipa handed to the
+user for sideloading. Host only: no device was attached, no device command was run,
+no exploit was executed. Raw logs live next to this file under
+`docs/verification/2026-09-28-g33/` (the `*.log` extension is gitignored, so they stay
+local by the usual rule).
+
+### The three source edits
+
+1. `terminal/trm_shell.c` - added `tail [-n N] <file>` (default 10; ring buffer, so a
+   file larger than the 400-line output cap still yields its last N lines in order) and
+   `wc [-l] [-w] [-c] <file>...` (one streaming pass, total line for several files).
+   Both `needs_unsafe = 0`, both read-only POSIX (`fopen`/`fgets`/`fread`) with no kernel
+   write on the path, both in `sh_cmd_takes_path` so TAB completes their arguments.
+   Command table 49 -> 51 (`trm_shell_command_count()`).
+2. `kexploit/kexploit_opa334.m` - `early_kread_report_invalid` took two caller frames and
+   the call site passed `__builtin_return_address(0), __builtin_return_address(1)`. A
+   nonzero argument to that builtin is unsafe with a frame pointer and clang's
+   `-Wframe-address` is an ERROR here, so the DEBUG build did not compile at all:
+   `make mha` died at `kexploit/kexploit_opa334.m:1214` before linking anything. The
+   latch now reports one caller frame (`__builtin_return_address(0)` only). The second
+   frame was not replaced with `backtrace()` on purpose: the refusal path is reached
+   thousands of times in a scan (that is why the latch exists) and an unwind per refusal
+   is not worth a diagnostic frame. The KPRINTF line lost its second `callers` slot.
+3. `tests/trm_shell_host_test.c` - new section `[10] tail + wc`, 17 checks, all asserting
+   values rather than "it printed something": a 5-line/5-word/31-byte fixture, each
+   counter alone and all three together, the last two lines in order, `-n 0` printing
+   nothing, `-n 100` on a 5-line file, only the last 3 of 12 lines (the ring has to drop),
+   the 17-line total across two files, and the four refusal paths (missing argument,
+   missing file, unknown flag).
+
+### Commands, exit status and sha256 of the full output
+
+All run from `/home/kaffein/Desktop/W0lfSword`, with
+`THEOS=$HOME/theos` and `PATH=$PWD/scripts:$PATH` (the vendored Procursus `ldid`).
+
+| # | command | rc | sha256 of stdout+stderr | log |
+| --- | --- | --- | --- | --- |
+| 1 | `rm -rf .theos/obj/debug && BUNDLE_ID=com.kaffeindecaf.w0lfsword.filza make mha IPA=/home/kaffein/Downloads/Filza.ipa OUT=packages/Filza-Arctic-term-2026-09-28.ipa` | 0 | `0f7ed4ae86835eaa6ca1b01b804e0f804f70cdfe598c09150aefd01611694a94` | `build_filza_ipa.log` |
+| 2 | `bash scripts/run_trm_host_test.sh` | 0 | `400961cae5b451ce2b11bc63eaa8e6bc5dbb9fe1e4f229eacb226d7042b3b402` | `trm_shell_host_test.log` |
+| 3 | `bash scripts/check_host_verification.sh --with-builds` | 0 | `1d49db4b48e217ab36c1e17163774e7cbd4b794c4d417216321f7b447ac72cb1` | `host_verification.log` |
+| 4 | the artifact checks (unzip listing, shipped-dylib strings, `ldid -h`, CydiaSubstrate count, `plistlib` on the bundle) | 0 | `51c3af36dd7e47bdedcfbe5520ee2e1e85ba1d4f8050f21a26c1dd2d8be406e4` | `artifact_check.log` |
+
+Run 1: 60 compilation units, zero warnings from this tree (the only two warnings are
+`ld64.lld`'s known `-multiply_defined` / `-ios_version_min` notes), re-sign + inject +
+bind-table check + repackage all green. Run 2: `checks=125 failures=0` /
+`TRM_SHELL_HOST_TEST PASS` (108 before). Run 3: `host verification: 24 ok, 0 drift`.
+
+### Re-pins (old -> new, six entries, all in `scripts/check_host_verification.sh`)
+
+| entry | was | now | why |
+| --- | --- | --- | --- |
+| `trm_shell_host_test` | `15062e05...` | `344fa87d...` | section [10]: 108 -> 125 checks |
+| `bug2_release_paths` | `d215c983...` | `7e56a52d...` | the lint prints traced engine src lines; the `early_kread` edit moved them (61 checks / 0 failed, unchanged) |
+| `bug2_release_paths_self` | `88768fcc...` | `faba74ef...` | same edit, same reason (all 23 mutations still caught) |
+| `engine_lib_archive` | `6d7e10bb...` | `cf9a6343...` | the engine source changed; same 53 objects |
+| `app_binary` | `4b91ab17...` | `26924c23...` | the W0lfTerm app links the rebuilt archive and compiles `terminal/trm_shell.c` directly |
+| `app_static_symbols` | `abab3d7d...` | `24c17963...` | the check gained the G3.3 proof: `_cmd_tail` / `_cmd_wc` in the linked binary's `nm` list plus the two usage strings in the marker loop |
+
+The G3.3 proof is a link-level one, not "it compiles": the shipped app binary lists
+`t _cmd_tail` and `t _cmd_wc`, and `tail [-n N] <file>` / `wc [-l] [-w] [-c] <file>`
+each appear twice in its strings (1 table row + 1 usage line).
+
+### The artifact
+
+`/home/kaffein/Desktop/w0lf-sideload/Filza-Arctic-term-2026-09-28.ipa`
+(14159114 bytes, sha256 `c9c9c355361aff72cc3bc925beb14280cba2aa6f6843ab34c9f6e1b474564032`),
+same lineage as `Filza-Arctic-term.ipa` (2026-09-11): bundle id
+`com.kaffeindecaf.w0lfsword.filza` (registerable with an Apple ID; `com.apple.*` is
+refused by the developer API), `UIFileSharingEnabled`, injected
+`FilzaApplySandboxExt.dylib` (906016 bytes, CodeDirectory embedded, 0 CydiaSubstrate
+references, so it loads on a non-jailbroken device), the `Sharing.appex` extension id
+rewritten to the same prefix.
+
+### What this pass does NOT prove
+
+Nothing was run on a phone. `tail` and `wc` are read-only POSIX paths (`fopen` /
+`fgets` / `fread`, no `kwrite*`, no `ssv_write`, no kernel address arithmetic), so the
+claim that they cannot widen the panic surface is a statement about the call graph, not
+a measurement on hardware - the host test measures their behaviour, nothing measures the
+device. The re-signed ipa is verified structurally (bundle id, injected dylib present,
+signed, substrate-free, bind tables intact, the two new usage strings in the shipped
+dylib) but has not been launched: the first launch on a phone is the user's sideload,
+and the shell's new commands are the only part of this pass whose on-device behaviour is
+still unobserved. `readonly` remains the only mode to offer on any device/iOS pair this
+tree has not proven, staging included.
+

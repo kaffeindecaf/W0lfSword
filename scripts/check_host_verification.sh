@@ -263,9 +263,15 @@ check term_anim_host_test    "$ROOT" 0 89f328d5bbf57f8f83cfa16407bf636ad07c123f0
 # re-pinned 2026-09-27: this lint PRINTS the engine source line numbers it
 # traces, so the pointer guard's new lines in kexploit_opa334.m moved its
 # output (61 checks / 23 mutations, unchanged).
-check bug2_release_paths     "$ROOT" 0 d215c9831c32277eaaccdf354510ca8fac191608ab85b01b6a551da29b5f1f76 raw \
+# re-pinned 2026-09-28 (shell tail/wc + the -Wframe-address build fix): the
+# trm_shell harness gained section [10] (108 -> 125 checks), and
+# kexploit_opa334.m's early_kread dropped its __builtin_return_address(1) call,
+# which moved every line this lint traces. Same counts either side (61 checks /
+# 23 mutations, all mutations caught); only line numbers and the harness output
+# moved.
+check bug2_release_paths     "$ROOT" 0 7e56a52dcec408bb07a4feba7564204c3fc4024f0dec5dd74bfc6f0f8e2a2593 raw \
     'python3 scripts/check_bug2_release_paths.py'
-check bug2_release_paths_self "$ROOT" 0 88768fcc730f5edbf7f6f2231cdb782a8aabdcbe56f1ec9d3dbcd263b5331fcc raw \
+check bug2_release_paths_self "$ROOT" 0 faba74ef11ee5609a030cbfe613c32700dd549b4de5d8268b1ff94e908630508 raw \
     'python3 scripts/check_bug2_release_paths.py --selftest'
 check test_offsets           "$ROOT" 0 eead34fbfc466f966c32ceb1d2e43f1312400ccf97fa2894239a85550f47857d raw \
     'python3 scripts/test_offsets.py'
@@ -281,7 +287,7 @@ check test_chain_select      "$ROOT" 0 9a596a45ef210f9b0238c8c2fc595887a88b66e8b
 # The trm_shell harness is the one host check whose raw output cannot be byte
 # stable (it prints live df/date/loadavg/pid AND host identity): rc + the
 # canonical hash instead, with the compiler preamble dropped (canon-trm).
-check trm_shell_host_test    "$ROOT" 0 15062e0546725b0d302879afba7f545343b5ef46030281d3f15971147900301f canon-trm \
+check trm_shell_host_test    "$ROOT" 0 344fa87d4442038fb23af304741d57ff14e940e1d1af347944fd564458cdee91 canon-trm \
     'bash scripts/run_trm_host_test.sh'
 
 # The mask is only worth what it proves, so pin it from both sides: two logs
@@ -338,15 +344,20 @@ if [ "$WITH_BUILDS" = 1 ]; then
         # re-pinned 2026-09-27: the engine archive gained early_kread's latched refusal
 # and kread_set_origin's breadcrumbs (kexploit_opa334.m, krw.m) and
 # krw_zone_size.c's poison refusal, so the build log AND the archive moved.
+# re-pinned 2026-09-28: kexploit_opa334.m changed again (the invalid-read latch
+# now reports one caller frame - the frame-address builtin with a nonzero
+# argument was a hard compile error in the debug build), and terminal/trm_shell.c
+# grew tail/wc, which the W0lfTerm app compiles directly - so the archive, the
+# linked app binary and its nm/string list all moved. Same object count (53).
 check engine_lib_build "$ROOT" 0 9512ce2f1a32feb6cdd8696bc6d93ee5198504216e6efa3b211a959d791519e3 raw \
             'THEOS=${THEOS:-$HOME/theos} make libengine'
         got_ar=$(sha256sum .theos/libengine/libw0lfengine.a | cut -d' ' -f1)
-        if [ "$got_ar" = 6d7e10bb1d00830783fe3e5c879f8e0698819de244e41f13ea175bcca47f7781 ]; then
+        if [ "$got_ar" = cf9a6343100ae2da92e9617adc5252dc8a92d75b47d5ed2dbb539435361c195c ]; then
             printf 'ok   %-34s %s\n' "engine_lib_archive" "${got_ar:0:16}..."
             PASS=$((PASS + 1))
         else
             printf 'BAD  %-34s sha256=%s\n     want %s\n' "engine_lib_archive" "$got_ar" \
-                6d7e10bb1d00830783fe3e5c879f8e0698819de244e41f13ea175bcca47f7781
+                cf9a6343100ae2da92e9617adc5252dc8a92d75b47d5ed2dbb539435361c195c
             FAIL=$((FAIL + 1))
         fi
         # 2) app build: the log varies only in compile order + zip mtimes (canon
@@ -360,12 +371,12 @@ check engine_lib_build "$ROOT" 0 9512ce2f1a32feb6cdd8696bc6d93ee5198504216e6efa3
         got_bin=$(sha256sum "$TERM_SRC/dist/Payload/W0lfTerm.app/W0lfTerm" | cut -d' ' -f1)
         # Re-pinned 2026-09-22 (ANIM.4): the app gained the status pill (new view
         # code, new version label 0.22), so the linked binary moved.
-        if [ "$got_bin" = 4b91ab17e0fcbdaf5a54ceba882ff9160d6ce71f1f55dc0f472f09acd88e4bcc ]; then
+        if [ "$got_bin" = 26924c23843b7b61b5aeeb9fd706a3df91dd784117fa230724386a9fe37b659a ]; then
             printf 'ok   %-34s %s\n' "app_binary" "${got_bin:0:16}..."
             PASS=$((PASS + 1))
         else
             printf 'BAD  %-34s sha256=%s\n     want %s\n' "app_binary" "$got_bin" \
-                4b91ab17e0fcbdaf5a54ceba882ff9160d6ce71f1f55dc0f472f09acd88e4bcc
+                26924c23843b7b61b5aeeb9fd706a3df91dd784117fa230724386a9fe37b659a
             FAIL=$((FAIL + 1))
         fi
         # 3) the app-side static check (llvm-nm: GNU nm cannot read Mach-O)
@@ -378,7 +389,7 @@ check engine_lib_build "$ROOT" 0 9512ce2f1a32feb6cdd8696bc6d93ee5198504216e6efa3
     #    (_kexploit_state_poisoned + _term_bridge_state_poisoned, plus the strings
     #    a reader of the log sees when the engine refuses to close the spray).
         # shellcheck disable=SC2016  # eval'd command string: the expansion is the point
-        check app_static_symbols "$TERM_SRC" 0 abab3d7dc4cd48f20f1934c37688896d3189b00b7167e0aa31fad73630e3df7d raw \
+        check app_static_symbols "$TERM_SRC" 0 24c179631d7a3d90ebc7da04e09b6bfa0fc85427b1c8de293a0d136ba199dc25 raw \
             'BIN=dist/Payload/W0lfTerm.app/W0lfTerm
              { echo "W0lfTerm app-side static check (linked binary produced by the 0.24 rebuild)"
                echo "binary: $BIN"
@@ -399,8 +410,11 @@ check engine_lib_build "$ROOT" 0 9512ce2f1a32feb6cdd8696bc6d93ee5198504216e6efa3
                echo "== nm: BUG.8 poisoned-state wiring (the engine bit + the bridge call) =="
                llvm-nm-19 "$BIN" | grep -E " _kexploit_state_poisoned| _term_bridge_state_poisoned"
                echo
+               echo "== nm: G3.3 shell tail/wc (terminal/trm_shell.c is inside the app) =="
+               llvm-nm-19 "$BIN" | grep -E " _cmd_tail| _cmd_wc"
+               echo
                echo "== strings markers (count) =="
-               for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter" beginBootSequence skipBootSequence wolf_art fadeTick endLineFade CANCELLED "no position yet" "no read landed" "pillPulse" customKbToggled "Custom keyboard" "Keyboard size" SHIFT "sockets LEAKED" "inert-field round trip" "poisoned kernel state" "Reboot the phone to clear it"; do
+               for m in cancel "pe_v2 scan stopped on request" "no kernel writes" "zero kernel writes" "measured by kwrite_counter" beginBootSequence skipBootSequence wolf_art fadeTick endLineFade CANCELLED "no position yet" "no read landed" "pillPulse" customKbToggled "Custom keyboard" "Keyboard size" SHIFT "sockets LEAKED" "inert-field round trip" "poisoned kernel state" "Reboot the phone to clear it" "tail [-n N] <file>" "wc [-l] [-w] [-c] <file>"; do
                    printf "  %-34s %s\n" "$m" "$(strings -a "$BIN" | grep -cF "$m")"
                done
                echo

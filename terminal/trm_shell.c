@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -66,6 +67,8 @@ extern char **environ;
 #define TRM_READ_MAX      4096     // bytes per kread
 #define TRM_CAT_LINE_MAX  512
 #define TRM_CAT_LINES_MAX 400
+#define TRM_TAIL_DEFAULT  10       // lines `tail` prints without -n
+
 #define TRM_LS_MAX        200
 #define TRM_LS_NAME_MAX   200
 
@@ -409,6 +412,98 @@ static int cmd_head(int argc, char **argv) {
     }
     fclose(f);
     return 0;
+}
+
+// tail — the file may be far larger than the output cap, so the last N lines
+// are kept in a ring and printed in order at EOF (head can stop reading early,
+// tail cannot).
+static int cmd_tail(int argc, char **argv) {
+    int want = TRM_TAIL_DEFAULT;
+    int first = 1;
+    if (argc > 3 && !strcmp(argv[1], "-n")) {
+        want = atoi(argv[2]);
+        first = 3;
+    }
+    if (argc <= first) { sh_err("tail: usage: tail [-n N] <file>"); return 1; }
+    if (want < 0) want = 0;
+    int cap = want > TRM_CAT_LINES_MAX ? TRM_CAT_LINES_MAX : want;
+    if (cap == 0) return 0;
+    char rbuf[PATH_MAX];
+    const char *path = sh_resolve(argv[first], rbuf, sizeof(rbuf));
+    FILE *f = fopen(path, "r");
+    if (!f) { sh_err("tail %s: errno=%d (%s)", path, errno, strerror(errno)); return 1; }
+    char (*ring)[TRM_CAT_LINE_MAX] = calloc((size_t)cap, TRM_CAT_LINE_MAX);
+    if (!ring) { sh_err("tail: no memory for %d lines", cap); fclose(f); return 1; }
+    char line[TRM_CAT_LINE_MAX];
+    int stored = 0, next = 0;
+    while (fgets(line, sizeof(line), f)) {
+        size_t l = strlen(line);
+        while (l > 0 && (line[l - 1] == '\n' || line[l - 1] == '\r')) line[--l] = '\0';
+        snprintf(ring[next], TRM_CAT_LINE_MAX, "%s", line);
+        next = (next + 1) % cap;
+        if (stored < cap) stored++;
+    }
+    fclose(f);
+    int start = (stored == cap) ? next : 0;
+    for (int i = 0; i < stored; i++) sh_out("%s", ring[(start + i) % cap]);
+    free(ring);
+    return 0;
+}
+
+// wc — one streaming pass per file: lines, words (whitespace-separated runs)
+// and bytes, like the coreutils tool. More than one file adds a total line.
+static int cmd_wc(int argc, char **argv) {
+    int mode = 0;                       // bit 1 lines, bit 2 words, bit 4 bytes
+    int first = 1;
+    if (argc > 2 && argv[1][0] == '-' && argv[1][1]) {
+        for (const char *q = argv[1] + 1; *q; q++) {
+            if (*q == 'l') mode |= 1;
+            else if (*q == 'w') mode |= 2;
+            else if (*q == 'c') mode |= 4;
+            else { sh_err("wc: unknown flag -%c (use -l, -w, -c)", *q); return 1; }
+        }
+        first = 2;
+    }
+    if (argc <= first) { sh_err("wc: usage: wc [-l] [-w] [-c] <file>..."); return 1; }
+    if (!mode) mode = 7;
+    long t_lines = 0, t_words = 0, t_bytes = 0;
+    int rc = 0;
+    for (int i = first; i < argc; i++) {
+        char rbuf[PATH_MAX];
+        const char *path = sh_resolve(argv[i], rbuf, sizeof(rbuf));
+        FILE *f = fopen(path, "rb");
+        if (!f) { sh_err("wc %s: errno=%d (%s)", path, errno, strerror(errno)); rc = 1; continue; }
+        long lines = 0, words = 0, bytes = 0;
+        int in_word = 0;
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+            bytes += (long)n;
+            for (size_t k = 0; k < n; k++) {
+                unsigned char c = (unsigned char)buf[k];
+                if (c == '\n') lines++;
+                if (isspace(c)) in_word = 0;
+                else if (!in_word) { in_word = 1; words++; }
+            }
+        }
+        fclose(f);
+        t_lines += lines; t_words += words; t_bytes += bytes;
+        char out[256];
+        int o = 0;
+        if (mode & 1) o += snprintf(out + o, sizeof(out) - (size_t)o, "%s%ld", o ? " " : "", lines);
+        if (mode & 2) o += snprintf(out + o, sizeof(out) - (size_t)o, "%s%ld", o ? " " : "", words);
+        if (mode & 4) o += snprintf(out + o, sizeof(out) - (size_t)o, "%s%ld", o ? " " : "", bytes);
+        sh_out("%s %s", out, path);
+    }
+    if (argc - first > 1) {
+        char out[256];
+        int o = 0;
+        if (mode & 1) o += snprintf(out + o, sizeof(out) - (size_t)o, "%s%ld", o ? " " : "", t_lines);
+        if (mode & 2) o += snprintf(out + o, sizeof(out) - (size_t)o, "%s%ld", o ? " " : "", t_words);
+        if (mode & 4) o += snprintf(out + o, sizeof(out) - (size_t)o, "%s%ld", o ? " " : "", t_bytes);
+        sh_out("%s total", out);
+    }
+    return rc;
 }
 
 static int cmd_stat(int argc, char **argv) {
@@ -1213,7 +1308,9 @@ static const trm_cmd kCmds[] = {
     { "cd",        "cd [path]",               "change directory (~ = app container)",         0, TRM_PKG_NONE, cmd_cd },
     { "ls",        "ls [-l] [-a] [path]",     "list a directory",                            0, TRM_PKG_NONE, cmd_ls },
     { "cat",       "cat <file>...",           "print text files",                            0, TRM_PKG_NONE, cmd_cat },
-    { "head",      "head [-n N] <file>",      "first N lines of a file",                     0, TRM_PKG_NONE, cmd_head },
+    { "head",      "head [-n N] <file>",       "first N lines of a file",                     0, TRM_PKG_NONE, cmd_head },
+    { "tail",      "tail [-n N] <file>",       "last N lines of a file",                      0, TRM_PKG_NONE, cmd_tail },
+    { "wc",        "wc [-l] [-w] [-c] <file>", "count lines/words/bytes",                     0, TRM_PKG_NONE, cmd_wc },
     { "stat",      "stat <path>",             "file metadata + access bits",                  0, TRM_PKG_NONE, cmd_stat },
     { "mkdir",     "mkdir <dir>",             "create a directory",                          0, TRM_PKG_NONE, cmd_mkdir },
     { "rmdir",     "rmdir <dir>",             "remove an empty directory",                   0, TRM_PKG_NONE, cmd_rmdir },
@@ -1302,7 +1399,7 @@ static int cmd_help(int argc, char **argv) {
 // path, so `help redir_` stays silent instead of listing files.
 static int sh_cmd_takes_path(const char *cmd) {
     static const char *kPathCmds[] = {
-        "cd", "ls", "cat", "head", "stat", "mkdir", "rmdir", "rm", "mv", "cp",
+        "cd", "ls", "cat", "head", "tail", "stat", "mkdir", "rmdir", "rm", "mv", "cp",
         "touch", "chmod", "hexdump", "strings", "df", "spawn", "execsurf", NULL
     };
     for (int i = 0; kPathCmds[i]; i++) {

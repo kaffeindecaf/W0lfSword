@@ -96,8 +96,8 @@ Once a run succeeds, open Filza. The exploit fires a second or two later.
 - an on-screen status panel (collapsible) with the live log, a LOG button that
   exports the log, and RERUN to try the exploit again without relaunching Filza
 - a small in-process shell under that panel: `ls`, `cat`, `cd`, `stat`, `mkdir`,
-  `rm`, `mv`, `cp`, `chmod`, `ps`, `df` and kernel read/write commands. Read-only
-  until you type `unsafe 1`
+  `rm`, `mv`, `cp`, `chmod`, `head`, `tail`, `wc`, `ps`, `df` and kernel
+  read/write commands. Read-only until you type `unsafe 1`
 
 Everything resets on reboot. Open Filza again and it is back.
 

@@ -2683,6 +2683,19 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [ ] `G3.2` 🟡 — Embedded SSH server in the tweak  
   _Prompt:_ "Bundle dropbear SSH server. After sandbox escape, spawn it on port 2222. Connect from any machine. This gives remote root shell via Filza acting as a trojan."
 
+- [x] `G3.3` 🟢 — **`tail` + `wc` in the in-process shell** (`terminal/trm_shell.c`)
+  _Done 2026-09-28: the shell could read the head of a file (400 lines) and count nothing,
+  so reading a log's END - the common case in a file manager - meant dumping the whole file
+  into the HUD first. Added `tail [-n N] <file>` (default 10, ring buffer so a file bigger
+  than the 400-line output cap still yields its last N lines in order) and
+  `wc [-l] [-w] [-c] <file>...` (one streaming pass, total line for several files), both
+  read-only (`needs_unsafe = 0`, no kernel write anywhere on the path, so they cannot
+  introduce a new panic surface), both added to the path-completion table so TAB finishes
+  their arguments. Table count 49 -> 51. Verification: `bash scripts/run_trm_host_test.sh`
+  -> `checks=125 failures=0` (was 108), new section `[10] tail + wc` with 17 checks that
+  assert VALUES (5 lines / 5 words / 31 bytes on a known file, only the last 3 of 12 lines
+  from the ring, the 17-line total across two files), not "it printed something".
+
 ---
 
 # SECTION H: Architecture & Writing
@@ -3098,7 +3111,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | F4 — MTE Bypass Research (iPhone 17+) | 3 | 0 | 3 |
 | G1 — File Managers | 2 | 0 | 2 |
 | G2 — System Apps | 3 | 0 | 3 |
-| G3 — Terminal / Shell | 2 | 0 | 2 |
+| G3 — Terminal / Shell | 3 | 1 | 2 |
 | H1 — Writeup Documentation (kfd-style) | 3 | 3 | 0 |
 | H2 — Knowledge Base | 3 | 3 | 0 |
 | J1 — Interactive Menu (no-args mode) | 3 | 3 | 0 |
@@ -3124,7 +3137,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 | L8 — Testing & Release | 4 | 1 | 3 |
 | L9 — Stretch (post-v1) | 3 | 0 | 3 |
 | Queued for later (non-critical) | 11 | 11 | 0 |
-| **TOTAL** | **377** | **251** | **126** |
+| **TOTAL** | **378** | **252** | **126** |
 
 ---
 
