@@ -368,7 +368,7 @@ W0lfSword                  # CLI: menu, build, deploy, diagnostics, host tools
 +-- utils/                 # logging, permissions, hide/reveal
 +-- kpf/ + XPF/            # kernelcache grabber and offset patchfinder
 +-- tools/xpf-cli/         # host-side XPF resolver
-+-- pocs/                  # panic PoCs and the ImageIO probe
++-- pocs/                  # panic PoCs, the ImageIO probe, the Hub app shell
 +-- tweaks/                # SpringBoard tweak catalog and installer
 +-- tests/ + scripts/      # host harnesses, lints, regression and verification
 +-- docs/                  # guides, ADRs, verification logs, WORKLOG
@@ -392,6 +392,12 @@ of them are guessed. Run `./W0lfSword audit` and
 record what ran in `docs/WORKLOG.md`. `docs/GLOSSARY.md` explains the vocabulary,
 `docs/OFFSET_RESOLUTION_GUIDE.md` walks through the offset workflow, and
 `docs/THREAT_MODEL.md` writes down what this tool is and is not safe against.
+
+The in-repo app shell is `pocs/hub_shell/` (bundle
+`com.kaffeindecaf.w0lfswordhubshell`, display name W0lfSword Hub): a thin Theos
+app over the same engine, packaged by `scripts/build_hub_ipa.sh`. Its feature
+list, both install modes and what is still open are in
+[`pocs/hub_shell/README.md`](pocs/hub_shell/README.md).
 
 ## Release history
 
