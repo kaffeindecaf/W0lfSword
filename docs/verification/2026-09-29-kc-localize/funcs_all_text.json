@@ -1,0 +1,1024 @@
+{
+  "old": ".w0lfsword/kernelcaches/macho_18.7.2",
+  "new": ".w0lfsword/kernelcaches/macho_18.7.3",
+  "regions": [
+    {
+      "region": "__TEXT_EXEC",
+      "old_funcs": 100516,
+      "new_funcs": 100516,
+      "identical_funcs": 100416,
+      "only_old": 100,
+      "only_new": 100,
+      "old_undecodable": 11596,
+      "new_undecodable": 11596
+    }
+  ],
+  "counts": {
+    "only_old_total": 100,
+    "only_new_total": 100
+  },
+  "only_old": [
+    {
+      "va": 18446744005122327892,
+      "size": 5504,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005122623508,
+      "size": 268,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005122823188,
+      "size": 248,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005122827224,
+      "size": 448,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005122843016,
+      "size": 660,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123020312,
+      "size": 5132,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123052696,
+      "size": 592,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123177176,
+      "size": 188,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123268076,
+      "size": 14008,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123282604,
+      "size": 864,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123307528,
+      "size": 2572,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123311968,
+      "size": 1016,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123314144,
+      "size": 1340,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123317192,
+      "size": 644,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123320328,
+      "size": 3136,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123323464,
+      "size": 220,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123323800,
+      "size": 168,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123324248,
+      "size": 2260,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123331156,
+      "size": 856,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123333440,
+      "size": 472,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123333912,
+      "size": 476,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123335356,
+      "size": 464,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123335904,
+      "size": 828,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123336732,
+      "size": 3948,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123340680,
+      "size": 2364,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123343524,
+      "size": 164,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123344000,
+      "size": 820,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123345116,
+      "size": 364,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123345480,
+      "size": 4636,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123350844,
+      "size": 136,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123350980,
+      "size": 4192,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123355172,
+      "size": 348,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123355824,
+      "size": 5280,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123361104,
+      "size": 4512,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123367584,
+      "size": 712,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123368532,
+      "size": 124,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123368800,
+      "size": 512,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123369876,
+      "size": 1912,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123371788,
+      "size": 1224,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123373012,
+      "size": 584,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123373596,
+      "size": 288,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123375008,
+      "size": 1848,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123376856,
+      "size": 1604,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123379580,
+      "size": 6224,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123385804,
+      "size": 648,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123387748,
+      "size": 156,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123387904,
+      "size": 100,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123388004,
+      "size": 260,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123390172,
+      "size": 7316,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123397556,
+      "size": 1320,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123399144,
+      "size": 6872,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123406016,
+      "size": 436,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123406452,
+      "size": 4496,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123413052,
+      "size": 152,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123420112,
+      "size": 132,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123420244,
+      "size": 948,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123421192,
+      "size": 908,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123422588,
+      "size": 1468,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123426212,
+      "size": 756,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123427628,
+      "size": 764,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123428392,
+      "size": 472,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123429260,
+      "size": 2720,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123432716,
+      "size": 164,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123432880,
+      "size": 140,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433020,
+      "size": 132,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433152,
+      "size": 216,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433368,
+      "size": 140,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433508,
+      "size": 140,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433648,
+      "size": 76,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433724,
+      "size": 1904,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123437372,
+      "size": 728,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123444528,
+      "size": 4080,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123479912,
+      "size": 2472,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123482812,
+      "size": 3368,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123534628,
+      "size": 4736,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123540632,
+      "size": 3012,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123553968,
+      "size": 992,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123637464,
+      "size": 244,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123637708,
+      "size": 992,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123638700,
+      "size": 1376,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123640076,
+      "size": 2276,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123667340,
+      "size": 664,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123677864,
+      "size": 332,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123678196,
+      "size": 332,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123680148,
+      "size": 204,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123681768,
+      "size": 1300,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123684100,
+      "size": 272,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123927032,
+      "size": 5276,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005124441184,
+      "size": 144,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127069836,
+      "size": 560,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127087268,
+      "size": 328,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127114676,
+      "size": 564,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127279128,
+      "size": 1824,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127296184,
+      "size": 2760,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130467828,
+      "size": 460,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130486720,
+      "size": 992,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130496508,
+      "size": 772,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130499660,
+      "size": 428,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130518648,
+      "size": 16280,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005156154276,
+      "size": 4992,
+      "owner": "com.apple.security.sandbox"
+    }
+  ],
+  "only_new": [
+    {
+      "va": 18446744005122327892,
+      "size": 5504,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005122623508,
+      "size": 268,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005122823188,
+      "size": 248,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005122827224,
+      "size": 472,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005122843040,
+      "size": 660,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123020336,
+      "size": 5132,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123052720,
+      "size": 592,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123177200,
+      "size": 188,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123268100,
+      "size": 14128,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123282748,
+      "size": 864,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123307672,
+      "size": 2568,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123312108,
+      "size": 1016,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123314284,
+      "size": 1340,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123317332,
+      "size": 644,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123320468,
+      "size": 3136,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123323604,
+      "size": 220,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123323940,
+      "size": 168,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123324388,
+      "size": 2260,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123331296,
+      "size": 856,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123333580,
+      "size": 472,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123334052,
+      "size": 476,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123335496,
+      "size": 464,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123336044,
+      "size": 828,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123336872,
+      "size": 3948,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123340820,
+      "size": 2364,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123343664,
+      "size": 164,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123344140,
+      "size": 820,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123345256,
+      "size": 364,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123345620,
+      "size": 4636,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123350984,
+      "size": 136,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123351120,
+      "size": 4200,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123355320,
+      "size": 348,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123355972,
+      "size": 5280,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123361252,
+      "size": 4512,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123367732,
+      "size": 712,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123368680,
+      "size": 124,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123368948,
+      "size": 512,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123370024,
+      "size": 1912,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123371936,
+      "size": 1224,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123373160,
+      "size": 584,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123373744,
+      "size": 288,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123375156,
+      "size": 1848,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123377004,
+      "size": 1604,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123379728,
+      "size": 6224,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123385952,
+      "size": 648,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123387896,
+      "size": 156,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123388052,
+      "size": 96,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123388148,
+      "size": 260,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123390316,
+      "size": 7316,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123397700,
+      "size": 1320,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123399288,
+      "size": 6872,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123406160,
+      "size": 436,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123406596,
+      "size": 4496,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123413196,
+      "size": 152,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123420256,
+      "size": 132,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123420388,
+      "size": 948,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123421336,
+      "size": 908,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123422732,
+      "size": 1468,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123426356,
+      "size": 756,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123427772,
+      "size": 764,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123428536,
+      "size": 472,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123429404,
+      "size": 2720,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123432860,
+      "size": 164,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433024,
+      "size": 140,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433164,
+      "size": 132,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433296,
+      "size": 216,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433512,
+      "size": 140,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433652,
+      "size": 140,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433792,
+      "size": 76,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123433868,
+      "size": 1904,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123437516,
+      "size": 728,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123444672,
+      "size": 4080,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123480056,
+      "size": 2472,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123482956,
+      "size": 3364,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123534768,
+      "size": 4724,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123540760,
+      "size": 3012,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123554096,
+      "size": 992,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123637592,
+      "size": 244,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123637836,
+      "size": 992,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123638828,
+      "size": 1376,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123640204,
+      "size": 2276,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123667468,
+      "size": 664,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123677992,
+      "size": 332,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123678324,
+      "size": 332,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123680276,
+      "size": 196,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123681888,
+      "size": 1300,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123684220,
+      "size": 272,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005123927152,
+      "size": 5276,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005124441304,
+      "size": 164,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127069976,
+      "size": 560,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127087408,
+      "size": 328,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127114816,
+      "size": 560,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127279264,
+      "size": 1824,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005127296320,
+      "size": 2760,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130467964,
+      "size": 460,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130486856,
+      "size": 992,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130496644,
+      "size": 772,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130499796,
+      "size": 428,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005130518784,
+      "size": 16144,
+      "owner": "com.apple.kernel"
+    },
+    {
+      "va": 18446744005156154276,
+      "size": 4992,
+      "owner": "com.apple.security.sandbox"
+    }
+  ]
+}

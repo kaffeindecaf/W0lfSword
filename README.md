@@ -250,6 +250,27 @@ build gets supported:
 ./W0lfSword kernelcache diff a.img4 b.img4
 ```
 
+`diffs`/`drift` compare pre-computed datasets; for two kernelcaches in hand the
+`scripts/kc_*` tools diff the binaries themselves, with no symbols and no device.
+A positional diff is useless here (every build orders functions differently), so
+they match function bodies by canonical content and report what changed:
+
+```bash
+scripts/kc_localize.sh .w0lfsword/kernelcaches/macho_18.7.2 \
+                       .w0lfsword/kernelcaches/macho_18.7.3   # whole bundle
+scripts/kc_funcdiff.py old new --owner com.apple.kernel      # changed bodies
+scripts/kc_pairs.py    old new --owner com.apple.kernel      # how they changed
+scripts/kc_xref.py     old --find-string "maps" --window 40  # string xrefs
+scripts/kc_datainsert.py old new --owner com.apple.security.sandbox --seg __TEXT
+```
+
+That is how the two Kernel fixes in iOS 18.7.3 were localized from public
+binaries: CVE-2025-46285 is `struct vm_map.timestamp` widened to 64 bits (98
+changed kernel bodies, the entire xnu text delta of the release), and
+CVE-2025-43512 is 112 bytes of built-in sandbox profile data (the only code edit
+is the collection length constant). Write-ups:
+`research/kc46285_vm_map_timestamp.md`, `research/kc43512_sandbox_profile.md`.
+
 The host test suites run without a device and without network access (C harnesses
 for the write path and the shell, Python lints over the sources, 30 assertions
 over the diff dataset). `bash scripts/check_host_verification.sh` runs the whole

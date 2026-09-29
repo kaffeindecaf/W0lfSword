@@ -121,3 +121,6 @@ docs/POPULARITY_WRITEUP.md
 AGENTS.md
 CLAUDE.md
 /pocs/mcmprobe/
+
+# kc_localize.sh smoke-run bundles stay local (reproducible with one command)
+docs/verification/**/driver-*/

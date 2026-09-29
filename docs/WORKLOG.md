@@ -3678,3 +3678,171 @@ and the shell's new commands are the only part of this pass whose on-device beha
 still unobserved. `readonly` remains the only mode to offer on any device/iOS pair this
 tree has not proven, staging included.
 
+---
+
+## T21 (2026-09-29) - CVE-2025-46285 localized: `struct vm_map.timestamp` 32 -> 64 bit
+
+Laptop only, no device. K4.7's laptop half: locate the fix behind Apple's "An integer
+overflow was addressed by adopting 64-bit timestamps" (iOS 18.7.3 notes, 2025-12-12,
+CVE-2025-46285) in the binaries, and confirm it on both release lines.
+
+### Inputs
+
+Four XPF-decoded kernelcache Mach-Os, already in `.w0lfsword/kernelcaches/`:
+
+| build | kernel version string from the binary | bytes | sha256[0:16] |
+| --- | --- | --- | --- |
+| 18.7.2 (22H124, T8020) | `xnu-11417.140.69.702.20~1` | 56590336 | `f102a72b2fec2eb7` |
+| 18.7.3 (22H217, T8020) | `xnu-11417.140.69.704.2~1` | 56590336 | `e3172e5364910053` |
+| 26.1 (23B85, T8110) | `xnu-12377.42.6~55` | 64389120 | `2ba97f893395eedb` |
+| 26.2 (23C57, T8110) | `xnu-12377.62.10~1` | 64405504 | `3dc5b2d30f6597bc` |
+
+Source side: `xnu-11417.140.69`, `xnu-12377.41.6`, `xnu-12377.61.12` (Apple publishes
+only base-version tags, so the tags bracket the builds rather than matching them).
+
+### Method
+
+A positional diff of two kernelcaches is useless (function order changes every build).
+New tooling matches functions by canonical content instead:
+
+- `scripts/kc_macho.py` - fileset/segment parse, VA -> segment lookup
+- `scripts/kc_funcdiff.py` - enumerate function starts, canonicalize each body
+  (register numbers dropped, `adrp+add` folded to a page token with the low 12 bits
+  kept, branch targets resolved), hash, report bodies unique to one build
+- `scripts/kc_pairs.py` - unified diff of the changed bodies, smallest first
+- `scripts/kc_xref.py` - string/data cross-references and labeled disassembly
+- `scripts/kc_localize.sh` - one command to produce a whole bundle for a build pair
+
+Two decoder bugs were found and fixed here, both of which had silently truncated
+everything measured in the 2026-08-25 pass: capstone stops at the first word it cannot
+decode (literal pools are inline in kernel text), and the `adrp` resolver leaked a
+previous page into later references. Fixing the first moved the kernel function count
+from 14,348 to 15,958 with the same 98 changed bodies; fixing the second removed a
+phantom 1.4 KB delta in one kext.
+
+### Results
+
+Kernel text (`com.apple.kernel`, `__TEXT_EXEC`), 18.7.2 -> 18.7.3: 15,958 functions on
+each side, 15,860 content-identical, **98 changed - and those 98 are the entire xnu text
+delta of the release**. Whole-kernelcache text (root `__TEXT_EXEC` container, kernel plus
+all 224 kexts, 100,516 functions each side) = 100 changed bodies. `__TEXT`,
+`__PPLTEXT`, `__PPLTRAMP`, `__KLD` of the kernel: 0 functions, 0 changes.
+
+The struct is identified by decoding the zone registration the fix touched: zone `"maps"`
+is `VM_MAP_ZONE_NAME` (`osfmk/vm/vm_map.c:938`), registered as
+`zone_create_ext(VM_MAP_ZONE_NAME, sizeof(struct _vm_map), ...)`:
+
+| pair | `"maps"` elem size | `"VM map entries"` | `"VM map holes"` | `"VM map copies"` |
+| --- | --- | --- | --- | --- |
+| 18.7.2 -> 18.7.3 | `0xf0` -> `0xf8` | 0x50 -> 0x50 | 0x20 -> 0x20 | 0x48 -> 0x48 |
+| 26.1 -> 26.2 | `0xf0` -> `0xf8` | 0x50 -> 0x50 | 0x20 -> 0x20 | 0x48 -> 0x48 |
+
+`sizeof(struct _vm_map)` grew by 8 while its neighbours did not, and the counter's access
+moved with it: `ldr w8,[x,#0xdc]; add w8,w8,#1; str w8,[x,#0xdc]` became
+`ldr x8,[x,#0xe0]; add x8,x8,#1; str x8,[x,#0xe0]`. The pre-fix packed `flags|timestamp`
+64-bit update (vector moves on the upper lane) split into two scalar accesses. 68 of the
+98 pairs carry the widening, 34 carry the `sizeof` constants, 17 carry both.
+
+Source: `osfmk/vm/vm_map_xnu.h` has `unsigned int timestamp; /* Version number */` at
+line 461 in `xnu-11417.140.69` and at 479 in `xnu-12377.41.6`, and `uint64_t timestamp;`
+at 479 in `xnu-12377.61.12`; `vm_map_version_t.main_timestamp` (500 / 567) widens with
+it. The complete diff of that header between `12377.41.6` and `12377.61.12` is those two
+lines, at the same line numbers.
+
+The field is the vm_map lock version: `map->timestamp` is incremented on every exclusive
+unlock (`vm_map_unlock`, `vm_map_lock_write_to_read`, `vm_map_entry_wait`) and is the
+token `vm_map_version()` publishes and `vm_map_verify()` checks in the operations that
+hold a map reference across a lock drop. A 32-bit wrap can return it to a value an
+in-flight operation already snapshotted.
+
+### Where the evidence is
+
+- `docs/verification/2026-09-29-kc-localize/COMMANDS.md` - every invocation, its exit
+  status and the sha256 of its complete stdout+stderr
+- same directory, committed artifacts: `funcs_kernel.json`, `funcs_all_text.json`,
+  `funcs_kernel_26x.json`, `vm_map_xnu.h_12377.41.6_to_61.12.diff`, `SHA256SUMS`
+- `*.log` (funcdiff runs, pair diffs, zone disassembly, the driver smoke runs) stays
+  local by this repo's convention; `COMMANDS.md` carries their hashes
+- write-up: `research/kc46285_vm_map_timestamp.md`
+
+### What this pass does NOT prove
+
+Nothing was run on a phone. The localization says *what* was fixed and *where*: it does
+not demonstrate the wrap. The naive trigger cost is 2^32 exclusive map unlocks, so
+whether a cheap path exists (`vm_map_copy`/`vm_remap` on a sub-map, a write->read
+downgrade storm, a shared region) is unmeasured, and that is exactly the part that needs
+18.7.2 or 26.1 hardware (now tracked as K4.7a). The two "same fix" claims rest on the
+zone-size measurement plus the source tag diff; the 18.x line has no published post-fix
+source tree, so for 18.7.3 the binary is the only evidence. The method diffs code: a
+change confined to a const/data segment would not appear, which is why the second Kernel
+entry in the same advisory (CVE-2025-43512, "logic issue") has no candidate here - every
+kernel body except the 98 timestamp sites is content-identical, so its fix is either the
+single changed `com.apple.security.sandbox` body (4992 bytes) or outside kernel text.
+
+---
+
+## T22 (2026-09-29) - 18.7.3's other Kernel entry: CVE-2025-43512 is 112 bytes of sandbox profile
+
+Second half of the same laptop-only session, and the answer to the question T21 left open.
+Same host, same four kernelcaches, no device.
+
+### Result
+
+CVE-2025-43512 (18.7.3 advisory, "a logic issue ... improved checks", app may elevate
+privileges) is **not in the kernel code**. `com.apple.security.sandbox`:
+
+- `__TEXT` 0x1c49ad -> 0x1c4a1d = **+112 bytes**; `__TEXT_EXEC`, `__DATA`,
+  `__DATA_CONST` and `__LINKEDIT` byte-for-byte the same size
+- `scripts/kc_datainsert.py` locates the insertion at one point: prefix
+  (`__TEXT+0..0xce767`) byte-identical, tail shifted by exactly 112; the 112 inserted
+  bytes are compiled sandbox-profile data containing the path literals
+  `PersistentConnection/com.apple.syncdefaultsd` and
+  `CrashReporter/PersistentConnection/com.apple.syncdefaultsd`
+- the kext's only changed code body in that pair (4992 B at 0xfffffff009e62ba4) differs by
+  a single immediate: `mov w3, #0x5d6` -> `#0x646` (+112), the 4th argument of the call
+  that registers the builtin collection (`x1 = "builtin collection"`, `x0` = a zeroed
+  `__DATA_CONST` record, `x2`/`x4` = code pointers, one PAC-signed)
+- cross-line, 26.1 -> 26.2: the same kext grows `__TEXT` by **+0x3530 (13,616 bytes)**
+  with the same shape - data in the segment, lengths in the code (3 changed bodies, one of
+  them a struct-field offset change) - so this is the profile-update mechanism, not a
+  one-off
+
+Attribution is by elimination: 46285 accounts for the entire xnu text delta (T21), the
+18.7.3 page has no Sandbox section, and Apple files kernelcache kext fixes under Kernel.
+The advisory never names a component.
+
+### Commands (working directory `/home/kaffein/Desktop/W0lfSword`)
+
+| command | rc | output | sha256/result |
+| --- | --- | --- | --- |
+| `scripts/kc_datainsert.py --selftest` | 0 | - | `checks=7 failures=0` |
+| `scripts/kc_datainsert.py macho_18.7.2 macho_18.7.3 --owner com.apple.security.sandbox --seg __TEXT --context 64` | 0 | `docs/verification/2026-09-29-kc43512-sandbox-profile/datainsert_sandbox.log` | sha256 `3b3f43fa3d0685a52fbe20c5fccaa82ed51d96321219f1fedb42c9871d091694` |
+| `scripts/kc_pairs.py macho_18.7.2 macho_18.7.3 --owner com.apple.security.sandbox` | 0 | same log | 1 changed pair, 2 changed lines |
+| `scripts/kc_pairs.py macho_26.1 macho_26.2 --owner com.apple.security.sandbox` | 0 | same log | 3 changed pairs |
+| `bash scripts/regression.sh` | 0 | `/tmp/k47_suite.log` (local) | `Regression: 23 passed, 0 failed` (make package, libengine, hub app; device smoke skipped, no device) |
+| `bash -s audit < W0lfSword` | 0 | - | `AUDIT PASSED` after `scripts/roadmap_stats.py --write ROADMAP.md` |
+| `python3 -m py_compile scripts/kc_*.py` | 0 | - | clean |
+| `bash -n scripts/kc_localize.sh` | 0 | - | clean |
+
+The `datainsert_sandbox.log` hash above covers the tool run and both pair diffs (one file,
+one invocation chain); `COMMANDS.md` in the T21 evidence directory carries the per-command
+hashes for the K4.7 bundle.
+
+### Artifacts
+
+- `research/kc43512_sandbox_profile.md` - write-up
+- `scripts/kc_datainsert.py` - the insertion locator (binary search for the shift point,
+  `--selftest` with synthetic mid/start/end insertions and an in-place rewrite)
+- `docs/verification/2026-09-29-kc43512-sandbox-profile/datainsert_sandbox.log` (local, gitignored)
+- gitignored, local-only: `.hermes`-side tarballs of `xnu-11417.140.69`, `xnu-12377.41.6`,
+  `xnu-12377.61.12` used for the source bracket in T21
+
+### What this pass does NOT prove
+
+Which rule the 112 bytes add. The bytes are compiled profile data (SBPL) and the encoding
+around them is not decoded, so the finding says "the built-in profile grew, by this much,
+at this offset" and not "this specific path is now denied". Nor is the attribution to
+43512 a quote from Apple - it is elimination against a fully explained xnu delta. Nothing
+was evaluated on a device: no profile was run and no privilege path was exercised, so the
+claim that the pre-fix profile is the path 43512 describes stays open as K4.7c.
+
