@@ -390,7 +390,7 @@ W0lfSword                  # CLI: menu, build, deploy, diagnostics, host tools
 +-- kpf/ + XPF/            # kernelcache grabber and offset patchfinder
 +-- tools/xpf-cli/         # host-side XPF resolver
 +-- pocs/                  # panic PoCs, the ImageIO probe, the Hub app shell
-+-- tweaks/                # SpringBoard tweak catalog and installer
++-- tweaks/                # SpringBoard tweak catalog, parity list, installer
 +-- tests/ + scripts/      # host harnesses, lints, regression and verification
 +-- docs/                  # guides, ADRs, verification logs, WORKLOG
 +-- research/              # framework research, fuzz harnesses, CVE catalogs
