@@ -47,6 +47,13 @@ v1 is a test harness, not a jailbreak:
 - **panic guard** (L7.2): the A3.1 crash counter ported to app-scoped flag
   files. Registers each launch, resets the counter when a run proves the
   exploit completed.
+- **icon + launch screen** (L2.6): eight iPhone icon PNGs in `Resources/`
+  (`AppIcon29x29`/`40x40`/`60x60` at @2x/@3x, the repo's wolf art), declared
+  through `CFBundleIcons`, plus a system launch screen (`UILaunchScreen`) and
+  `UIUserInterfaceStyle = Dark` so the launch screen and the system chrome
+  match the app's hardcoded black UI. No asset catalog: `actool` and `ibtool`
+  need Xcode. Regenerate with
+  `python3 scripts/make_wolf_icon.py pocs/hub_shell/Resources phone`.
 
 Both probes are read-only and gated on `exploit_is_done()`. The screen is one
 black label with those lines on it.
@@ -56,8 +63,7 @@ black label with those lines on it.
 - no exploit runner, retry ladder or live status: L6.1 to L6.4
 - no sandbox-escape test suite or result export: L4.1 to L4.4
 - no SSV panel or escalation report: L5.3 to L5.5
-- no icons or launch screen (L2.6), no in-app confirm gates or limits screen
-  (L7.1, L7.3, L7.4)
+- no in-app confirm gates or limits screen (L7.1, L7.3, L7.4)
 - no XPF-verified offset table beyond the generated `offsets.json` (L3.2), and
   no `TweakLog` plumbing into an app log view or file export (L3.5)
 - never tested on hardware (L8.1), no release build (L8.3)

@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-# make_wolf_icon.py - renders the W0lfSword arctic-wolf ASCII art as the
-# Filza app icon, all sizes, dark navy + ice-blue theme.
-import os, random
+# make_wolf_icon.py - renders the W0lfSword arctic-wolf ASCII art as an app
+# icon set, all sizes, dark navy + ice-blue theme.
+#
+#   python3 scripts/make_wolf_icon.py [outdir] [set]
+#     outdir  default .theos/icon_out
+#     set     all (default: + the ~ipad sizes) | phone (the 8 iPhone files)
+#
+# Two consumers: the Filza re-sign drop dir (.theos/icon_out) and the hub app
+# (pocs/hub_shell/Resources, L2.6 — a plain PNG set plus CFBundleIcons in
+# Info.plist, because an .xcassets catalog needs actool/Xcode this Linux build
+# path does not have). Deterministic: fixed seed, fixed font, fixed sizes.
+import os, random, sys
 from PIL import Image, ImageDraw, ImageFont
 
-ART = [l.rstrip("\n") for l in open("scripts/wolf_art.txt").read().splitlines() if l.strip() != ""]
+ART = [l.rstrip("\n") for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "wolf_art.txt")).read().splitlines() if l.strip() != ""]
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 if not os.path.exists(FONT):
@@ -63,7 +72,10 @@ for i, line in enumerate(ART):
 # --- subtle border (looks sharp on any wallpaper) ---
 d.rectangle([0, 0, W - 1, H - 1], outline=(90, 130, 190, 255), width=6)
 
-OUT = ".theos/icon_out"
+OUT = sys.argv[1] if len(sys.argv) > 1 else ".theos/icon_out"
+SET = sys.argv[2] if len(sys.argv) > 2 else "all"
+if SET not in ("all", "phone"):
+    sys.exit(f"set must be all|phone, got '{SET}'")
 os.makedirs(OUT, exist_ok=True)
 
 SIZES = {
@@ -83,8 +95,14 @@ SIZES = {
     "AppIcon76x76@2x~ipad.png": 152,
     "AppIcon83.5x83.5@2x~ipad.png": 167,
 }
+# "phone": UIDeviceFamily 1 - the hub app declares iPhone only, so the ~ipad
+# files would ship as dead weight.
+if SET == "phone":
+    SIZES = {n: s for n, s in SIZES.items() if "~ipad" not in n}
+
 for name, size in SIZES.items():
     img.resize((size, size), Image.LANCZOS).save(os.path.join(OUT, name))
     print(f"{name}: {size}x{size}")
 
-print("master: 1024x1024")
+print(f"master: 1024x1024 ({len(SIZES)} files, set={SET}, out={OUT})")
+

@@ -10,6 +10,19 @@
 	<string>W0lfSwordHubShell</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.kaffeindecaf.w0lfswordhubshell</string>
+	<!-- L2.6: plain PNG icon set in Resources/ (a .xcassets catalog needs
+	     actool, i.e. Xcode). iOS resolves the @2x/@3x files from the base
+	     name. Regenerate: python3 scripts/make_wolf_icon.py pocs/hub_shell/Resources phone -->
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60x60</string>
+			</array>
+		</dict>
+	</dict>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -28,9 +41,19 @@
 	<array>
 		<integer>1</integer>
 	</array>
+	<!-- L2.6: empty dict = the system launch screen (dark, see
+	     UIUserInterfaceStyle). No LaunchScreen.storyboard: compiling one needs
+	     ibtool (Xcode); no color asset: actool. -->
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<!-- The app's own UI is hardcoded black with an ice-blue label; forcing
+	     dark keeps the launch screen, alerts, sheets and keyboard in the same
+	     palette instead of flashing white on a light-mode device. -->
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
 </dict>
 </plist>
