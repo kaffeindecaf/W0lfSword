@@ -5,7 +5,7 @@ _Source: the archived per-repo deep reads in `referenceforAI/RESEARCH.md`
 from `referenceforAI/` on 2026-08-24; the provenance table at the top of
 RESEARCH.md carries the clone URLs and commits, so a fresh clone re-checks any
 line-level claim below. Catalog state is `tweaks/catalog.json` (13 rows:
-10 available, 3 planned)._
+11 available, 2 planned)._
 
 ## What the two references actually are
 
@@ -50,7 +50,7 @@ needs no file write at all.
 |---|---|---|---|
 | badge colour | SpringBoard badge view tint | `badge_colors` | planned |
 | passcode theming | CPBitmap button images | `passcode_theming` | planned |
-| icon theming (user apps) | `Assets.car` rendition rewrite, PNG fallback | `custom_icons` (PNG at `/var/mobile/Documents/Icons/<bundleid>.png`) | planned |
+| icon theming (user apps) | `Assets.car` rendition rewrite, PNG fallback | `custom_icons` (PNG at `/var/mobile/Documents/Icons/<bundleid>.png`) | available |
 | icon theming (system apps) | `WebClips` dirs + `com.apple.private.WebClips.read-write` | - | gap |
 | home gesture / device look | MobileGestalt cache `ArtworkDeviceSubType` | `mobilegestalt` CLI (chain F, kernel route) | shipped in the CLI, not as a catalog tweak |
 | respring after apply | `killall("SpringBoard")` over KERN_PROC | `tweaks install` deploys + resprings | parity |
@@ -78,9 +78,12 @@ Ordering rule: hook-only tweaks first (a substrate hook writes no files, so no
 SSV/vnode path and no backup story), then the path rewrites that need kernel R/W
 plus a restore, then the items that need a deliverable we do not have.
 
-1. `custom_icons` (K3.7) - already carries a catalog row and a prompt. Ship the
-   PNG-per-bundleid path first; `Assets.car` rendition rewriting is the
-   follow-up once the CoreUI route is verified on a device.
+1. `custom_icons` (K3.7) - shipped 2026-10-02: `tweaks/templates/custom_icons.xm`
+   hooks `SBIconView -setIcon:` and pushes a PNG-per-bundleid image into the
+   icon's own image views; it reads `/var/mobile/Documents/Icons/<bundleid>.png`
+   and writes nothing, so the revert is "delete the dir + respring". The
+   `Assets.car` rendition rewrite is the follow-up, once the CoreUI route is
+   verified on a device - it needs the write window this hook does not.
 2. `badge_colors` - Mugunghwa's simplest feature, one SpringBoard badge view
    hook, no file writes.
 3. `passcode_theming` - same class as `badge_colors`, but the passcode keypad

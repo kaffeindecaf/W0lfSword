@@ -151,9 +151,9 @@
       "required_exploit": "darksword",
       "jailbreak_required": true,
       "files_modified": ["/var/mobile/Documents/Icons/ (new)"],
-      "dylib_template": "",
+      "dylib_template": "templates/custom_icons.xm",
       "substrate_target": "com.apple.springboard",
-      "status": "planned"
+      "status": "available"
     },
     {
       "id": "badge_colors",
