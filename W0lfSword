@@ -765,6 +765,13 @@ load_config() {
             confirm_risky)  CFG_CONFIRM_RISKY="$v";;
             prompt_symbol)  CFG_PROMPT="$v";;
             loading_time)   CFG_LOADING_TIME="$v";;
+            # AUD.13: this arm was missing, so `report_errors=<x>` in the config
+            # file (and `config set report_errors <x>`, which re-loads through
+            # here) was silently ignored - the setting existed in the schema,
+            # config_defaults, config_get and config_valid, but never reached the
+            # runtime variable. scripts/test_config_keys.sh fails while any
+            # schema key is missing from any of these four tables.
+            report_errors)  CFG_REPORT_ERRORS="$v";;
         esac
     done < "$CONFIG_FILE"
     # color=off neutralizes the palette so every helper prints plain text

@@ -46,6 +46,19 @@ if bash scripts/test_cve_catalog.sh >/dev/null 2>&1; then ok "test_cve_catalog.s
 section "Per-device exploit-method compat grid (K1.8)"
 if bash scripts/test_exploit_choice.sh >/dev/null 2>&1; then ok "test_exploit_choice.sh"; else bad "test_exploit_choice.sh"; fi
 
+section "Config key load test (AUD.13)"
+# The config lives in four parallel tables (config_schema, config_defaults,
+# config_get, config_valid and load_config's case); `report_errors` was in four
+# of them and missing from load_config, so a value in the config file was
+# silently dropped. Structural half = every schema key is an arm of all four
+# functions; behavioural half = defaults / valid / invalid / `config set`
+# through the CLI, in a throwaway project dir (the real config is never read).
+if bash scripts/test_config_keys.sh >/tmp/regression_config_keys.log 2>&1; then
+    ok "test_config_keys.sh ($(grep -c '✓' /tmp/regression_config_keys.log) checks)"
+else
+    bad "test_config_keys.sh — see /tmp/regression_config_keys.log"
+fi
+
 section "BUG.1 host tests (zone-writer clamp + probe restore policy)"
 # BUG.1 (2026-09-11 SE panic) is a 32-byte block written past the end of a
 # kalloc.96 object and a corrupted live inpcb left behind on a probe exit. Both
