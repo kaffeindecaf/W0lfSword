@@ -6,13 +6,18 @@
 #   Tweak.m, TweakExploit.m, FilzaPadlockBypass.xm
 #
 # Usage: THEOS=~/theos bash scripts/build_libengine.sh
-# Output: .theos/libengine/libw0lfengine.a
+#        DEBUG=0 OUT=.theos/libengine-release bash scripts/build_libengine.sh
+# Output: .theos/libengine/libw0lfengine.a (OUT overridable, so a release
+#         build never overwrites the debug archive the host suite pins).
+# DEBUG=1 (default) = -DDEBUG (KPRINTF address-leak logging on);
+# DEBUG=0           = -DNDEBUG (FAILURE() returns, KPRINTF compiles out, L8.3).
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 THEOS="${THEOS:-$HOME/theos}"
-OUT=".theos/libengine"
+DEBUG="${DEBUG:-1}"
+OUT="${OUT:-.theos/libengine}"
 mkdir -p "$OUT"
 : > "$OUT/build.log"
 
@@ -33,7 +38,12 @@ CFLAGS="-target arm64-apple-ios15.0 -isysroot $SDK -arch arm64 -miphoneos-versio
   -I$(pwd) -I$(pwd)/XPF/src -I$(pwd)/XPF/external/ChOma/include \
   -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable \
   -Wno-incompatible-pointer-types -Wno-incompatible-pointer-types-discards-qualifiers \
-  -Wno-deprecated-declarations -Wno-nonportable-include-path -Wno-format -DDEBUG"
+  -Wno-deprecated-declarations -Wno-nonportable-include-path -Wno-format"
+if [ "$DEBUG" = "1" ]; then
+    CFLAGS="$CFLAGS -DDEBUG"
+else
+    CFLAGS="$CFLAGS -DNDEBUG"
+fi
 
 SOURCES="sandbox_escape.m \
   kexploit/kexploit_opa334.m kexploit/krw.m kexploit/krw_zone_write.c kexploit/krw_zone_size.c kexploit/probe_restore_policy.c kexploit/kwrite_counter.c kexploit/kutils.m kexploit/offsets.m \

@@ -416,8 +416,9 @@ record what ran in `docs/WORKLOG.md`. `docs/GLOSSARY.md` explains the vocabulary
 
 The in-repo app shell is `pocs/hub_shell/` (bundle
 `com.kaffeindecaf.w0lfswordhubshell`, display name W0lfSword Hub): a thin Theos
-app over the same engine, packaged by `scripts/build_hub_ipa.sh`. Its feature
-list, both install modes and what is still open are in
+app over the same engine, packaged by `scripts/build_hub_ipa.sh` (add
+`--release` for the NDEBUG build that strips the address-leak logging). Its
+feature list, both install modes and what is still open are in
 [`pocs/hub_shell/README.md`](pocs/hub_shell/README.md).
 
 ## Release history

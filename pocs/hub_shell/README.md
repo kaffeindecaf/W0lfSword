@@ -54,6 +54,10 @@ v1 is a test harness, not a jailbreak:
   match the app's hardcoded black UI. No asset catalog: `actool` and `ibtool`
   need Xcode. Regenerate with
   `python3 scripts/make_wolf_icon.py pocs/hub_shell/Resources phone`.
+- **release build** (L8.3): `scripts/build_hub_ipa.sh trollstore 1.0 --release`
+  rebuilds the engine at `DEBUG=0` and the app at `FINALPACKAGE=1`, verifies the
+  shipped binary carries no `KPRINTF` marker, and writes
+  `.w0lfsword/dist/W0lfSwordHub-1.0-trollstore-release.ipa`.
 
 Both probes are read-only and gated on `exploit_is_done()`. The screen is one
 black label with those lines on it.
@@ -66,7 +70,7 @@ black label with those lines on it.
 - no in-app confirm gates or limits screen (L7.1, L7.3, L7.4)
 - no XPF-verified offset table beyond the generated `offsets.json` (L3.2), and
   no `TweakLog` plumbing into an app log view or file export (L3.5)
-- never tested on hardware (L8.1), no release build (L8.3)
+- never tested on hardware (L8.1)
 
 ## Build and install
 
@@ -76,11 +80,18 @@ make libengine                          # repo root; the shared engine archive
 bash scripts/build_hub_ipa.sh trollstore 1.0
 ```
 
-`scripts/build_hub_ipa.sh [sideload|trollstore] [version]` does the Theos build,
-writes the entitlement plist, assembles `Payload/W0lfSwordHub.app`, signs the
-binary with `scripts/ldid` and zips the result to
-`.w0lfsword/dist/W0lfSwordHub-<version>-<mode>.ipa`. It then prints the IPA
-listing, the CodeDirectory line and the entitlements it applied.
+`scripts/build_hub_ipa.sh [sideload|trollstore] [version] [--release]` does the
+Theos build, writes the entitlement plist, assembles `Payload/W0lfSwordHub.app`,
+signs the binary with `scripts/ldid` and zips the result to
+`.w0lfsword/dist/W0lfSwordHub-<version>-<mode>[-release].ipa`. It then prints the
+IPA listing, the CodeDirectory line and the entitlements it applied.
+
+`--release` (L8.3) builds the same app for shipping: the engine archive is
+rebuilt with `DEBUG=0` (`-DNDEBUG`, so `KPRINTF` address-leak logging compiles
+out) into `.theos/libengine-release/`, the app builds with `FINALPACKAGE=1` and
+`-Wl,-S`, and the script refuses to hand over an IPA whose shipped binary still
+carries a `KPRINTF` marker. The debug archive under `.theos/libengine/` is never
+touched, because the host suite pins its hash.
 
 Two delivery modes:
 
