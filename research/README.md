@@ -31,3 +31,7 @@
   `../ROADMAP.md` Section 0.2 - fuzzer targeting is done; reproduction needs an
   iOS 26.1 arm64e device.
 - Fuzz state lives in `.w0lfsword/fuzz/` (corpus, manifest, results, signatures - gitignored).
+
+## External references (not vendored)
+
+- [EliasTekdin/r7-darksword-rce](https://github.com/EliasTekdin/r7-darksword-rce) - unverified “GhostWave”/DarkSword implementation claim. The README claims iOS 18.4-26.3; GTIG documents the in-the-wild chain on 18.4-18.7. GitHub lists no license or releases. Reference only: do not vendor or execute its code.
