@@ -1,154 +1,106 @@
-# W0lfSword
+<h1 align="center">W0lfSword</h1>
 
-A Filza tweak and host tools for iOS exploit research.
+<p align="center">
+  <strong>Kernel research on iOS. Kernelcache research from your desk.</strong>
+</p>
 
-W0lfSword builds a tweak that gives Filza kernel read/write and sandbox access on supported builds. The same repository includes tools for device setup, offset checks, kernelcache analysis, crash triage and fuzzing.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#host-tools">Host tools</a> ·
+  <a href="https://github.com/kaffeindecaf/W0lfSword/releases">Releases</a>
+</p>
 
-Use it only on devices you own or are authorized to test. The kernel stage can panic a phone. W0lfSword is not a jailbreak, does not include Filza and is not a recovery tool.
+<p align="center">
+  <img src="docs/og-banner.png" width="740" alt="W0lfSword wordmark beside the blue Arctic Wolf ASCII art">
+</p>
 
-```
-host:   check device -> build tweak -> deploy
-                                  |
-                                  v
-iOS:    Filza -> kernel access -> sandbox and file operations
-```
+W0lfSword brings **DarkSword kernel read/write and sandbox escape to Filza** on supported iOS builds. On Linux or macOS, the same toolkit can resolve offsets, compare kernelcaches and triage panic logs **without a phone attached**.
 
-- Check the model and iOS build before a device run.
-- Build and deploy through one CLI, over USB or SSH.
-- Research kernel builds on the host without running the exploit.
+| On the device | On the host |
+| --- | --- |
+| Explore what Filza can access after a sandbox escape, and watch the chain run in its live log. | Compare iOS builds, track offset drift and map crash reports back to the relevant subsystem. |
 
 ## Quick start
 
-Clone the repository with its submodules:
+Clone the repo and open the command index. This step only needs your computer:
 
 ```bash
-git clone --recurse-submodules https://github.com/kaffeindecaf/W0lfSword.git
+git clone https://github.com/kaffeindecaf/W0lfSword.git
 cd W0lfSword
+./W0lfSword commands
 ```
 
-Install the build tools once. On Linux, setup needs root. On macOS, do not run setup with `sudo`.
-
-```bash
-# Linux
-sudo ./W0lfSword setup
-
-# macOS
-./W0lfSword setup
-```
-
-Check the toolchain and run the project audit:
+For a device run, install the build tools with `sudo ./W0lfSword setup` on Linux or `./W0lfSword setup` on macOS. Then check the toolchain and your exact device combination:
 
 ```bash
 ./W0lfSword doctor
-./W0lfSword audit
+./W0lfSword exploits iPhone14,7 26.0.1  # Replace with your model and iOS version
 ```
 
-Before using a device, check its exact model and iOS version:
+> [!CAUTION]
+> Use a lab device you own or are authorized to test. The kernel stage can panic the device. A reboot clears in-memory patches; files you modify can remain changed.
 
-```bash
-./W0lfSword exploits iPhone14,7 26.0.1
-```
+| Deployment path | When to use it |
+| --- | --- |
+| `sudo ./W0lfSword adderall --safe` | First deployment check on a jailbroken test device with Filza and OpenSSH. It builds and deploys the tweak but skips the kernel stage. Add `--usb` to use USB transport. |
+| `./W0lfSword explain nojailbreak` | See the USB install workflow for a device without a jailbreak. It requires your own Filza IPA and is listed for iOS 18.0–26.0.1. The install workflow can run the kernel stage. |
 
-Replace the example model and version with the values for your test device. The command reports whether a technique is listed for that combination.
+W0lfSword requires a copy of Filza and does not jailbreak or recover a device.
 
-## What runs on the phone
+## Architecture
 
-The main path is a tweak injected into Filza. It uses the DarkSword kernel exploit to obtain kernel read/write, changes the process sandbox rules, and can activate the sealed system volume path. Filza then uses its normal file browser UI.
+On the main path, Filza loads the tweak and activates the UI hooks. DarkSword (CVE-2025-43520) can then provide kernel read/write, which the tweak uses to patch Filza's sandbox rules and enable access through the sealed system volume (SSV) path. File operations still happen through Filza's usual browser.
 
-The kernel stage is listed for iOS 17.0 through 26.0.1. `pe_v1` covers A12 through A17; `pe_v2` covers A18. Use `exploits <model> [ios]` for the current per-device verdict. Apple patched the DarkSword kernel path in iOS 26.1. Other userspace features have separate support windows; do not infer their status from the kernel matrix.
+| System architecture | Exploit chain |
+| :---: | :---: |
+| <a href="W0lfSwordArchitecture.png"><img src="W0lfSwordArchitecture.png" width="360" alt="Filza tweak components, kernel read/write, and XPF offset resolution"></a> | <a href="W0lfSwordChain.png"><img src="W0lfSwordChain.png" width="360" alt="Flow from tweak initialization and hooks through kernel access, sandbox escape and SSV writes"></a> |
+| How the tweak, kernel primitives and offset resolver fit together. | How execution moves from Filza startup to sandbox and system volume access. |
 
-There are two deployment paths:
+Select either diagram to view it at full size. The chain diagram shows the main path; release builds use the staged checks described below.
 
-- `adderall` discovers the phone, builds and deploys the tweak, then restarts Filza. It requires root on the host and a jailbroken phone with Filza and OpenSSH. `--usb` forces USB transport. `--safe` skips the kernel stage.
-- `nojailbreak` installs a substrate-free Filza build over USB, without a jailbreak, SSH or Wi-Fi. It needs a Filza IPA you provide and is listed for iOS 18.0 through 26.0.1. It still runs the kernel exploit, so it can panic the phone.
+## Compatibility and safety
 
-Get the current flags before a device operation:
-
-```bash
-./W0lfSword explain adderall
-./W0lfSword explain nojailbreak
-```
-
-## Safety
-
-Treat every unverified kernel run as capable of panicking the device. Use a test phone that you can force-restart. Do not use a daily-driver phone.
-
-The release build uses staged mode. It can pass a compatibility check, perform a write probe and continue into the full chain. Staged mode is not read-only. Use `--safe` when you only want to verify the build and deployment path.
-
-A reboot clears the in-memory kernel and sandbox changes. Files you deliberately change are separate and may remain. After a panic, save the device crash report before another run; a later panic can replace the earlier report.
+- **Kernel stage:** Listed for supported combinations from iOS 17.0 through 26.0.1. The `pe_v1` path covers A12–A17; `pe_v2` covers A18. Check `./W0lfSword exploits <model> [ios]` for your exact combination.
+- **iOS 26.1 and later:** Apple patched this DarkSword kernel path in 26.1. Userspace techniques have their own support windows, which the CLI reports separately.
+- **Release builds:** Staged mode can move from a compatibility check to a write probe and then the full chain. Use `adderall --safe` to verify deployment without running the kernel stage.
+- **After a panic:** Save the crash report before retrying; a later panic may replace it. See the [threat model](docs/THREAT_MODEL.md) for the limits of each path.
 
 ## Host tools
 
-These commands work without running the kernel exploit:
+Start with `./W0lfSword offsets` to see existing coverage or `./W0lfSword explain <command>` for usage.
 
-| Command | Use |
+| Command | What it helps you do |
 | --- | --- |
-| `doctor` | Check the host build tools |
-| `audit` | Check shell syntax, CLI wiring and repository rules |
-| `exploits <model> [ios]` | Read the technique matrix and device verdict |
-| `offsets` | Show offset coverage |
-| `kernelcache` | Extract, resolve or diff kernelcaches |
-| `diffs` | Inspect precomputed Apple build diffs |
-| `drift` | Find offsets that need re-verification |
-| `kcwatch` | Check new kernel builds and report offset changes |
-| `panic analyze <file>` | Classify an iOS crash report |
-| `cve [filter]` | Browse the CVE catalog |
-| `chains [a-g|best]` | Browse the attack-chain catalog |
+| `kernelcache` | Extract a kernelcache, resolve offsets or diff two builds. |
+| `diffs` · `drift` | Inspect published build diffs and identify offsets that need re-verification. |
+| `kcwatch` | Check new builds and report offset changes. |
+| `panic analyze <file>` | Classify a saved iOS panic report. |
+| `cve [filter]` · `chains` | Browse the CVE and attack-chain catalogs. |
 
-`poc`, `poclab` and `fuzz` are research tools. Some tests can crash a device. Read each command's help and use a lab device before running them.
-
-For the full command list, aliases and menu keys:
-
-```bash
-./W0lfSword commands
-./W0lfSword explain <command>
-```
-
-With no arguments, `W0lfSword` opens the interactive menu.
+The [research index](research/README.md) covers the kernelcache scripts, fuzzers and proof-of-concept tools. Some PoC and fuzzing commands interact with a device; check their help before running them.
 
 ## Build and verify
 
-The host build uses Theos, clang, an iPhoneOS SDK and `dpkg-deb`. `doctor` checks the local toolchain.
+The build uses Theos, clang, an iPhoneOS SDK and `dpkg-deb`. Run `./W0lfSword doctor` to check your setup.
 
 ```bash
 make package
+./W0lfSword audit
 bash scripts/check_host_verification.sh
 ```
 
-The verification script runs the pinned host tests. Add `--with-builds` to include the Theos cross-builds. Neither command runs an exploit on a phone.
+Add `--with-builds` to the verification script to include Theos cross-builds. These checks run on the host.
 
-## Repository layout
-
-```
-W0lfSword                  CLI and device workflow
-Tweak.m                    tweak entry point
-TweakExploit.m             exploit sequencing and safety modes
-kexploit/                  kernel primitives, offsets and userspace modules
-SSV/                       sealed system volume helpers
-terminal/                  in-process shell and probes
-mobilegestalt/             MobileGestalt module
-sbtweak/                   SpringBoard RemoteCall driver
-scripts/                   build, research and verification tools
-research/                  host research tools and tracked index
-pocs/                      research PoCs and Hub app
-```
-
-## Further reading
-
-- [Threat model](docs/THREAT_MODEL.md)
-- [Offset resolution guide](docs/OFFSET_RESOLUTION_GUIDE.md)
-- [Research index](research/README.md)
-- [Hub app](pocs/hub_shell/README.md)
-- [License](LICENSE)
+| Where to go next | What you'll find |
+| --- | --- |
+| [Kernel primitives](kexploit/) · [Exploit sequencing](TweakExploit.m) | The kernel read/write implementation and staged execution. |
+| [Offset resolution guide](docs/OFFSET_RESOLUTION_GUIDE.md) | How to research offsets for a new iOS build. |
+| [W0lfSword Hub](pocs/hub_shell/README.md) | The companion app, its build workflow and install modes. |
+| [Roadmap](ROADMAP.md) · [Arctic Wolf art asset](scripts/wolf_art.txt) | Open work and the source art for the Hub icon. |
 
 ## Credits
 
-- [Huy Nguyen](https://github.com/34306/): original FilzaJailedDS
-- [wh1te4ever](https://github.com/wh1te4ever/): DarkSword exploit and XPF offset engine
-- [opa334](https://github.com/opa334/): XPF patchfinder, kernel read/write primitives and sandbox structures
-- [khanhduytran0](https://github.com/khanhduytran0/): sandbox hook token technique
-- [CrazyMind90](https://github.com/CrazyMind90/): sandbox token acquisition
-- [XEmaz](https://x.com/XEmaz_): sealed system volume bypass and Filza hooks
-- [kaffeindecaf](https://github.com/kaffeindecaf/): W0lfSword integration, device support and host tooling
+[Huy Nguyen](https://github.com/34306/) (FilzaJailedDS), [wh1te4ever](https://github.com/wh1te4ever/) (DarkSword and XPF offset engine), [opa334](https://github.com/opa334/) (XPF, kernel primitives and sandbox structures), [khanhduytran0](https://github.com/khanhduytran0/) (sandbox hook tokens), [CrazyMind90](https://github.com/CrazyMind90/) (sandbox token acquisition), [XEmaz](https://x.com/XEmaz_) (SSV bypass and Filza hooks) and [kaffeindecaf](https://github.com/kaffeindecaf/) (integration, device support and tooling).
 
-Third-party code remains subject to its original license. See [LICENSE](LICENSE) and the relevant upstream repositories.
+See [LICENSE](LICENSE). Third-party code remains under its original licenses.
