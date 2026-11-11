@@ -211,5 +211,19 @@ class TestCliContract(unittest.TestCase):
         self.assertIn("not a diff at all", r.stdout)
 
 
+class TestColourOverrides(unittest.TestCase):
+    def test_no_color_wins_in_either_argument_order(self):
+        env = dict(os.environ)
+        env.pop("NO_COLOR", None)
+        for args in (["--no-color", "--color=always"],
+                     ["--color=always", "--no-color"]):
+            with self.subTest(args=args):
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), *args], input=SAMPLE,
+                    capture_output=True, text=True, env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, SAMPLE)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

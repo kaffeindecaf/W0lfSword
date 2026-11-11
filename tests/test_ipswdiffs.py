@@ -13,7 +13,9 @@ README) plus a synthetic pair that drives the drift verdicts.
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -482,6 +484,44 @@ class DriftVerdictTests(unittest.TestCase):
         pair.inline["com.apple.kernel"] = "no fence here at all\n"
         with self.assertRaises(ID.DatasetError):
             DRIFT.analyse(FakeDataset({}), pair, None, jobs=1)
+
+
+class SectionFilterTests(unittest.TestCase):
+    def test_changed_only_and_grep_keep_each_targets_own_diff(self):
+        # Removing the first row must not shift the raw diffs used by --grep.
+        # The unchanged target matches, the first changed target doesn't, and
+        # the last changed target does: catch both false positives and losses.
+        samples = {
+            "unchanged": '   __TEXT.__text: 0x10\n match_marker\n',
+            "other": '+ "different string"\n',
+            "matching": '+ "match_marker"\n',
+        }
+        for command, section in (("dylibs", "DSC"),
+                                 ("firmware", "Firmware")):
+            with tempfile.TemporaryDirectory() as tmp:
+                (pathlib.Path(tmp) / "README.md").write_text(
+                    "# Test dataset\n\n- [Test pair](pair/README.md)\n",
+                    encoding="utf-8")
+                pair_dir = pathlib.Path(tmp) / "pair"
+                pair_dir.mkdir()
+                blocks = [f"# Test pair\n\n## {section}\n\n### Updated\n"]
+                for name, diff in samples.items():
+                    blocks.append(f"\n> `{name}`\n\n```diff\n{diff}```\n")
+                (pair_dir / "README.md").write_text("\n".join(blocks), encoding="utf-8")
+                for flags, expected in (
+                    ([], set(samples)),
+                    (["--changed-only"], {"other", "matching"}),
+                    (["--grep", "match_marker"], {"unchanged", "matching"}),
+                    (["--changed-only", "--grep", "match_marker"], {"matching"}),
+                ):
+                    with self.subTest(command=command, flags=flags):
+                        result = subprocess.run(
+                            [sys.executable, str(SCRIPTS / "ipswdiffs.py"),
+                             command, "pair", "--cache", tmp, "--json", *flags],
+                            capture_output=True, text=True, timeout=10)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        rows = json.loads(result.stdout)["targets"]
+                        self.assertEqual({r["label"] for r in rows}, expected)
 
 
 if __name__ == "__main__":

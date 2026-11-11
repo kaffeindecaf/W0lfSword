@@ -197,13 +197,11 @@ def colour_diff(text: str, enabled: bool) -> str:
 
 
 def _parse_colour_arg(argv) -> str:
-    if os.environ.get("NO_COLOR"):
+    if os.environ.get("NO_COLOR") or "--no-color" in argv:
         return "never"
     mode = "auto"
     for a in argv:
-        if a == "--no-color":
-            mode = "never"
-        elif a.startswith("--color="):
+        if a.startswith("--color="):
             mode = a.split("=", 1)[1]
     return mode
 
