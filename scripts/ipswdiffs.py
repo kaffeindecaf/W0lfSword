@@ -897,8 +897,11 @@ def cmd_section(ds: Dataset, args, out: Out, sections: list[str]) -> int:
     ents = _section_picker(ds, pair, args, out, sections)
     diffs = _diff_for_pair_by_entries(ds, pair, ents, args)
     all_strings = getattr(args, "all_strings", False)
+    rx = re.compile(args.grep, re.I) if args.grep else None
     rows = []
     for d in diffs:
+        if rx and not rx.search(d.raw):
+            continue
         raw_add = d.cstrings.get("added", [])
         raw_del = d.cstrings.get("removed", [])
         cadd, cdel, cadd_noise, cdel_noise = split_noise(raw_add, raw_del)
@@ -913,9 +916,6 @@ def cmd_section(ds: Dataset, args, out: Out, sections: list[str]) -> int:
     if args.changed_only:
         rows = [r for r in rows if r["sym_added"] or r["sym_removed"]
                 or r["cstr_added"] or r["cstr_removed"]]
-    if args.grep:
-        rx = re.compile(args.grep, re.I)
-        rows = [r for r, d in zip(rows, diffs) if rx.search(d.raw)]
     rows.sort(key=lambda r: (not (r["sym_added"] or r["sym_removed"]
                                   or r["cstr_added"] or r["cstr_removed"]),
                              r["label"]))
