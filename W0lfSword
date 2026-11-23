@@ -1624,7 +1624,7 @@ cmd_panic() {
                         printf '%s|%s\n' "$(date -r "$pf" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')" "$(basename "$pf")"
                     done | sort -r | head -20)
             else
-                echo -e "  ${C_DIM}No panic reports yet. Fetch one with: ./W0lfSword panic fetch${NC}"
+                echo -e "  ${C_DIM}No panic reports yet. Fetch over USB with: ./W0lfSword panic usb${NC}"
             fi
             ;;
         fetch)
@@ -1647,6 +1647,9 @@ cmd_panic() {
             echo ""
             cmd_panic analyze "$panics_dir/$base"
             ;;
+        usb)
+            python3 "$PROJECT_DIR/scripts/panic_usb.py" "$panics_dir" "${@:2}"
+            ;;
         analyze)
             local f="${2:-}"
             [ -z "$f" ] && { err "Usage: ./W0lfSword panic analyze <file.ips|panic.log>"; return 1; }
@@ -1656,7 +1659,7 @@ cmd_panic() {
             python3 "$PROJECT_DIR/scripts/panic_analyzer.py" "$f" || true
             ;;
         *)
-            err "Usage: panic list | fetch [ip] | analyze <file>"
+            err "Usage: panic list | fetch [ip] | usb [udid] | analyze <file>"
             return 1
             ;;
     esac
@@ -7224,6 +7227,8 @@ EOF
 panic  -  classify crash reports against known bugs.
   list               -  crash reports saved in .w0lfsword/panics/
   fetch [ip]         -  pull the newest .ips off the phone over SSH
+  usb [udid]         -  copy panic-full reports from a trusted USB device
+                        and retain the originals (needs libimobiledevice)
   analyze <file>     -  classify a .ips (JSON) or raw panic log:
                       kernel vs SEP vs MTE vs userspace crash, and map
                       it to known CVEs (CVE-2026-20687 AppleJPEGDriver,
