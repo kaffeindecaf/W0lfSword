@@ -78,6 +78,9 @@ Start with `./W0lfSword offsets` to see existing coverage or `./W0lfSword explai
 | `panic analyze <file>` | Classify a saved iOS panic report. |
 | `cve [filter]` · `chains` | Browse the CVE and attack-chain catalogs. |
 
+To compare two local text files side by side, run `bash scripts/file_diff.sh before.plist after.plist`.
+The exit code is 0 for identical files, 1 for differences, and 2 for an error.
+
 The [research index](research/README.md) covers the kernelcache scripts, fuzzers and proof-of-concept tools. Some PoC and fuzzing commands interact with a device; check their help before running them.
 
 ## Build and verify
