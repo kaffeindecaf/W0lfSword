@@ -3234,6 +3234,7 @@ Day 5: "Research C3.2 — iCloud Keychain exfiltration: locate keychain daemon, 
 - [ ] `L6.2` 🟡 — Kernel info panel: slide/base/version string after resolution (KPRINTF-gated values are debug-only — show only in debug builds, matching A6.2).
 - [ ] `L6.3` 🟡 — Log viewer: scrollable TweakLog stream with severity colors; export button.
 - [ ] `L6.4` 🟢 — Crash/panic viewer: parse `.ips` from the app's own crash dir (host-side panic_analyzer.py logic ported or a "send to host" export).
+  _Host collection route: `./W0lfSword panic usb [udid]` imports existing `panic-full` reports from a trusted USB device with originals retained. The in-app report picker and viewer remain open._
 
 ## L7 — Safety & Persistence
 

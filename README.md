@@ -76,10 +76,16 @@ Start with `./W0lfSword offsets` to see existing coverage or `./W0lfSword explai
 | `diffs` · `drift` | Inspect published build diffs and identify offsets that need re-verification. |
 | `kcwatch` | Check new builds and report offset changes. |
 | `panic analyze <file>` | Classify a saved iOS panic report. |
+| `panic usb [udid]` | Copy existing iOS panic reports from a trusted USB device. |
 | `cve [filter]` · `chains` | Browse the CVE and attack-chain catalogs. |
 
 To compare two local text files side by side, run `bash scripts/file_diff.sh before.plist after.plist`.
 The exit code is 0 for identical files, 1 for differences, and 2 for an error.
+
+For USB crash collection, unlock the trusted device and run `./W0lfSword panic usb`.
+The command requires `idevice_id` and `idevicecrashreport` with `--keep` and `--filter` support.
+It copies `panic-full` reports into `.w0lfsword/panics/`, skips identical reports on repeat imports, and retains the phone's copies.
+Run `./W0lfSword panic list` to see saved reports. Pass a UDID from `idevice_id -l` when more than one phone is connected.
 
 The [research index](research/README.md) covers the kernelcache scripts, fuzzers and proof-of-concept tools. Some PoC and fuzzing commands interact with a device; check their help before running them.
 
